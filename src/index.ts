@@ -16,7 +16,7 @@ const main = async () => {
   await printLinks(nodeInfo);
   const withdrawerAddress = "0x90e7b822a5Ac10edC381aBc03d94b866e4B985A1"
   const keystoreData = getRelevantKeystoreData();
-  const approveCallData = await getApproveStakeSpendCalldata(keystoreData.length);
+  const approveCallData = await getApproveStakeSpendCalldata(withdrawerAddress, keystoreData.length);
   console.log("✅ Approve stake spend calldata:", approveCallData);
   await logAttestersCalldata(
     keystoreData,

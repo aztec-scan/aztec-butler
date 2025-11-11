@@ -110,7 +110,7 @@ type CalldataExport = {
 }
 
 export const getApproveStakeSpendCalldata = async (
-  //currentTokenHolderAddress: string,
+  currentTokenHolderAddress: string,
   nbrOfAttesters: number = 1,
 ): Promise<CalldataExport> => {
   const rollupContract = getRollupContract();
@@ -122,7 +122,18 @@ export const getApproveStakeSpendCalldata = async (
   //   abi: erc20Abi,
   //   client: getEthereumClient(),
   // }).read.allowance([getAddress(currentTokenHolderAddress), rollupContract.address]);
+  const currentTokenHoldings = await getContract({
+    address: stakingAssetAddress,
+    abi: erc20Abi,
+    client: getEthereumClient()
+  }).read.balanceOf([getAddress(currentTokenHolderAddress)]);
+
   const requiredAllowance = activationThreshold * BigInt(nbrOfAttesters);
+  if (currentTokenHoldings < requiredAllowance) {
+    console.warn(`
+WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentTokenHoldings}, required: ${requiredAllowance}
+`);
+  }
 
   return {
     address: stakingAssetAddress,
