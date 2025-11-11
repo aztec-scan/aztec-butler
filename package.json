@@ -5,11 +5,11 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "tsc --noEmit && ts-node src/index.ts",
-    "dev:no-check": "ts-node src/index.ts",
+    "dev": "tsc --noEmit && node --loader ts-node/esm src/index.ts",
+    "dev:no-check": "node --loader ts-node/esm src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev:watch": "nodemon --exec \"tsc --noEmit && ts-node src/index.ts\"",
+    "dev:watch": "nodemon --exec \"tsc --noEmit && node --loader ts-node/esm src/index.ts\"",
     "type-check": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

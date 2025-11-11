@@ -5,7 +5,7 @@ import {
 } from "@aztec/aztec.js";
 import assert from "assert";
 import "dotenv/config";
-import { getPackageVersion } from "./fileUtils.ts";
+import { getPackageVersion } from "./fileUtils.js";
 
 // --- Retrieve versions dynamically ---
 const aztecjsVersion = getPackageVersion("@aztec/aztec.js");

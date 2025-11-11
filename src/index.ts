@@ -1,8 +1,8 @@
 import {
   getNodeInfo,
-} from "./aztecClient.ts";
-import { getApproveStakeSpendCalldata, init, logAttestersCalldata, printLinks } from "./ethereumClient.ts";
-import { getRelevantKeystoreData } from "./fileUtils.ts";
+} from "./aztecClient.js";
+import { getApproveStakeSpendCalldata, init, logAttestersCalldata, printLinks } from "./ethereumClient.js";
+import { getRelevantKeystoreData } from "./fileUtils.js";
 
 const main = async () => {
   console.log("📋 Fetching node info...");
@@ -29,8 +29,8 @@ const main = async () => {
 export { main };
 
 // Export all client functions for external use
-export * from "./aztecClient.ts";
-export * from "./ethereumClient.ts";
+export * from "./aztecClient.js";
+export * from "./ethereumClient.js";
 
 // Run main function if this file is executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {

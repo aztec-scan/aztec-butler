@@ -5,7 +5,7 @@ import assert from "assert";
 import "dotenv/config";
 import { createPublicClient, encodeFunctionData, erc20Abi, getAddress, getContract, http, type Address, type GetContractReturnType, type PublicClient } from "viem";
 import { mainnet, sepolia } from "viem/chains";
-import type { CuratedKeystoreData } from "./fileUtils.ts";
+import type { CuratedKeystoreData } from "./fileUtils.js";
 
 const ETHEREUM_NODE_URL = process.env.ETHEREUM_NODE_URL;
 
