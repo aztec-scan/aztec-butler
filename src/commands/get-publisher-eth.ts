@@ -35,8 +35,8 @@ const command = async (nodeInfo: NodeInfo, dirData: DirData) => {
     const pubAddr = getAddressFromPrivateKey(privKey);
     publishers[privKey]!.currentBalance = await client.getBalance({ address: pubAddr });
     publishers[privKey]!.requiredTopUp = BigInt(Math.ceil(info.load)) * RECOMMENDED_ETH_PER_ATTESTER - info.currentBalance;
-    const requiresTopUpString = publishers[privKey]!.requiredTopUp > 0n ? ` ❌ REQUIRES ADDITIONAL: ${formatEther(publishers[privKey]!.requiredTopUp)} ETH` : `✅`;
-    console.log(`${pubAddr} - load: ${info.load}, current balance: ${formatEther(publishers[privKey]!.currentBalance)} ETH${requiresTopUpString}`);
+    const requiresTopUpString = publishers[privKey]!.requiredTopUp > 0n ? `❌ REQUIRES ADDITIONAL: ${formatEther(publishers[privKey]!.requiredTopUp)} ETH` : `✅`;
+    console.log(`${pubAddr} - load: ${info.load}, current balance: ${formatEther(publishers[privKey]!.currentBalance)} ETH ${requiresTopUpString}`);
   }
 }
 
