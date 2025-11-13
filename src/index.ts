@@ -7,6 +7,7 @@ import { ATTESTER_REGISTRATIONS_DIR_NAME, getDockerDirData } from "./utils/fileO
 const AZTEC_DOCKER_DIR = process.env.AZTEC_DOCKER_DIR || process.cwd();
 const ETHEREUM_NODE_URL = process.env.ETHEREUM_NODE_URL;
 const AZTEC_NODE_URL = process.env.AZTEC_NODE_URL;
+const PROVIDER_ADMIN_ADDRESS = "0x90e7b822a5Ac10edC381aBc03d94b866e4B985A1"
 
 const main = async () => {
   const data = await getDockerDirData(AZTEC_DOCKER_DIR);
@@ -21,6 +22,7 @@ const main = async () => {
   for (const attesterReg of data.attesterRegistrations) {
     console.log(`✅ Attester registration data: ${attesterReg.path}`);
   }
+  await command.getCreateProviderCallData(nodeInfo, data, PROVIDER_ADMIN_ADDRESS);
 };
 
 // Export main function for potential reuse
