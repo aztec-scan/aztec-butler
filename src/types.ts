@@ -160,4 +160,4 @@ export const MOCK_REGISTRY_ABI = [
     ],
     stateMutability: 'view',
   },
-];
+] as const;

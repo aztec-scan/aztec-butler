@@ -4,7 +4,7 @@ import { GovernanceAbi, GSEAbi, RollupAbi } from "@aztec/l1-artifacts";
 import assert from "assert";
 import { createPublicClient, encodeFunctionData, erc20Abi, formatEther, getAddress, getContract, http, parseEther, type Address, type GetContractReturnType, type PublicClient } from "viem";
 import { mainnet, sepolia } from "viem/chains";
-import { CuratedKeystoreData, DirData, HexString } from "../types.js";
+import { CuratedKeystoreData, DirData, HexString, MOCK_REGISTRY_ABI } from "../types.js";
 
 const supportedChains = [
   sepolia,
@@ -15,7 +15,6 @@ type RollupContract = GetContractReturnType<typeof RollupAbi, PublicClient>;
 
 let client: PublicClient | undefined;
 let rollupContract: RollupContract | undefined;
-
 
 export const getEthereumClient = (chainId?: number, url?: string): PublicClient => {
   if (!client) {
@@ -234,4 +233,29 @@ export const getStakingRegistryAddress = (nodeInfo: NodeInfo): HexString => {
   } else {
     throw `unsupported chain id: ${nodeInfo.l1ChainId}`;
   }
+}
+
+export const getProviderId = async (adminAddress: string, nodeInfo: NodeInfo): Promise<bigint> => {
+  // TODO: better way to check providerId
+  const client = getEthereumClient(nodeInfo.l1ChainId);
+  const stakingRegContract = getContract({
+    address: getStakingRegistryAddress(nodeInfo),
+    abi: MOCK_REGISTRY_ABI,
+    client,
+  });
+  let foundProvider = false;
+  let index = 0n;
+  while (!foundProvider) {
+    const [
+      admin,
+      takeRate,
+      rewardsRecipient,
+    ] = await stakingRegContract.read.providerConfigurations([index]);
+    if (admin === adminAddress) {
+      foundProvider = true;
+      console.log(`${index} - Admin: ${admin}, Take Rate: ${takeRate}, Rewards Recipient: ${rewardsRecipient}`);
+    }
+    index++;
+  }
+  return foundProvider ? index : -1n;
 }
