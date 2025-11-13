@@ -60,6 +60,7 @@ export const getDockerDirData = async (dockerDirPath: string) => {
   if (!files.includes(ATTESTER_REGISTRATIONS_DIR_NAME) && files.includes("keys")) {
     console.log("Creating attester-registrations directory...");
     await fs.mkdir(join(dockerDirPath, ATTESTER_REGISTRATIONS_DIR_NAME));
+    files.push(ATTESTER_REGISTRATIONS_DIR_NAME);
   }
   for (const reqFile of [".env", "keys", ATTESTER_REGISTRATIONS_DIR_NAME]) {
     if (!files.includes(reqFile)) {
