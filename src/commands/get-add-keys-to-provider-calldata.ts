@@ -3,8 +3,8 @@ import { getAddressFromPrivateKey } from "@aztec/ethereum";
 import { encodeFunctionData, formatEther, getAddress, parseEther } from "viem";
 import { getEthereumClient, getProviderId, getStakingRegistryAddress } from "../components/ethereumClient.js";
 import { AttesterRegistration, DirData, HexString, MOCK_REGISTRY_ABI } from "../types.js";
-const command = async (nodeInfo: NodeInfo, dirData: DirData, providerAdminAddress: `0x${string}`) => {
-  const providerId = await getProviderId(providerAdminAddress, nodeInfo);
+const command = async (l1ChainId: number, dirData: DirData, providerAdminAddress: `0x${string}`) => {
+  const providerId = await getProviderId(providerAdminAddress, l1ChainId);
 
   if (providerId < 0n) {
     console.error("Provider not registered. Please register the provider first.");
@@ -53,7 +53,7 @@ const command = async (nodeInfo: NodeInfo, dirData: DirData, providerAdminAddres
     }));
 
     const callData = {
-      contractToCall: getStakingRegistryAddress(nodeInfo),
+      contractToCall: getStakingRegistryAddress(l1ChainId),
       callData: encodeFunctionData({
         abi: MOCK_REGISTRY_ABI,
         functionName: "addKeysToProvider",

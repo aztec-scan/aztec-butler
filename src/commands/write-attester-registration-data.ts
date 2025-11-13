@@ -10,8 +10,8 @@ const get0xString = (bn: bigint): HexString => {
 
 const ATTESTER_REGISTRATION_FILE_PREFIX = "regs";
 
-const command = async (nodeInfo: NodeInfo, dirData: DirData, attesterDirPath: string): Promise<DirData["attesterRegistrations"]> => {
-  const client = getEthereumClient(nodeInfo.l1ChainId);
+const command = async (l1ChainId: number, dirData: DirData, attesterDirPath: string): Promise<DirData["attesterRegistrations"]> => {
+  const client = getEthereumClient(l1ChainId);
   const rollupContract = getRollupContract();
   const keystoresMissingRegistrationFiles: DirData["keystores"] = dirData.keystores.filter(ks => {
     if (dirData.attesterRegistrations.find(ar => ar.id === ks.id)) {

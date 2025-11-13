@@ -47,19 +47,19 @@ export const getRollupContract = (): RollupContract => {
   return rollupContract;
 }
 
-export const init = async (nodeInfo: NodeInfo, url: string): Promise<void> => {
-  const client = getEthereumClient(nodeInfo.l1ChainId, url);
+export const init = async (url: string, l1ChainId: number, rollupAddress: string) => {
+  const client = getEthereumClient(l1ChainId, url);
   const queriedChainId = await client.getChainId();
-  assert(queriedChainId === nodeInfo.l1ChainId, `Mismatch between Aztec node L1 chain ID (${nodeInfo.l1ChainId}) and Ethereum client chain ID (${queriedChainId})`);
+  assert(queriedChainId === l1ChainId, `Mismatch between Aztec node L1 chain ID (${l1ChainId}) and Ethereum client chain ID (${queriedChainId})`);
   console.log(`Ethereum chain: ${client?.chain?.id} (${client?.chain?.name})
 `);
-  const rollupAddressRaw = nodeInfo.l1ContractAddresses.rollupAddress;
+  const rollupAddressRaw = rollupAddress;
   if (!rollupAddressRaw) {
     throw new Error("No rollup address found in node info");
   }
-  const rollupAddress = getAddress(rollupAddressRaw.toString());
+  const rollupAddr = getAddress(rollupAddressRaw.toString());
   rollupContract = getContract({
-    address: rollupAddress,
+    address: rollupAddr,
     abi: RollupAbi,
     client,
   });
@@ -70,8 +70,8 @@ const getEtherscanAddressUrl = (client: PublicClient, address: Address) => {
   return `${etherscanBaseUrl}/address/${address}`;
 }
 
-export const printImportantInfo = async (nodeInfo: NodeInfo): Promise<void> => {
-  const client = getEthereumClient(nodeInfo.l1ChainId);
+export const printImportantInfo = async (l1ChainId: number) => {
+  const client = getEthereumClient(l1ChainId);
   rollupContract = getRollupContract();
   const gse = await rollupContract.read.getGSE();
   const governance = await getContract({
@@ -225,21 +225,21 @@ export const logAttestersCalldata = async (
   }
 }
 
-export const getStakingRegistryAddress = (nodeInfo: NodeInfo): HexString => {
-  if (nodeInfo.l1ChainId === 11155111) {
+export const getStakingRegistryAddress = (l1ChainId: number): HexString => {
+  if (l1ChainId === 11155111) {
     return getAddress("0xc3860c45e5F0b1eF3000dbF93149756f16928ADB");
-  } else if (nodeInfo.l1ChainId === 1) {
-    throw "mainnet address not yet known";
+  } else if (l1ChainId === 1) {
+    return getAddress("0x042dF8f42790d6943F41C25C2132400fd727f452"); //
   } else {
-    throw `unsupported chain id: ${nodeInfo.l1ChainId}`;
+    throw `unsupported chain id: ${l1ChainId}`;
   }
 }
 
-export const getProviderId = async (adminAddress: string, nodeInfo: NodeInfo): Promise<bigint> => {
+export const getProviderId = async (adminAddress: string, l1ChainId: number): Promise<bigint> => {
   // TODO: better way to check providerId
-  const client = getEthereumClient(nodeInfo.l1ChainId);
+  const client = getEthereumClient(l1ChainId);
   const stakingRegContract = getContract({
-    address: getStakingRegistryAddress(nodeInfo),
+    address: getStakingRegistryAddress(l1ChainId),
     abi: MOCK_REGISTRY_ABI,
     client,
   });

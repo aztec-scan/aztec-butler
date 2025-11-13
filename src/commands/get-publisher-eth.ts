@@ -6,8 +6,8 @@ import { DirData, HexString } from "../types.js";
 
 const RECOMMENDED_ETH_PER_ATTESTER = parseEther("0.1");
 
-const command = async (nodeInfo: NodeInfo, dirData: DirData) => {
-  const client = getEthereumClient(nodeInfo.l1ChainId);
+const command = async (l1ChainId: number, dirData: DirData) => {
+  const client = getEthereumClient(l1ChainId);
   const publishers: Record<HexString, {
     load: number,
     currentBalance: bigint,
