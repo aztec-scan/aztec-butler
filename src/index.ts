@@ -1,36 +1,26 @@
-import {
-  getNodeInfo,
-} from "./aztecClient.js";
-import { getApproveStakeSpendCalldata, init, logAttestersCalldata, printLinks } from "./ethereumClient.js";
-import { getRelevantKeystoreData } from "./fileUtils.js";
+import { getNodeInfo } from "./components/aztecClient.js";
+import { init, printImportantInfo, printPublisherETH } from "./components/ethereumClient.js";
+import { getDockerDirData } from "./utils/fileOperations.js";
+import "dotenv/config";
+
+const AZTEC_DOCKER_DIR = process.env.AZTEC_DOCKER_DIR || process.cwd();
+const ETHEREUM_NODE_URL = process.env.ETHEREUM_NODE_URL;
+const AZTEC_NODE_URL = process.env.AZTEC_NODE_URL;
 
 const main = async () => {
-  console.log("📋 Fetching node info...");
-  const nodeInfo = await getNodeInfo();
-  console.log("✅ Node info:", {
-    nodeVersion: nodeInfo.nodeVersion,
-    l1ChainId: nodeInfo.l1ChainId,
-    rollupVersion: nodeInfo.rollupVersion,
-  });
-  await init(nodeInfo);
-  await printLinks(nodeInfo);
-  const withdrawerAddress = "0x90e7b822a5Ac10edC381aBc03d94b866e4B985A1"
-  const keystoreData = getRelevantKeystoreData();
-  const approveCallData = await getApproveStakeSpendCalldata(withdrawerAddress, keystoreData.length);
-  console.log("✅ Approve stake spend calldata:", approveCallData);
-  await logAttestersCalldata(
-    keystoreData,
-    withdrawerAddress,
-    nodeInfo
-  )
+  const data = await getDockerDirData(AZTEC_DOCKER_DIR);
+  const l2RpcUrl = AZTEC_NODE_URL || data.l2RpcUrl || "localhost:8080";
+  const nodeInfo = await getNodeInfo(l2RpcUrl);
+  console.log("✅ Retrieved Aztec node info:", JSON.stringify(nodeInfo, null, 2));
+  const l1RpcUrl = ETHEREUM_NODE_URL || data.l1RpcUrl || "http://localhost:8545";
+  await init(nodeInfo, l1RpcUrl);
+  await printImportantInfo(nodeInfo);
+  await printPublisherETH(nodeInfo, data);
+  // run command(s)
 };
 
 // Export main function for potential reuse
 export { main };
-
-// Export all client functions for external use
-export * from "./aztecClient.js";
-export * from "./ethereumClient.js";
 
 // Run main function if this file is executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {

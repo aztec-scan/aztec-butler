@@ -2,12 +2,9 @@ import type { NodeInfo } from "@aztec/aztec.js";
 import { getAddressFromPrivateKey, GSEContract, type ViemPublicClient } from "@aztec/ethereum";
 import { GovernanceAbi, GSEAbi, RollupAbi } from "@aztec/l1-artifacts";
 import assert from "assert";
-import "dotenv/config";
-import { createPublicClient, encodeFunctionData, erc20Abi, getAddress, getContract, http, type Address, type GetContractReturnType, type PublicClient } from "viem";
+import { createPublicClient, encodeFunctionData, erc20Abi, formatEther, getAddress, getContract, http, parseEther, type Address, type GetContractReturnType, type PublicClient } from "viem";
 import { mainnet, sepolia } from "viem/chains";
-import type { CuratedKeystoreData } from "./fileUtils.js";
-
-const ETHEREUM_NODE_URL = process.env.ETHEREUM_NODE_URL;
+import { CuratedKeystoreData, DirData, HexString } from "../types.js";
 
 const supportedChains = [
   sepolia,
@@ -19,26 +16,26 @@ type RollupContract = GetContractReturnType<typeof RollupAbi, PublicClient>;
 let client: PublicClient | undefined;
 let rollupContract: RollupContract | undefined;
 
-const getEthereumClient = (chainId?: number): PublicClient => {
+const getEthereumClient = (chainId?: number, url?: string): PublicClient => {
   if (!client) {
     if (!chainId) {
       throw new Error("Chain ID must be provided for the first initialization of the Ethereum client");
     }
-    client = createEthereumClient(chainId);
+    if (!url) {
+      throw new Error("RPC URL must be provided for the first initialization of the Ethereum client");
+    }
+    client = createEthereumClient(chainId, url);
   }
   return client;
 }
 
-const createEthereumClient = (chainId: number) => {
-  if (!ETHEREUM_NODE_URL) {
-    throw new Error("ETHEREUM_NODE_URL is not defined in environment variables");
-  }
+const createEthereumClient = (chainId: number, url: string) => {
   const chain = supportedChains.find(c => c.id === chainId);
   if (!chain) {
     throw new Error(`Unsupported chain ID: ${chainId}`);
   }
   return createPublicClient({
-    transport: http(ETHEREUM_NODE_URL),
+    transport: http(url),
     chain: chain,
   });
 };
@@ -50,8 +47,8 @@ const getRollupContract = () => {
   return rollupContract;
 }
 
-export const init = async (nodeInfo: NodeInfo): Promise<void> => {
-  const client = getEthereumClient(nodeInfo.l1ChainId);
+export const init = async (nodeInfo: NodeInfo, url: string): Promise<void> => {
+  const client = getEthereumClient(nodeInfo.l1ChainId, url);
   const queriedChainId = await client.getChainId();
   assert(queriedChainId === nodeInfo.l1ChainId, `Mismatch between Aztec node L1 chain ID (${nodeInfo.l1ChainId}) and Ethereum client chain ID (${queriedChainId})`);
   console.log(`Ethereum chain: ${client?.chain?.id} (${client?.chain?.name})
@@ -73,7 +70,7 @@ const getEtherscanAddressUrl = (client: PublicClient, address: Address) => {
   return `${etherscanBaseUrl}/address/${address}`;
 }
 
-export const printLinks = async (nodeInfo: NodeInfo): Promise<void> => {
+export const printImportantInfo = async (nodeInfo: NodeInfo): Promise<void> => {
   const client = getEthereumClient(nodeInfo.l1ChainId);
   rollupContract = getRollupContract();
   const gse = await rollupContract.read.getGSE();
@@ -225,5 +222,41 @@ export const logAttestersCalldata = async (
       nodeInfo
     );
     console.log(`✅ Deposit calldata for attester ${attesterAddress}:`, calldatata);
+  }
+}
+
+const RECOMMENDED_ETH_PER_ATTESTER = parseEther("0.1");
+
+export const printPublisherETH = async (nodeInfo: NodeInfo, dirData: DirData) => {
+  const client = getEthereumClient(nodeInfo.l1ChainId);
+  const publishers: Record<HexString, {
+    load: number,
+    currentBalance: bigint,
+    requiredTopUp: bigint
+  }> = {};
+  for (const keystore of dirData.keystores) {
+    for (const validator of keystore.data.validators) {
+      if (typeof validator.publisher === "string") {
+        const pub = publishers[validator.publisher] || { load: 0, currentBalance: 0n, requiredTopUp: 0n };
+        pub.load += 1;
+        publishers[validator.publisher] = pub;
+      } else {
+        const loadFactor = 1 / validator.publisher.length;
+        for (const pubPrivKey of validator.publisher) {
+          const pub = publishers[pubPrivKey] || { load: 0, currentBalance: 0n, requiredTopUp: 0n };
+          pub.load += loadFactor;
+          publishers[pubPrivKey] = pub;
+        }
+      }
+    }
+  }
+  console.log("Publisher ETH balances and required top-ups:");
+  for (const [publisherPrivKey, info] of Object.entries(publishers)) {
+    const privKey = publisherPrivKey as HexString;
+    const pubAddr = getAddressFromPrivateKey(privKey);
+    publishers[privKey]!.currentBalance = await client.getBalance({ address: pubAddr });
+    publishers[privKey]!.requiredTopUp = BigInt(Math.ceil(info.load)) * RECOMMENDED_ETH_PER_ATTESTER - info.currentBalance;
+    const requiresTopUpString = publishers[privKey]!.requiredTopUp > 0n ? ` REQUIRES TOP-UP OF: ${formatEther(publishers[privKey]!.requiredTopUp)} ETH` : ``;
+    console.log(`${pubAddr} - load: ${info.load}, current balance: ${formatEther(publishers[privKey]!.currentBalance)} ETH${requiresTopUpString}`);
   }
 }
