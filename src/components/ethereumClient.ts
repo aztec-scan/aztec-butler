@@ -47,7 +47,7 @@ export const getRollupContract = (): RollupContract => {
   return rollupContract;
 }
 
-export const init = async (url: string, l1ChainId: number, rollupAddress: string) => {
+export const init = async (url: string, l1ChainId: number, rollupAddress: `0x${string}`) => {
   const client = getEthereumClient(l1ChainId, url);
   const queriedChainId = await client.getChainId();
   assert(queriedChainId === l1ChainId, `Mismatch between Aztec node L1 chain ID (${l1ChainId}) and Ethereum client chain ID (${queriedChainId})`);

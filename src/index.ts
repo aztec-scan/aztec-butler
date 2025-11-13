@@ -15,9 +15,9 @@ const main = async () => {
   const nodeInfo = await getNodeInfo(l2RpcUrl);
   console.log("✅ Retrieved Aztec node info:", JSON.stringify(nodeInfo, null, 2));
   const l1RpcUrl = ETHEREUM_NODE_URL || data.l1RpcUrl || "http://localhost:8545";
-  const l1ChainId = 1;
-  const rollupAddress = "0x603bb2c05D474794ea97805e8De69bCcFb3bCA12";
-  await init(l1RpcUrl, l1ChainId, rollupAddress);
+  const l1ChainId = nodeInfo.l1ChainId;
+  const rollupAddress = nodeInfo.l1ContractAddresses.rollupAddress;
+  await init(l1RpcUrl, l1ChainId, rollupAddress.toString());
   await printImportantInfo(l1ChainId);
   await command.getPublisherEth(l1ChainId, data);
   data.attesterRegistrations = await command.writeAttesterAttesterRegistrationData(l1ChainId, data, `${AZTEC_DOCKER_DIR}/${ATTESTER_REGISTRATIONS_DIR_NAME}`);
