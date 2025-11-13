@@ -254,8 +254,9 @@ export const getProviderId = async (adminAddress: string, nodeInfo: NodeInfo): P
     if (admin === adminAddress) {
       foundProvider = true;
       console.log(`${index} - Admin: ${admin}, Take Rate: ${takeRate}, Rewards Recipient: ${rewardsRecipient}`);
+    } else {
+      index++;
     }
-    index++;
   }
   return foundProvider ? index : -1n;
 }
