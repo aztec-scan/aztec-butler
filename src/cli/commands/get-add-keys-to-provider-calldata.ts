@@ -1,15 +1,21 @@
 import assert from "assert";
 import { encodeFunctionData, getAddress } from "viem";
-import { getProviderId, getStakingRegistryAddress } from "../../core/components/ethereumClient.js";
+import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { DirData, MOCK_REGISTRY_ABI } from "../../types.js";
 import { ButlerConfig } from "../../core/config/index.js";
 
-const command = async (l1ChainId: number, dirData: DirData, providerAdminAddress: ButlerConfig["PROVIDER_ADMIN_ADDRESS"]) => {
+const command = async (
+  ethClient: EthereumClient,
+  dirData: DirData,
+  providerAdminAddress: ButlerConfig["PROVIDER_ADMIN_ADDRESS"],
+) => {
   assert(providerAdminAddress, "Provider admin address must be provided.");
-  const providerId = await getProviderId(providerAdminAddress, l1ChainId);
+  const providerId = await ethClient.getProviderId(providerAdminAddress);
 
   if (providerId < 0n) {
-    console.error("Provider not registered. Please register the provider first.");
+    console.error(
+      "Provider not registered. Please register the provider first.",
+    );
     return;
   }
 
@@ -33,10 +39,12 @@ const command = async (l1ChainId: number, dirData: DirData, providerAdminAddress
       continue;
     }
 
-    console.log(`Found ${attesterRegistration.data.length} attester registrations`);
+    console.log(
+      `Found ${attesterRegistration.data.length} attester registrations`,
+    );
 
     // Transform attester data to match ABI structure
-    const keyStores = attesterRegistration.data.map(attesterData => ({
+    const keyStores = attesterRegistration.data.map((attesterData) => ({
       attester: getAddress(attesterData.attester),
       publicKeyG1: {
         x: BigInt(attesterData.publicKeyG1.x),
@@ -55,18 +63,17 @@ const command = async (l1ChainId: number, dirData: DirData, providerAdminAddress
     }));
 
     const callData = {
-      contractToCall: getStakingRegistryAddress(l1ChainId),
+      contractToCall: ethClient.getStakingRegistryAddress(),
       callData: encodeFunctionData({
         abi: MOCK_REGISTRY_ABI,
         functionName: "addKeysToProvider",
-        args: [
-          providerId,
-          keyStores,
-        ]
-      })
+        args: [providerId, keyStores],
+      }),
     };
 
-    console.log(`\nADD KEYS TO PROVIDER CALL DATA for ${attesterRegistration.path}:`);
+    console.log(
+      `\nADD KEYS TO PROVIDER CALL DATA for ${attesterRegistration.path}:`,
+    );
     console.log(JSON.stringify(callData, null, 2));
 
     // Also log individual attester addresses for reference

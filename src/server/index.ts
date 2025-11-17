@@ -19,7 +19,14 @@ import { initState } from "./state/index.js";
  * - Action executor with retry logic
  */
 export const startServer = async () => {
-  console.log("\n=== Starting Aztec Butler Server ===\n");
+  console.log(`
+    ___        __                  __          __  __
+   /   |____  / /____  _____      / /_  __  __/ /_/ /__  _____
+  / /| /_  / / __/ _ \/ ___/_____/ __ \/ / / / __/ / _ \/ ___/
+ / ___ |/ /_/ /_/  __/ /__/_____/ /_/ / /_/ / /_/ /  __/ /
+/_/  |_/___/\__/\___/\___/     /_.___/\__,_/\__/_/\___/_/
+
+`)
 
   // 1. Initialize configuration
   console.log("Step 1: Initializing configuration...");
