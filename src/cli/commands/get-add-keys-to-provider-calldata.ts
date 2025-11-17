@@ -1,8 +1,8 @@
 import assert from "assert";
 import { encodeFunctionData, getAddress } from "viem";
-import { ButlerConfig } from "../../config.js";
 import { getProviderId, getStakingRegistryAddress } from "../../core/components/ethereumClient.js";
 import { DirData, MOCK_REGISTRY_ABI } from "../../types.js";
+import { ButlerConfig } from "../../core/config/index.js";
 
 const command = async (l1ChainId: number, dirData: DirData, providerAdminAddress: ButlerConfig["PROVIDER_ADMIN_ADDRESS"]) => {
   assert(providerAdminAddress, "Provider admin address must be provided.");
