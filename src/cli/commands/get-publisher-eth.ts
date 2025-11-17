@@ -1,8 +1,7 @@
-import { NodeInfo } from "@aztec/aztec.js";
 import { getAddressFromPrivateKey } from "@aztec/ethereum";
 import { formatEther, parseEther } from "viem";
-import { getEthereumClient } from "../components/ethereumClient.js";
-import { DirData, HexString } from "../types.js";
+import { getEthereumClient } from "../../core/components/ethereumClient.js";
+import { DirData, HexString } from "../../types.js";
 
 const RECOMMENDED_ETH_PER_ATTESTER = parseEther("0.1");
 

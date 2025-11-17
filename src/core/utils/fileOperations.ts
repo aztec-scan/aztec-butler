@@ -1,7 +1,8 @@
 import fs from "fs/promises";
 import { createRequire } from "module";
 import path, { join } from "path";
-import { AttesterRegistration, CuratedKeystoreData, DirData, KeystoreData } from "../types.js";
+import { DirData } from "../../types.js";
+
 const require = createRequire(import.meta.url);
 export const ATTESTER_REGISTRATIONS_DIR_NAME = "attester-registrations";
 
@@ -85,8 +86,3 @@ export const getDockerDirData = async (dockerDirPath: string) => {
   }
   return dirData as DirData;
 }
-
-export const writeFile = async (fullPath: string, stringData: string) => {
-  await fs.writeFile(fullPath, stringData, "utf8");
-}
-

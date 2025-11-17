@@ -2,9 +2,9 @@ import type { NodeInfo } from "@aztec/aztec.js";
 import { getAddressFromPrivateKey, GSEContract, type ViemPublicClient } from "@aztec/ethereum";
 import { GovernanceAbi, GSEAbi, RollupAbi } from "@aztec/l1-artifacts";
 import assert from "assert";
-import { createPublicClient, encodeFunctionData, erc20Abi, formatEther, getAddress, getContract, http, parseEther, type Address, type GetContractReturnType, type PublicClient } from "viem";
+import { createPublicClient, encodeFunctionData, erc20Abi, getAddress, getContract, http, type Address, type GetContractReturnType, type PublicClient } from "viem";
 import { mainnet, sepolia } from "viem/chains";
-import { CuratedKeystoreData, DirData, HexString, MOCK_REGISTRY_ABI } from "../types.js";
+import { CuratedKeystoreData, HexString, MOCK_REGISTRY_ABI } from "../../types.js";
 
 const supportedChains = [
   sepolia,

@@ -1,5 +1,4 @@
 import { NodeInfo } from "@aztec/aztec.js";
-import { getApproveStakeSpendCalldata, logAttestersCalldata, printImportantInfo } from "../components/ethereumClient.js";
 
 const command = async (nodeInfo: NodeInfo) => {
   // console.log("✅ Node info:", {

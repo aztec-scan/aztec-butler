@@ -1,9 +1,9 @@
 import "dotenv/config";
-import * as command from "./commands/index.js";
-import { getNodeInfo } from "./components/aztecClient.js";
-import { init, printImportantInfo } from "./components/ethereumClient.js";
+import * as command from "./cli/commands/index.js";
+import { getNodeInfo } from "./core/components/aztecClient.js";
+import { init, printImportantInfo } from "./core/components/ethereumClient.js";
 import { initConfig } from "./config.js";
-import { ATTESTER_REGISTRATIONS_DIR_NAME, getDockerDirData } from "./utils/fileOperations.js";
+import { ATTESTER_REGISTRATIONS_DIR_NAME, getDockerDirData } from "./core/utils/fileOperations.js";
 
 const main = async () => {
   const config = await initConfig();

@@ -1,8 +1,8 @@
 import assert from "assert";
 import { encodeFunctionData, getAddress } from "viem";
-import { getProviderId, getStakingRegistryAddress } from "../components/ethereumClient.js";
-import { ButlerConfig } from "../config.js";
-import { DirData, MOCK_REGISTRY_ABI } from "../types.js";
+import { ButlerConfig } from "../../config.js";
+import { getProviderId, getStakingRegistryAddress } from "../../core/components/ethereumClient.js";
+import { DirData, MOCK_REGISTRY_ABI } from "../../types.js";
 
 const DEFAULT_COMISSION_RATE_PERCENTAGE = 10;
 

@@ -1,8 +1,7 @@
-import { NodeInfo } from "@aztec/aztec.js";
 import { getAddressFromPrivateKey, GSEContract, ViemPublicClient } from "@aztec/ethereum";
-import { getEthereumClient, getRollupContract } from "../components/ethereumClient.js";
-import { AttesterRegistration, DirData, HexString } from "../types.js";
-import { writeFile } from "../utils/fileOperations.js";
+import { getEthereumClient, getRollupContract } from "../../core/components/ethereumClient.js";
+import { AttesterRegistration, DirData, HexString } from "../../types.js";
+import fs from "fs/promises";
 
 const get0xString = (bn: bigint): HexString => {
   return `0x${bn.toString(16).padStart(64, "0")}`;
@@ -44,7 +43,7 @@ const command = async (l1ChainId: number, dirData: DirData, attesterDirPath: str
       });
     }
     const path = `${attesterDirPath}/${ATTESTER_REGISTRATION_FILE_PREFIX}${keystore.id}.json`;
-    await writeFile(path, JSON.stringify(attesterRegistrations, null, 2));
+    await fs.writeFile(path, JSON.stringify(attesterRegistrations, null, 2), "utf8");
     newAttesterRegistrations.push({
       id: keystore.id,
       path,
