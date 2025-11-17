@@ -1,7 +1,9 @@
 import { initConfig } from "../core/config/index.js";
-import { initMetricsRegistry } from "./metrics/index.js";
-import { initNodeMetrics } from "./metrics/index.js";
-import { createHttpServer } from "./http-server.js";
+import {
+  initMetricsRegistry,
+  initConfigMetrics,
+  getMetricsRegistry,
+} from "./metrics/index.js";
 import { initWatchers } from "./watchers/index.js";
 import { initHandlers } from "./handlers/index.js";
 import { initState } from "./state/index.js";
@@ -10,7 +12,7 @@ import { initState } from "./state/index.js";
  * Combined server mode: Prometheus exporter + Event watcher
  *
  * This server orchestrates:
- * - HTTP server for /metrics (Prometheus) and /health endpoints
+ * - HTTP server for /metrics (Prometheus exporter)
  * - Periodic scrapers to refresh metrics
  * - Event listeners for on-chain changes
  * - File watchers for local state changes
@@ -27,26 +29,24 @@ export const startServer = async () => {
   console.log("\nStep 2: Initializing metrics registry...");
   const metricsPort = 9464;
   initMetricsRegistry({ port: metricsPort });
+  console.log(
+    `Prometheus metrics available at http://localhost:${metricsPort}/metrics`,
+  );
 
-  // 3. Initialize node metrics (hardcoded L1 info metric)
-  console.log("Step 3: Initializing node metrics...");
-  initNodeMetrics(config);
+  // 3. Initialize config metrics (configuration information)
+  console.log("\nStep 3: Initializing config metrics...");
+  initConfigMetrics(config);
 
-  // 4. Start HTTP server for metrics and health checks
-  console.log("\nStep 4: Starting HTTP server...");
-  const httpServer = createHttpServer({ port: metricsPort });
-  await httpServer.start();
-
-  // 5. Initialize state management (Phase 5 - TODO)
-  console.log("\nStep 5: Initializing state management...");
+  // 4. Initialize state management (Phase 5 - TODO)
+  console.log("\nStep 4: Initializing state management...");
   await initState();
 
-  // 6. Initialize watchers (Phase 4 - TODO)
-  console.log("\nStep 6: Initializing watchers...");
+  // 5. Initialize watchers (Phase 4 - TODO)
+  console.log("\nStep 5: Initializing watchers...");
   await initWatchers();
 
-  // 7. Initialize handlers (Phase 4 - TODO)
-  console.log("\nStep 7: Initializing handlers...");
+  // 6. Initialize handlers (Phase 4 - TODO)
+  console.log("\nStep 6: Initializing handlers...");
   await initHandlers();
 
   // Setup graceful shutdown
@@ -60,8 +60,10 @@ export const startServer = async () => {
 
     console.log("\n\n=== Shutting down gracefully ===");
     try {
-      await httpServer.stop();
-      console.log("Server stopped");
+      const { exporter } = getMetricsRegistry();
+      console.log("Shutting down Prometheus exporter...");
+      await exporter.shutdown();
+      console.log("Prometheus exporter shut down");
     } catch (err) {
       console.error("Error during shutdown:", err);
     }
@@ -78,8 +80,7 @@ export const startServer = async () => {
   console.log("\n=== Server is running ===");
   console.log(`
 Endpoints:
-  - Metrics:      http://localhost:${metricsPort}/metrics
-  - Health check: http://localhost:${metricsPort + 1}/health
+  - Metrics: http://localhost:${metricsPort}/metrics
 
 Press Ctrl+C to stop
 `);

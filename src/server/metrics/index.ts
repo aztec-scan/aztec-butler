@@ -4,4 +4,4 @@ export {
   getMeter,
   type MetricsOptions,
 } from "./registry.js";
-export { initNodeMetrics, updateL1InfoMetric } from "./node-metrics.js";
+export { initConfigMetrics, updateConfigMetric } from "./config-metrics.js";
