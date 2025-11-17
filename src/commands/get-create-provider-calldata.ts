@@ -1,12 +1,13 @@
-import { NodeInfo } from "@aztec/aztec.js";
-import { getAddressFromPrivateKey } from "@aztec/ethereum";
-import { encodeFunctionData, formatEther, getAddress, getContract, parseEther } from "viem";
-import { getEthereumClient, getProviderId, getStakingRegistryAddress } from "../components/ethereumClient.js";
-import { DirData, HexString, MOCK_REGISTRY_ABI } from "../types.js";
+import assert from "assert";
+import { encodeFunctionData, getAddress } from "viem";
+import { getProviderId, getStakingRegistryAddress } from "../components/ethereumClient.js";
+import { ButlerConfig } from "../config.js";
+import { DirData, MOCK_REGISTRY_ABI } from "../types.js";
 
 const DEFAULT_COMISSION_RATE_PERCENTAGE = 10;
 
-const command = async (l1ChainId: number, dirData: DirData, providerAdmin: string) => {
+const command = async (l1ChainId: number, dirData: DirData, providerAdmin: ButlerConfig["PROVIDER_ADMIN_ADDRESS"]) => {
+  assert(providerAdmin, "Provider admin address must be provided.");
   const stakingRegistryAddress = getStakingRegistryAddress(l1ChainId);
   const providerAdminAddress = getAddress(providerAdmin);
   const rewardsRecipientAddress = providerAdminAddress; // For simplicity, using the same address

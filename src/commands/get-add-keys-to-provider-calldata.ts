@@ -1,9 +1,11 @@
-import { NodeInfo } from "@aztec/aztec.js";
-import { getAddressFromPrivateKey } from "@aztec/ethereum";
-import { encodeFunctionData, formatEther, getAddress, parseEther } from "viem";
-import { getEthereumClient, getProviderId, getStakingRegistryAddress } from "../components/ethereumClient.js";
-import { AttesterRegistration, DirData, HexString, MOCK_REGISTRY_ABI } from "../types.js";
-const command = async (l1ChainId: number, dirData: DirData, providerAdminAddress: `0x${string}`) => {
+import assert from "assert";
+import { encodeFunctionData, getAddress } from "viem";
+import { getProviderId, getStakingRegistryAddress } from "../components/ethereumClient.js";
+import { ButlerConfig } from "../config.js";
+import { DirData, MOCK_REGISTRY_ABI } from "../types.js";
+
+const command = async (l1ChainId: number, dirData: DirData, providerAdminAddress: ButlerConfig["PROVIDER_ADMIN_ADDRESS"]) => {
+  assert(providerAdminAddress, "Provider admin address must be provided.");
   const providerId = await getProviderId(providerAdminAddress, l1ChainId);
 
   if (providerId < 0n) {

@@ -2,30 +2,31 @@ import "dotenv/config";
 import * as command from "./commands/index.js";
 import { getNodeInfo } from "./components/aztecClient.js";
 import { init, printImportantInfo } from "./components/ethereumClient.js";
+import { initConfig } from "./config.js";
 import { ATTESTER_REGISTRATIONS_DIR_NAME, getDockerDirData } from "./utils/fileOperations.js";
 
-const AZTEC_DOCKER_DIR = process.env.AZTEC_DOCKER_DIR || process.cwd();
-const ETHEREUM_NODE_URL = process.env.ETHEREUM_NODE_URL;
-const AZTEC_NODE_URL = process.env.AZTEC_NODE_URL;
-const PROVIDER_ADMIN_ADDRESS = "0x90e7b822a5Ac10edC381aBc03d94b866e4B985A1"
-
 const main = async () => {
-  const data = await getDockerDirData(AZTEC_DOCKER_DIR);
-  const l2RpcUrl = AZTEC_NODE_URL || data.l2RpcUrl || "http://localhost:8080";
-  const nodeInfo = await getNodeInfo(l2RpcUrl);
+  const config = await initConfig();
+  const data = await getDockerDirData(config.AZTEC_DOCKER_DIR);
+  if (config.AZTEC_NODE_URL !== data.l2RpcUrl) {
+    console.warn(`⚠️ Warning: AZTEC_NODE_URL in config (${config.AZTEC_NODE_URL}) does not match L2 RPC URL in docker dir (${data.l2RpcUrl})`);
+  }
+  const nodeInfo = await getNodeInfo(config.AZTEC_NODE_URL);
   console.log("✅ Retrieved Aztec node info:", JSON.stringify(nodeInfo, null, 2));
-  const l1RpcUrl = ETHEREUM_NODE_URL || data.l1RpcUrl || "http://localhost:8545";
+  if (config.ETHEREUM_NODE_URL !== data.l1RpcUrl) {
+    console.warn(`⚠️ Warning: ETHEREUM_NODE_URL in config (${config.ETHEREUM_NODE_URL}) does not match L1 RPC URL in docker dir (${data.l1RpcUrl})`);
+  }
   const l1ChainId = nodeInfo.l1ChainId;
   const rollupAddress = nodeInfo.l1ContractAddresses.rollupAddress;
-  await init(l1RpcUrl, l1ChainId, rollupAddress.toString());
+  await init(config.ETHEREUM_NODE_URL, l1ChainId, rollupAddress.toString());
   await printImportantInfo(l1ChainId);
   await command.getPublisherEth(l1ChainId, data);
-  data.attesterRegistrations = await command.writeAttesterAttesterRegistrationData(l1ChainId, data, `${AZTEC_DOCKER_DIR}/${ATTESTER_REGISTRATIONS_DIR_NAME}`);
+  data.attesterRegistrations = await command.writeAttesterAttesterRegistrationData(l1ChainId, data, `${config.AZTEC_DOCKER_DIR}/${ATTESTER_REGISTRATIONS_DIR_NAME}`);
   for (const attesterReg of data.attesterRegistrations) {
     console.log(`✅ Attester registration data: ${attesterReg.path}`);
   }
-  await command.getCreateProviderCallData(l1ChainId, data, PROVIDER_ADMIN_ADDRESS);
-  await command.getAddKeysToProviderCalldata(l1ChainId, data, PROVIDER_ADMIN_ADDRESS);
+  await command.getCreateProviderCallData(l1ChainId, data, config.PROVIDER_ADMIN_ADDRESS);
+  await command.getAddKeysToProviderCalldata(l1ChainId, data, config.PROVIDER_ADMIN_ADDRESS);
 };
 
 // Export main function for potential reuse

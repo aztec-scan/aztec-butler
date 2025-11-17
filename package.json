@@ -5,8 +5,8 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "tsc --noEmit && node --loader ts-node/esm src/index.ts",
-    "dev:no-check": "node --loader ts-node/esm src/index.ts",
+    "dev": "tsc --noEmit && node --import 'data:text/javascript,import { register } from \"node:module\"; import { pathToFileURL } from \"node:url\"; register(\"ts-node/esm\", pathToFileURL(\"./\"));' src/index.ts",
+    "dev:no-check": "node --import 'data:text/javascript,import { register } from \"node:module\"; import { pathToFileURL } from \"node:url\"; register(\"ts-node/esm\", pathToFileURL(\"./\"));' src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "dev:watch": "nodemon --exec \"tsc --noEmit && node --loader ts-node/esm src/index.ts\"",
@@ -34,6 +34,8 @@
     "@aztec/ethereum": "^2.1.2",
     "@aztec/l1-artifacts": "^2.1.2",
     "dotenv": "^17.2.3",
-    "viem": "^2.38.6"
+    "env-paths": "^3.0.0",
+    "viem": "^2.38.6",
+    "zod": "^3.23.8"
   }
 }
