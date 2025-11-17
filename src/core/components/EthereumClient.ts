@@ -19,7 +19,8 @@ import {
 import { mainnet, sepolia } from "viem/chains";
 import {
   CuratedKeystoreData,
-  MOCK_REGISTRY_ABI
+  MOCK_REGISTRY_ABI,
+  type StakingProviderData,
 } from "../../types.js";
 
 const SUPPORTED_CHAINS = [sepolia, mainnet];
@@ -42,6 +43,8 @@ export class EthereumClient {
   private readonly config: EthereumClientConfig;
   private rollupContract?: RollupContract;
   private stakingRegistryContract?: any;
+  private providerDataCache: Map<string, StakingProviderData | null> =
+    new Map();
 
   constructor(config: EthereumClientConfig) {
     this.config = config;
@@ -186,10 +189,20 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   }
 
   /**
-   * Get provider ID for a given admin address
+   * Get staking provider data for a given admin address
    * Iterates through provider registry until a match is found
+   * Results are memoized per admin address
    */
-  async getProviderId(adminAddress: string): Promise<bigint> {
+  async getStakingProvider(
+    adminAddress: string,
+  ): Promise<StakingProviderData | null> {
+    const normalizedAddress = adminAddress.toLowerCase();
+
+    // Check cache first
+    if (this.providerDataCache.has(normalizedAddress)) {
+      return this.providerDataCache.get(normalizedAddress)!;
+    }
+
     const stakingReg = this.getStakingRegistryContract();
     let index = 0n;
 
@@ -197,16 +210,22 @@ supply: ${await stakingAssetContract.read.totalSupply()}
       try {
         const [admin, takeRate, rewardsRecipient] =
           await stakingReg.read.providerConfigurations([index]);
-        if (admin.toLowerCase() === adminAddress.toLowerCase()) {
-          console.log(
-            `${index} - Admin: ${admin}, Take Rate: ${takeRate}, Rewards Recipient: ${rewardsRecipient}`,
-          );
-          return index;
+        if (admin.toLowerCase() === normalizedAddress) {
+          const providerData: StakingProviderData = {
+            providerId: index,
+            admin,
+            takeRate,
+            rewardsRecipient,
+          };
+          // Cache the result
+          this.providerDataCache.set(normalizedAddress, providerData);
+          return providerData;
         }
         index++;
       } catch (error) {
         // No more providers found
-        return -1n;
+        this.providerDataCache.set(normalizedAddress, null);
+        return null;
       }
     }
   }
@@ -220,18 +239,22 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   }
 
   /**
-   * Get provider configuration
+   * Get provider configuration using memoized provider data
+   * This method uses the cached provider ID from getStakingProvider
    */
-  async getProviderConfiguration(providerId: bigint): Promise<{
-    admin: Address;
+  async getProviderConfiguration(adminAddress: string): Promise<{
     takeRate: number;
     rewardsRecipient: Address;
-  }> {
-    const stakingReg = this.getStakingRegistryContract();
-    const [admin, takeRate, rewardsRecipient] =
-      await stakingReg.read.providerConfigurations([providerId]);
+  } | null> {
+    const providerData = await this.getStakingProvider(adminAddress);
+    if (!providerData) {
+      return null;
+    }
 
-    return { admin, takeRate, rewardsRecipient };
+    return {
+      takeRate: providerData.takeRate,
+      rewardsRecipient: providerData.rewardsRecipient,
+    };
   }
 
   /**

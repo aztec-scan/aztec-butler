@@ -2,8 +2,10 @@ import { initConfig } from "../core/config/index.js";
 import {
   initMetricsRegistry,
   initConfigMetrics,
+  initProviderMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
+import { ScraperManager, ProviderScraper } from "./scrapers/index.js";
 import { initWatchers } from "./watchers/index.js";
 import { initHandlers } from "./handlers/index.js";
 import { initState } from "./state/index.js";
@@ -26,7 +28,7 @@ export const startServer = async () => {
  / ___ |/ /_/ /_/  __/ /__/_____/ /_/ / /_/ / /_/ /  __/ /
 /_/  |_/___/\__/\___/\___/     /_.___/\__,_/\__/_/\___/_/
 
-`)
+`);
 
   // 1. Initialize configuration
   console.log("Step 1: Initializing configuration...");
@@ -44,16 +46,35 @@ export const startServer = async () => {
   console.log("\nStep 3: Initializing config metrics...");
   initConfigMetrics(config);
 
-  // 4. Initialize state management (Phase 5 - TODO)
-  console.log("\nStep 4: Initializing state management...");
+  // 4. Initialize scrapers
+  console.log("\nStep 4: Initializing scrapers...");
+  const scraperManager = new ScraperManager();
+
+  // Register provider scraper (30 second interval)
+  const providerScraper = new ProviderScraper(config);
+  scraperManager.register(providerScraper, 30_000);
+
+  // TODO: Add more scrapers here with their own intervals
+  // scraperManager.register(new NodeScraper(config), 60_000);
+  // scraperManager.register(new L1Scraper(config), 120_000);
+
+  await scraperManager.init();
+  await scraperManager.start();
+
+  // 5. Initialize provider metrics (uses scraper data)
+  console.log("\nStep 5: Initializing provider metrics...");
+  initProviderMetrics(providerScraper);
+
+  // 6. Initialize state management (Phase 5 - TODO)
+  console.log("\nStep 6: Initializing state management...");
   await initState();
 
-  // 5. Initialize watchers (Phase 4 - TODO)
-  console.log("\nStep 5: Initializing watchers...");
+  // 7. Initialize watchers (Phase 4 - TODO)
+  console.log("\nStep 7: Initializing watchers...");
   await initWatchers();
 
-  // 6. Initialize handlers (Phase 4 - TODO)
-  console.log("\nStep 6: Initializing handlers...");
+  // 8. Initialize handlers (Phase 4 - TODO)
+  console.log("\nStep 8: Initializing handlers...");
   await initHandlers();
 
   // Setup graceful shutdown
@@ -67,6 +88,12 @@ export const startServer = async () => {
 
     console.log("\n\n=== Shutting down gracefully ===");
     try {
+      // Shutdown scrapers first
+      console.log("Shutting down scrapers...");
+      await scraperManager.shutdown();
+      console.log("Scrapers shut down");
+
+      // Then shutdown metrics
       const { exporter } = getMetricsRegistry();
       console.log("Shutting down Prometheus exporter...");
       await exporter.shutdown();
@@ -83,6 +110,10 @@ export const startServer = async () => {
   process.on("SIGTERM", () => {
     void shutdown();
   });
+
+  // Keep the process alive
+  // The Prometheus exporter HTTP server and setInterval in ScraperManager
+  // will keep the event loop active, preventing the process from exiting
 
   console.log("\n=== Server is running ===");
   console.log(`

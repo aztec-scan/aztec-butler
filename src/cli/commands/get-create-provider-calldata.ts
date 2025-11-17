@@ -28,9 +28,12 @@ const command = async (
       ],
     }),
   };
-  const providerId = await ethClient.getProviderId(providerAdminAddress);
-  if (providerId >= 0n) {
+  const providerData = await ethClient.getStakingProvider(providerAdminAddress);
+  if (providerData) {
     console.log("Provider already registered on-chain.");
+    console.log(
+      `${providerData.providerId} - Admin: ${providerData.admin}, Take Rate: ${providerData.takeRate}, Rewards Recipient: ${providerData.rewardsRecipient}`,
+    );
   } else {
     console.log(
       "REGISTER PROVIDER CALL DATA:",

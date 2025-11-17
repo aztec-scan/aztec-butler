@@ -10,16 +10,20 @@ const command = async (
   providerAdminAddress: ButlerConfig["PROVIDER_ADMIN_ADDRESS"],
 ) => {
   assert(providerAdminAddress, "Provider admin address must be provided.");
-  const providerId = await ethClient.getProviderId(providerAdminAddress);
+  const providerData = await ethClient.getStakingProvider(providerAdminAddress);
 
-  if (providerId < 0n) {
+  if (!providerData) {
     console.error(
       "Provider not registered. Please register the provider first.",
     );
     return;
   }
 
-  console.log(`Provider ID: ${providerId}`);
+  // Log provider information
+  console.log(
+    `${providerData.providerId} - Admin: ${providerData.admin}, Take Rate: ${providerData.takeRate}, Rewards Recipient: ${providerData.rewardsRecipient}`,
+  );
+  console.log(`Provider ID: ${providerData.providerId}`);
 
   // TODO: check which attesters are already added to rollup
   // TODO: check which attesters are in rollup queue
@@ -67,7 +71,7 @@ const command = async (
       callData: encodeFunctionData({
         abi: MOCK_REGISTRY_ABI,
         functionName: "addKeysToProvider",
-        args: [providerId, keyStores],
+        args: [providerData.providerId, keyStores],
       }),
     };
 
