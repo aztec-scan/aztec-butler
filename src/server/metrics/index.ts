@@ -11,7 +11,6 @@ export {
   setAttesterMissingCoinbase,
   clearMissingCoinbaseStatuses,
   recordAttesterInfo,
-  recordCoinbaseInfo,
   updateAttesterStateCount,
   clearAttesterStateCounts,
 } from "./coinbase-metrics.js";

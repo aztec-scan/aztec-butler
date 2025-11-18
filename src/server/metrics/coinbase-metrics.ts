@@ -7,16 +7,15 @@
 
 import type { ObservableGauge } from "@opentelemetry/api";
 import { createObservableGauge } from "./registry.js";
+import { AttesterState } from "../state/index.js";
 
 // Metrics instances
 let attesterInfoGauge: ObservableGauge | null = null;
-let coinbaseInfoGauge: ObservableGauge | null = null;
 let attesterMissingCoinbaseGauge: ObservableGauge | null = null;
 let nbrofAttestersInStateGauge: ObservableGauge | null = null;
 
 // Store current values for observable gauges
-const attesterInfoMap = new Map<string, number>();
-const coinbaseInfoMap = new Map<string, number>();
+const attesterInfoMap = new Map<string, { value: number; coinbase: string }>();
 const attesterMissingCoinbaseMap = new Map<string, number>();
 const attesterStateCountMap = new Map<string, number>();
 
@@ -27,11 +26,6 @@ export const initCoinbaseMetrics = () => {
   // Observable Gauge: Static attester information
   attesterInfoGauge = createObservableGauge("attester_info", {
     description: "Static information about registered attesters (value=1)",
-  });
-
-  // Observable Gauge: Static coinbase information
-  coinbaseInfoGauge = createObservableGauge("coinbase_info", {
-    description: "Static information about coinbase addresses (value=1)",
   });
 
   // Observable Gauge: Attesters missing coinbase address (0 or 1 per attester)
@@ -53,8 +47,11 @@ export const initCoinbaseMetrics = () => {
 
   // Add callbacks to observe the gauge values
   attesterInfoGauge.addCallback((observableResult) => {
-    for (const [attester, value] of attesterInfoMap.entries()) {
-      observableResult.observe(value, { attester_address: attester });
+    for (const [attester, data] of attesterInfoMap.entries()) {
+      observableResult.observe(data.value, {
+        attester_address: attester,
+        coinbase_address: data.coinbase,
+      });
     }
   });
 
@@ -65,14 +62,13 @@ export const initCoinbaseMetrics = () => {
   });
 
   nbrofAttestersInStateGauge.addCallback((observableResult) => {
-    for (const [state, count] of attesterStateCountMap.entries()) {
-      observableResult.observe(count, { attester_state: state });
-    }
-  });
+    // Always ensure all states are present, even if map is empty
+    // Get all possible states from the enum to maintain single source of truth
+    const allStates = Object.values(AttesterState);
 
-  coinbaseInfoGauge.addCallback((observableResult) => {
-    for (const [coinbase, value] of coinbaseInfoMap.entries()) {
-      observableResult.observe(value, { coinbase_address: coinbase });
+    for (const state of allStates) {
+      const count = attesterStateCountMap.get(state) ?? 0;
+      observableResult.observe(count, { attester_state: state });
     }
   });
 
@@ -99,8 +95,8 @@ export const clearMissingCoinbaseStatuses = () => {
 /**
  * Record attester information (static metric with value=1)
  */
-export const recordAttesterInfo = (attester: string) => {
-  attesterInfoMap.set(attester, 1);
+export const recordAttesterInfo = (attester: string, coinbase: string) => {
+  attesterInfoMap.set(attester, { value: 1, coinbase });
 };
 
 /**
@@ -108,20 +104,6 @@ export const recordAttesterInfo = (attester: string) => {
  */
 export const clearAttesterInfo = () => {
   attesterInfoMap.clear();
-};
-
-/**
- * Record coinbase information (static metric with value=1)
- */
-export const recordCoinbaseInfo = (coinbase: string) => {
-  coinbaseInfoMap.set(coinbase, 1);
-};
-
-/**
- * Clear all coinbase info (for refresh)
- */
-export const clearCoinbaseInfo = () => {
-  coinbaseInfoMap.clear();
 };
 
 /**

@@ -15,8 +15,6 @@ import {
   clearMissingCoinbaseStatuses,
   recordAttesterInfo,
   clearAttesterInfo,
-  recordCoinbaseInfo,
-  clearCoinbaseInfo,
   updateAttesterStateCount,
   clearAttesterStateCounts,
 } from "../metrics/coinbase-metrics.js";
@@ -91,12 +89,11 @@ export class CoinbaseQueueScraper extends AbstractScraper {
       // Clear previous metrics
       clearMissingCoinbaseStatuses();
       clearAttesterInfo();
-      clearCoinbaseInfo();
 
       // Track attesters and their coinbase status
       const attesterAddresses: string[] = [];
       const attestersWithCoinbase: string[] = [];
-      const coinbaseAddresses: Set<string> = new Set();
+      const attesterCoinbaseMap = new Map<string, string>();
       let attestersWithoutCoinbase = 0;
 
       for (const keystore of dirData.keystores) {
@@ -110,8 +107,8 @@ export class CoinbaseQueueScraper extends AbstractScraper {
           const hasCoinbase = !!validator.coinbase;
 
           if (hasCoinbase) {
-            coinbaseAddresses.add(validator.coinbase!);
             attestersWithCoinbase.push(attesterAddress);
+            attesterCoinbaseMap.set(attesterAddress, validator.coinbase!);
           } else {
             attestersWithoutCoinbase++;
           }
@@ -120,18 +117,30 @@ export class CoinbaseQueueScraper extends AbstractScraper {
           setAttesterMissingCoinbase(attesterAddress, !hasCoinbase);
 
           // State transition logic
-          const currentState = getAttesterState(attesterAddress);
+          // Defensive initialization: ensure attester exists in state map
+          // This provides self-healing if startup initialization failed
+          let currentState = getAttesterState(attesterAddress);
+          if (!currentState) {
+            // New attester discovered, initialize as NEW
+            updateAttesterState(attesterAddress, AttesterState.NEW);
+            currentState = getAttesterState(attesterAddress)!;
+          }
 
-          if (currentState && currentState.state === AttesterState.ACTIVE) {
+          if (currentState.state === AttesterState.ACTIVE) {
             if (!hasCoinbase) {
-              console.error(`FATAL: Active attester without coinbase detected! ${attesterAddress}`);
+              console.error(
+                `FATAL: Active attester without coinbase detected! ${attesterAddress}`,
+              );
             }
-          } else if (hasCoinbase && currentState && currentState.state !== AttesterState.IN_STAKING_QUEUE) {
+          } else if (
+            hasCoinbase &&
+            currentState.state !== AttesterState.IN_STAKING_QUEUE
+          ) {
             updateAttesterState(
               attesterAddress,
               AttesterState.IN_STAKING_QUEUE,
             );
-          } else if (!currentState || currentState.state === AttesterState.NEW) {
+          } else if (currentState.state === AttesterState.NEW) {
             // Check if in provider queue (stub for now, returns false)
             const isInProviderQueue = await this.isAttesterInProviderQueue(
               attesterAddress,
@@ -147,11 +156,7 @@ export class CoinbaseQueueScraper extends AbstractScraper {
                 updateAttesterState(attesterAddress, AttesterState.NO_COINBASE);
               }
             }
-            // Otherwise stay in NEW (or create as NEW if no state exists)
-            else if (!currentState) {
-              // New attester discovered, initialize as NEW
-              updateAttesterState(attesterAddress, AttesterState.NEW);
-            }
+            // Otherwise stay in NEW
           } else if (
             currentState.state === AttesterState.IN_STAKING_PROVIDER_QUEUE
           ) {
@@ -172,13 +177,8 @@ export class CoinbaseQueueScraper extends AbstractScraper {
       }
 
       // Record static attester info metrics (only for attesters with coinbase)
-      for (const attester of attestersWithCoinbase) {
-        recordAttesterInfo(attester);
-      }
-
-      // Record static coinbase info metrics
-      for (const coinbase of coinbaseAddresses) {
-        recordCoinbaseInfo(coinbase);
+      for (const [attester, coinbase] of attesterCoinbaseMap.entries()) {
+        recordAttesterInfo(attester, coinbase);
       }
 
       // Update attester state count metrics
