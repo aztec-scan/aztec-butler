@@ -122,8 +122,16 @@ export class CoinbaseQueueScraper extends AbstractScraper {
           // State transition logic
           const currentState = getAttesterState(attesterAddress);
 
-          // Don't overwrite NEW state unless we have more info
-          if (!currentState || currentState.state === AttesterState.NEW) {
+          if (currentState && currentState.state === AttesterState.ACTIVE) {
+            if (!hasCoinbase) {
+              console.error(`FATAL: Active attester without coinbase detected! ${attesterAddress}`);
+            }
+          } else if (hasCoinbase && currentState && currentState.state !== AttesterState.IN_STAKING_QUEUE) {
+            updateAttesterState(
+              attesterAddress,
+              AttesterState.IN_STAKING_QUEUE,
+            );
+          } else if (!currentState || currentState.state === AttesterState.NEW) {
             // Check if in provider queue (stub for now, returns false)
             const isInProviderQueue = await this.isAttesterInProviderQueue(
               attesterAddress,
