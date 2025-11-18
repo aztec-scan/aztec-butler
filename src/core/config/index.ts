@@ -43,6 +43,9 @@ export const initConfig = async (
       .length(42)
       .optional()
       .parse(process.env.PROVIDER_ADMIN_ADDRESS),
+    METRICS_BEARER_TOKEN: z
+      .string()
+      .parse(process.env.METRICS_BEARER_TOKEN || "default-api-key"),
   };
   await ensureConfigFile(configFilePath, !!userConfigFilePath, config);
 

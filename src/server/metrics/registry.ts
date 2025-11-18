@@ -3,13 +3,16 @@ import { MeterProvider } from "@opentelemetry/sdk-metrics";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { PACKAGE_NAME } from "../../core/config/index.js";
+import http from "node:http";
 
 // Central Prometheus exporter and meter provider
 let exporter: PrometheusExporter | null = null;
 let meterProvider: MeterProvider | null = null;
+let authServer: http.Server | null = null;
 
 export interface MetricsOptions {
   port: number;
+  bearerToken?: string;
 }
 
 export const initMetricsRegistry = (options: MetricsOptions) => {
@@ -17,13 +20,64 @@ export const initMetricsRegistry = (options: MetricsOptions) => {
     return { exporter, meterProvider };
   }
 
-  exporter = new PrometheusExporter(options);
-  meterProvider = new MeterProvider({
-    readers: [exporter],
-    resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: PACKAGE_NAME,
-    }),
-  });
+  if (options.bearerToken) {
+    // Create exporter without starting server (we'll create our own with auth)
+    exporter = new PrometheusExporter({
+      preventServerStart: true,
+    });
+
+    meterProvider = new MeterProvider({
+      readers: [exporter],
+      resource: resourceFromAttributes({
+        [ATTR_SERVICE_NAME]: PACKAGE_NAME,
+      }),
+    });
+
+    // Create HTTP server with Bearer token authentication
+    authServer = http.createServer((req, res) => {
+      // Check for Bearer token
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        res.writeHead(401, {
+          "Content-Type": "text/plain",
+          "WWW-Authenticate": 'Bearer realm="Metrics"',
+        });
+        res.end("Unauthorized: Missing or invalid Bearer token");
+        return;
+      }
+
+      const token = authHeader.substring(7); // Remove "Bearer " prefix
+
+      if (token !== options.bearerToken) {
+        res.writeHead(401, {
+          "Content-Type": "text/plain",
+          "WWW-Authenticate": 'Bearer realm="Metrics"',
+        });
+        res.end("Unauthorized: Invalid Bearer token");
+        return;
+      }
+
+      // Token is valid, serve metrics
+      if (req.url === "/metrics") {
+        exporter!.getMetricsRequestHandler(req, res);
+      } else {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found");
+      }
+    });
+
+    authServer.listen(options.port);
+  } else {
+    // No authentication - use default PrometheusExporter server
+    exporter = new PrometheusExporter({ port: options.port });
+    meterProvider = new MeterProvider({
+      readers: [exporter],
+      resource: resourceFromAttributes({
+        [ATTR_SERVICE_NAME]: PACKAGE_NAME,
+      }),
+    });
+  }
 
   return { exporter, meterProvider };
 };
@@ -34,7 +88,7 @@ export const getMetricsRegistry = () => {
       "Metrics registry not initialized. Call initMetricsRegistry() first.",
     );
   }
-  return { exporter, meterProvider };
+  return { exporter, meterProvider, authServer };
 };
 
 export const getMeter = () => {

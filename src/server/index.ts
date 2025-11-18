@@ -50,10 +50,18 @@ export const startServer = async () => {
 
   initLog("Initializing Prometheus metrics registry...");
   const metricsPort = 9464;
-  initMetricsRegistry({ port: metricsPort });
+  initMetricsRegistry({
+    port: metricsPort,
+    bearerToken: config.METRICS_BEARER_TOKEN,
+  });
   console.log(
     `Prometheus metrics available at http://localhost:${metricsPort}/metrics`,
   );
+  if (config.METRICS_BEARER_TOKEN) {
+    console.log(
+      `  Authentication: Bearer token required (configured: ${config.METRICS_BEARER_TOKEN === "default-api-key" ? "default" : "custom"})`,
+    );
+  }
 
   initLog("Initializing configuration metrics...");
   initConfigMetrics(config);
@@ -162,8 +170,19 @@ export const startServer = async () => {
       console.log("Scrapers shut down");
 
       // Shutdown metrics
-      const { exporter } = getMetricsRegistry();
+      const { exporter, authServer } = getMetricsRegistry();
       console.log("Shutting down Prometheus exporter...");
+
+      // Close auth server if it exists
+      if (authServer) {
+        await new Promise<void>((resolve, reject) => {
+          authServer.close((err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+      }
+
       await exporter.shutdown();
       console.log("Prometheus exporter shut down");
     } catch (err) {
