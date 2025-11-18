@@ -26,6 +26,10 @@ import {
 const SUPPORTED_CHAINS = [sepolia, mainnet];
 
 type RollupContract = GetContractReturnType<typeof RollupAbi, PublicClient>;
+type StakingRegistryContract = GetContractReturnType<
+  typeof MOCK_REGISTRY_ABI,
+  PublicClient
+>;
 
 export interface EthereumClientConfig {
   rpcUrl: string;
@@ -42,7 +46,7 @@ export class EthereumClient {
   private readonly client: PublicClient;
   private readonly config: EthereumClientConfig;
   private rollupContract?: RollupContract;
-  private stakingRegistryContract?: any;
+  private stakingRegistryContract?: StakingRegistryContract;
   private providerDataCache: Map<string, StakingProviderData | null> =
     new Map();
 
@@ -253,7 +257,7 @@ supply: ${await stakingAssetContract.read.totalSupply()}
 
     return {
       takeRate: providerData.takeRate,
-      rewardsRecipient: providerData.rewardsRecipient,
+      rewardsRecipient: providerData.rewardsRecipient as `0x${string}`,
     };
   }
 
@@ -301,7 +305,6 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     withdrawerAddress: string,
     blsSecretKey: string,
     moveWithLatestRollup: boolean = true,
-    nodeInfo: NodeInfo,
   ): Promise<CalldataExport> {
     const rollupContract = this.getRollupContract();
 
@@ -336,7 +339,6 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
   async logAttestersCalldata(
     keystoreData: CuratedKeystoreData[],
     withdrawerAddress: string,
-    nodeInfo: NodeInfo,
   ): Promise<void> {
     for (const d of keystoreData) {
       const attesterAddress = getAddressFromPrivateKey(
@@ -347,7 +349,6 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
         withdrawerAddress,
         d.blsSecretKey,
         true,
-        nodeInfo,
       );
       console.log(
         `✅ Deposit calldata for attester ${attesterAddress}:`,

@@ -66,13 +66,15 @@ export class ScraperManager {
       }
 
       // Schedule periodic scraping
-      const handle = setInterval(async () => {
-        try {
-          await scraper.scrape();
-        } catch (error) {
-          console.error(`Error in ${scraper.name} scraper:`, error);
-          // Continue scraping on next interval
-        }
+      const handle = setInterval(() => {
+        void (async () => {
+          try {
+            await scraper.scrape();
+          } catch (error) {
+            console.error(`Error in ${scraper.name} scraper:`, error);
+            // Continue scraping on next interval
+          }
+        })();
       }, intervalMs);
 
       this.intervalHandles.push(handle);

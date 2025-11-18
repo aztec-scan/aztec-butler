@@ -18,23 +18,25 @@ const command = async (ethClient: EthereumClient, dirData: DirData) => {
   for (const keystore of dirData.keystores) {
     for (const validator of keystore.data.validators) {
       if (typeof validator.publisher === "string") {
-        const pub = publishers[validator.publisher] || {
+        const publisherKey = validator.publisher as HexString;
+        const pub = publishers[publisherKey] || {
           load: 0,
           currentBalance: 0n,
           requiredTopUp: 0n,
         };
         pub.load += 1;
-        publishers[validator.publisher] = pub;
+        publishers[publisherKey] = pub;
       } else {
         const loadFactor = 1 / validator.publisher.length;
         for (const pubPrivKey of validator.publisher) {
-          const pub = publishers[pubPrivKey] || {
+          const publisherKey = pubPrivKey as HexString;
+          const pub = publishers[publisherKey] || {
             load: 0,
             currentBalance: 0n,
             requiredTopUp: 0n,
           };
           pub.load += loadFactor;
-          publishers[pubPrivKey] = pub;
+          publishers[publisherKey] = pub;
         }
       }
     }

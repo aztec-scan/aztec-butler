@@ -1,59 +1,84 @@
+import { z } from "zod";
+
+// Base schemas
+export const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]+$/);
+
+// Keep the original template literal type for compile-time type safety
+// while using the schema for runtime validation
 export type HexString = `0x${string}`;
-export type KeystoreData = {
-  validators: {
-    attester: {
-      bls: HexString;
-      eth: HexString;
-    };
-    coinbase?: HexString;
-    publisher: HexString | HexString[];
-    feeRecipient: HexString;
-  }[];
-};
 
-export type CuratedKeystoreData = {
-  blsSecretKey: string;
-  ethPrivateKey: string;
-};
+export const KeystoreDataSchema = z.object({
+  validators: z.array(
+    z.object({
+      attester: z.object({
+        bls: HexStringSchema,
+        eth: HexStringSchema,
+      }),
+      coinbase: HexStringSchema.optional(),
+      publisher: z.union([HexStringSchema, z.array(HexStringSchema)]),
+      feeRecipient: HexStringSchema,
+    }),
+  ),
+});
 
-export type AttesterRegistration = {
-  attester: string;
-  publicKeyG1: {
-    x: string;
-    y: string;
-  };
-  publicKeyG2: {
-    x0: string;
-    y0: string;
-    x1: string;
-    y1: string;
-  };
-  proofOfPossession: {
-    x: string;
-    y: string;
-  };
-};
-export type StakingProviderData = {
-  providerId: bigint;
-  admin: `0x${string}`;
-  takeRate: number;
-  rewardsRecipient: `0x${string}`;
-};
+export type KeystoreData = z.infer<typeof KeystoreDataSchema>;
 
-export type DirData = {
-  l1RpcUrl: string | undefined;
-  l2RpcUrl: string | undefined;
-  keystores: {
-    path: string;
-    id: string;
-    data: KeystoreData;
-  }[];
-  attesterRegistrations: {
-    path: string;
-    id: string;
-    data: AttesterRegistration[];
-  }[];
-};
+export const CuratedKeystoreDataSchema = z.object({
+  blsSecretKey: z.string(),
+  ethPrivateKey: z.string(),
+});
+
+export type CuratedKeystoreData = z.infer<typeof CuratedKeystoreDataSchema>;
+
+export const AttesterRegistrationSchema = z.object({
+  attester: z.string(),
+  publicKeyG1: z.object({
+    x: z.string(),
+    y: z.string(),
+  }),
+  publicKeyG2: z.object({
+    x0: z.string(),
+    y0: z.string(),
+    x1: z.string(),
+    y1: z.string(),
+  }),
+  proofOfPossession: z.object({
+    x: z.string(),
+    y: z.string(),
+  }),
+});
+
+export type AttesterRegistration = z.infer<typeof AttesterRegistrationSchema>;
+
+export const StakingProviderDataSchema = z.object({
+  providerId: z.bigint(),
+  admin: HexStringSchema,
+  takeRate: z.number(),
+  rewardsRecipient: HexStringSchema,
+});
+
+export type StakingProviderData = z.infer<typeof StakingProviderDataSchema>;
+
+export const DirDataSchema = z.object({
+  l1RpcUrl: z.string().url().optional(),
+  l2RpcUrl: z.string().url().optional(),
+  keystores: z.array(
+    z.object({
+      path: z.string(),
+      id: z.string(),
+      data: KeystoreDataSchema,
+    }),
+  ),
+  attesterRegistrations: z.array(
+    z.object({
+      path: z.string(),
+      id: z.string(),
+      data: z.array(AttesterRegistrationSchema),
+    }),
+  ),
+});
+
+export type DirData = z.infer<typeof DirDataSchema>;
 
 export const MOCK_REGISTRY_ABI = [
   {

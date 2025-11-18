@@ -3,14 +3,11 @@ import type { ButlerConfig } from "../../core/config/index.js";
 import { AztecClient } from "../../core/components/AztecClient.js";
 import { EthereumClient } from "../../core/components/EthereumClient.js";
 import { getDockerDirData } from "../../core/utils/fileOperations.js";
-
-export interface ProviderData {
-  providerId: bigint;
-  queueLength: bigint;
-  adminAddress: string;
-  rewardsRecipient: string;
-  lastUpdated: Date;
-}
+import {
+  updateProviderData,
+  ProviderDataSchema,
+  type ProviderData,
+} from "../state/index.js";
 
 /**
  * Scraper for staking provider-related data from the staking registry
@@ -94,7 +91,7 @@ export class ProviderScraper extends AbstractScraper {
         providerData.providerId,
       );
 
-      this.lastScrapedData = {
+      const rawData = {
         providerId: providerData.providerId,
         queueLength,
         adminAddress: this.providerAdmin,
@@ -102,9 +99,15 @@ export class ProviderScraper extends AbstractScraper {
         lastUpdated: new Date(),
       };
 
+      // Validate before storing
+      this.lastScrapedData = ProviderDataSchema.parse(rawData);
+
       console.log(
         `[${this.name}] Scraped: Staking Provider ${providerData.providerId}, Queue Length: ${queueLength}`,
       );
+
+      // Update shared state (now guaranteed to be valid)
+      updateProviderData(this.lastScrapedData);
     } catch (error) {
       console.error(`[${this.name}] Error during scrape:`, error);
       throw error;
@@ -115,6 +118,7 @@ export class ProviderScraper extends AbstractScraper {
     console.log(`[${this.name}] Shutting down...`);
     this.ethClient = null;
     this.lastScrapedData = null;
+    updateProviderData(null);
   }
 
   /**

@@ -39,7 +39,9 @@ const command = async (
         BigInt(validator.attester.bls),
       );
       attesterRegistrations.push({
-        attester: getAddressFromPrivateKey(validator.attester.eth),
+        attester: getAddressFromPrivateKey(
+          validator.attester.eth as `0x${string}`,
+        ),
         publicKeyG1: {
           x: get0xString(registrationTuple.publicKeyInG1.x),
           y: get0xString(registrationTuple.publicKeyInG1.y),

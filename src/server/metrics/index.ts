@@ -6,3 +6,10 @@ export {
 } from "./registry.js";
 export { initConfigMetrics, updateConfigMetric } from "./config-metrics.js";
 export { initProviderMetrics } from "./provider-metrics.js";
+export {
+  initCoinbaseMetrics,
+  incrementCoinbaseChangesDetected,
+  incrementCoinbaseVerificationChecks,
+  incrementCoinbaseVerificationFailures,
+  setAttesterQueueStatus,
+} from "./coinbase-metrics.js";
