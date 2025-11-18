@@ -13,6 +13,13 @@ import { initState } from "./state/index.js";
 import { AztecClient } from "../core/components/AztecClient.js";
 import { EthereumClient } from "../core/components/EthereumClient.js";
 
+let logCounter = 0;
+
+const initLog = (str: string) => {
+  const counter = ++logCounter;
+  console.log(`\n\n=====  [${counter}] ${str}`);
+}
+
 /**
  * Combined server mode: Prometheus exporter + Event watcher
  *
@@ -33,24 +40,21 @@ export const startServer = async () => {
 
 `);
 
-  // 1. Initialize configuration
-  console.log("Step 1: Initializing configuration...");
+  initLog("Initializing configuration...");
   const config = await initConfig();
 
-  // 2. Initialize metrics registry and Prometheus exporter
-  console.log("\nStep 2: Initializing metrics registry...");
+
+  initLog("Initializing Prometheus metrics registry...");
   const metricsPort = 9464;
   initMetricsRegistry({ port: metricsPort });
   console.log(
     `Prometheus metrics available at http://localhost:${metricsPort}/metrics`,
   );
 
-  // 3. Initialize config metrics (configuration information)
-  console.log("\nStep 3: Initializing config metrics...");
+  initLog("Initializing configuration metrics...");
   initConfigMetrics(config);
 
-  // 4. Initialize scrapers
-  console.log("\nStep 4: Initializing scrapers...");
+  initLog("Initializing scrapers...");
   const scraperManager = new ScraperManager();
 
   // Register staking provider scraper (30 second interval)
@@ -64,26 +68,21 @@ export const startServer = async () => {
   await scraperManager.init();
   await scraperManager.start();
 
-  // 5. Initialize staking provider metrics (uses scraper data)
-  console.log("\nStep 5: Initializing staking provider metrics...");
+  initLog("Initializing staking provider metrics...");
   initStakingProviderMetrics(stakingProviderScraper);
 
-  // 6. Initialize coinbase metrics
-  console.log("\nStep 6: Initializing coinbase metrics...");
+  initLog("Initializing coinbase metrics...");
   initCoinbaseMetrics();
 
-  // 7. Initialize state management
-  console.log("\nStep 7: Initializing state management...");
+  initLog("Initializing state management...");
   await initState();
 
-  // 8. Initialize watchers (monitors file changes)
-  console.log("\nStep 8: Initializing watchers...");
+  initLog("Initializing watchers...");
   await initWatchers({
     dataDirPath: config.AZTEC_DOCKER_DIR,
   });
 
-  // 9. Initialize handlers (only if staking provider is configured)
-  console.log("\nStep 9: Initializing handlers...");
+  initLog("Initializing handlers...");
   if (config.PROVIDER_ADMIN_ADDRESS) {
     // Get staking provider data from scraper to initialize handler
     const stakingProviderData = stakingProviderScraper.getData();
