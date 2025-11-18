@@ -6,19 +6,24 @@ import {
   initCoinbaseMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
-import { ScraperManager, StakingProviderScraper } from "./scrapers/index.js";
+import {
+  ScraperManager,
+  StakingProviderScraper,
+  CoinbaseQueueScraper,
+} from "./scrapers/index.js";
 import { initWatchers, shutdownWatchers } from "./watchers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
-import { initState } from "./state/index.js";
+import { initState, initAttesterStates } from "./state/index.js";
 import { AztecClient } from "../core/components/AztecClient.js";
 import { EthereumClient } from "../core/components/EthereumClient.js";
+import { getDockerDirData } from "../core/utils/fileOperations.js";
 
 let logCounter = 0;
 
 const initLog = (str: string) => {
   const counter = ++logCounter;
   console.log(`\n\n=====  [${counter}] ${str}`);
-}
+};
 
 /**
  * Combined server mode: Prometheus exporter + Event watcher
@@ -43,7 +48,6 @@ export const startServer = async () => {
   initLog("Initializing configuration...");
   const config = await initConfig();
 
-
   initLog("Initializing Prometheus metrics registry...");
   const metricsPort = 9464;
   initMetricsRegistry({ port: metricsPort });
@@ -54,12 +58,31 @@ export const startServer = async () => {
   initLog("Initializing configuration metrics...");
   initConfigMetrics(config);
 
+  initLog("Initializing state management...");
+  await initState();
+
+  initLog("Loading initial directory data and attester states...");
+  try {
+    const initialDirData = await getDockerDirData(config.AZTEC_DOCKER_DIR);
+    console.log(
+      `Loaded ${initialDirData.keystores.length} keystores with ${initialDirData.keystores.reduce((sum, ks) => sum + ks.data.validators.length, 0)} validators`,
+    );
+    initAttesterStates(initialDirData);
+  } catch (error) {
+    console.error("Failed to load initial directory data:", error);
+    console.log("Server will continue, but attester states may be incomplete");
+  }
+
   initLog("Initializing scrapers...");
   const scraperManager = new ScraperManager();
 
   // Register staking provider scraper (30 second interval)
   const stakingProviderScraper = new StakingProviderScraper(config);
   scraperManager.register(stakingProviderScraper, 30_000);
+
+  // Register coinbase queue scraper (60 second interval)
+  const coinbaseQueueScraper = new CoinbaseQueueScraper(config);
+  scraperManager.register(coinbaseQueueScraper, 60_000);
 
   // TODO: Add more scrapers here with their own intervals
   // scraperManager.register(new NodeScraper(config), 60_000);
@@ -73,9 +96,6 @@ export const startServer = async () => {
 
   initLog("Initializing coinbase metrics...");
   initCoinbaseMetrics();
-
-  initLog("Initializing state management...");
-  await initState();
 
   initLog("Initializing watchers...");
   await initWatchers({

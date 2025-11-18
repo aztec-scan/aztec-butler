@@ -8,8 +8,10 @@ export { initConfigMetrics, updateConfigMetric } from "./config-metrics.js";
 export { initStakingProviderMetrics } from "./staking-provider-metrics.js";
 export {
   initCoinbaseMetrics,
-  incrementCoinbaseChangesDetected,
-  incrementCoinbaseVerificationChecks,
-  incrementCoinbaseVerificationFailures,
-  setAttesterQueueStatus,
+  setAttesterMissingCoinbase,
+  clearMissingCoinbaseStatuses,
+  recordAttesterInfo,
+  recordCoinbaseInfo,
+  updateAttesterStateCount,
+  clearAttesterStateCounts,
 } from "./coinbase-metrics.js";

@@ -7,12 +7,6 @@
 
 import type { CoinbaseChange } from "../state/index.js";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
-import {
-  incrementCoinbaseChangesDetected,
-  incrementCoinbaseVerificationChecks,
-  incrementCoinbaseVerificationFailures,
-  setAttesterQueueStatus,
-} from "../metrics/coinbase-metrics.js";
 
 export interface CoinbaseVerificationHandlerConfig {
   ethClient: EthereumClient;
@@ -47,8 +41,8 @@ export class CoinbaseVerificationHandler {
       `  Keystore: ${change.keystorePath} (ID: ${change.keystoreId})`,
     );
 
-    // Increment metrics
-    incrementCoinbaseChangesDetected();
+    // TODO: When proposing transaction to Gnosis Safe multisig:
+    // updateAttesterState(change.attesterEth, AttesterState.WAITING_FOR_ADD_TO_QUEUE);
 
     // Wait a bit to allow on-chain state to update
     // This accounts for timing differences between file updates and blockchain state
@@ -70,8 +64,6 @@ export class CoinbaseVerificationHandler {
    */
   private async verifyQueueStatus(change: CoinbaseChange): Promise<void> {
     try {
-      incrementCoinbaseVerificationChecks();
-
       // Get current queue length
       const queueLength = await this.ethClient.getProviderQueueLength(
         this.providerId,
@@ -80,9 +72,6 @@ export class CoinbaseVerificationHandler {
       console.log(
         `[CoinbaseVerification] Current queue length for staking provider ${this.providerId}: ${queueLength}`,
       );
-
-      // Update metrics
-      setAttesterQueueStatus(Number(queueLength));
 
       // Note: We cannot directly check if a specific attester is in the queue
       // without additional contract methods. For now, we log the queue length
@@ -98,7 +87,6 @@ export class CoinbaseVerificationHandler {
         console.warn(
           `  Expected: Attesters with coinbase addresses should be removed from queue`,
         );
-        incrementCoinbaseVerificationFailures();
       } else {
         console.log(
           `[CoinbaseVerification] ✓ Queue is empty - expected state after coinbase addition`,
@@ -116,7 +104,6 @@ export class CoinbaseVerificationHandler {
         `[CoinbaseVerification] Error verifying queue status:`,
         error,
       );
-      incrementCoinbaseVerificationFailures();
       throw error;
     }
   }

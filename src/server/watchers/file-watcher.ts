@@ -2,6 +2,12 @@ import chokidar from "chokidar";
 import { join } from "path";
 import { getDockerDirData } from "../../core/utils/fileOperations.js";
 import type { DirData } from "../../types.js";
+import {
+  getAttesterState,
+  updateAttesterState,
+  AttesterState,
+} from "../state/index.js";
+import { getAddressFromPrivateKey } from "@aztec/ethereum";
 
 export type FileWatcherEventType = "keystoreChange" | "envChange" | "error";
 
@@ -139,12 +145,45 @@ export class FileWatcher {
       console.log(
         `[FileWatcher] Successfully read directory data: ${dirData.keystores.length} keystores, ${dirData.attesterRegistrations.length} registrations`,
       );
+
+      // Detect new attesters and update their states
+      if (eventType === "keystoreChange") {
+        this.detectAndUpdateNewAttesters(dirData);
+      }
+
       this.emitEvent(eventType, dirData);
     } catch (error) {
       console.error("[FileWatcher] Failed to read directory data:", error);
       this.emitEvent("error", error as Error);
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Detect new attesters in directory data and update their states
+   */
+  private detectAndUpdateNewAttesters(dirData: DirData): void {
+    const attesterAddresses = new Set<string>();
+
+    // Collect all attester addresses from keystores
+    for (const keystore of dirData.keystores) {
+      for (const validator of keystore.data.validators) {
+        // Derive address from private key
+        const attesterAddress = getAddressFromPrivateKey(
+          validator.attester.eth as `0x${string}`,
+        );
+        attesterAddresses.add(attesterAddress);
+      }
+    }
+
+    // Check for new attesters
+    for (const attesterAddress of attesterAddresses) {
+      const existingState = getAttesterState(attesterAddress);
+      if (!existingState) {
+        console.log(`[FileWatcher] Detected new attester: ${attesterAddress}`);
+        updateAttesterState(attesterAddress, AttesterState.NEW);
+      }
     }
   }
 

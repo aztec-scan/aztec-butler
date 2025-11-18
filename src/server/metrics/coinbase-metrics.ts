@@ -1,91 +1,139 @@
 /**
- * Coinbase verification metrics
+ * Coinbase queue metrics
  *
- * Prometheus metrics for monitoring coinbase address changes
- * and verification status
+ * Prometheus metrics for tracking attesters missing coinbase addresses
+ * and their relationship to the staking provider queue.
  */
 
-import type { Counter, UpDownCounter } from "@opentelemetry/api";
-import { createCounter, createUpDownCounter } from "./registry.js";
+import type { ObservableGauge } from "@opentelemetry/api";
+import { createObservableGauge } from "./registry.js";
 
 // Metrics instances
-let coinbaseChangesDetectedCounter: Counter | null = null;
-let coinbaseVerificationChecksCounter: Counter | null = null;
-let coinbaseVerificationFailuresCounter: Counter | null = null;
-let attesterQueueStatusGauge: UpDownCounter | null = null;
+let attesterInfoGauge: ObservableGauge | null = null;
+let coinbaseInfoGauge: ObservableGauge | null = null;
+let attesterMissingCoinbaseGauge: ObservableGauge | null = null;
+let nbrofAttestersInStateGauge: ObservableGauge | null = null;
+
+// Store current values for observable gauges
+const attesterInfoMap = new Map<string, number>();
+const coinbaseInfoMap = new Map<string, number>();
+const attesterMissingCoinbaseMap = new Map<string, number>();
+const attesterStateCountMap = new Map<string, number>();
 
 /**
- * Initialize coinbase verification metrics
+ * Initialize coinbase queue metrics
  */
 export const initCoinbaseMetrics = () => {
-  // Counter: Total number of coinbase changes detected
-  coinbaseChangesDetectedCounter = createCounter(
-    "coinbase_changes_detected_total",
-    {
-      description: "Total number of coinbase address changes detected",
-    },
-  );
-
-  // Counter: Total number of verification checks performed
-  coinbaseVerificationChecksCounter = createCounter(
-    "coinbase_verification_checks_total",
-    {
-      description: "Total number of coinbase verification checks performed",
-    },
-  );
-
-  // Counter: Total number of verification failures
-  coinbaseVerificationFailuresCounter = createCounter(
-    "coinbase_verification_failures_total",
-    {
-      description:
-        "Total number of coinbase verification failures (attesters still in queue)",
-    },
-  );
-
-  // Gauge: Current number of attesters in queue
-  attesterQueueStatusGauge = createUpDownCounter("attester_queue_status", {
-    description: "Current number of attesters in the staking registry queue",
+  // Observable Gauge: Static attester information
+  attesterInfoGauge = createObservableGauge("attester_info", {
+    description: "Static information about registered attesters (value=1)",
   });
 
-  console.log("Coinbase verification metrics initialized successfully");
+  // Observable Gauge: Static coinbase information
+  coinbaseInfoGauge = createObservableGauge("coinbase_info", {
+    description: "Static information about coinbase addresses (value=1)",
+  });
+
+  // Observable Gauge: Attesters missing coinbase address (0 or 1 per attester)
+  attesterMissingCoinbaseGauge = createObservableGauge(
+    "attesters_missing_coinbase_address",
+    {
+      description:
+        "Attesters missing coinbase address (0=has coinbase, 1=missing coinbase)",
+    },
+  );
+
+  // Observable Gauge: Number of attesters in each state
+  nbrofAttestersInStateGauge = createObservableGauge(
+    "nbrof_attesters_in_state",
+    {
+      description: "Number of attesters in each state",
+    },
+  );
+
+  // Add callbacks to observe the gauge values
+  attesterInfoGauge.addCallback((observableResult) => {
+    for (const [attester, value] of attesterInfoMap.entries()) {
+      observableResult.observe(value, { attester_address: attester });
+    }
+  });
+
+  attesterMissingCoinbaseGauge.addCallback((observableResult) => {
+    for (const [attester, value] of attesterMissingCoinbaseMap.entries()) {
+      observableResult.observe(value, { attester_address: attester });
+    }
+  });
+
+  nbrofAttestersInStateGauge.addCallback((observableResult) => {
+    for (const [state, count] of attesterStateCountMap.entries()) {
+      observableResult.observe(count, { attester_state: state });
+    }
+  });
+
+  coinbaseInfoGauge.addCallback((observableResult) => {
+    for (const [coinbase, value] of coinbaseInfoMap.entries()) {
+      observableResult.observe(value, { coinbase_address: coinbase });
+    }
+  });
+
+  console.log("Coinbase queue metrics initialized successfully");
 };
 
 /**
- * Increment coinbase changes detected counter
+ * Set missing coinbase status for an attester (0 = has coinbase, 1 = missing)
  */
-export const incrementCoinbaseChangesDetected = () => {
-  if (coinbaseChangesDetectedCounter) {
-    coinbaseChangesDetectedCounter.add(1);
-  }
+export const setAttesterMissingCoinbase = (
+  attesterAddress: string,
+  isMissing: boolean,
+) => {
+  attesterMissingCoinbaseMap.set(attesterAddress, isMissing ? 1 : 0);
 };
 
 /**
- * Increment coinbase verification checks counter
+ * Clear all missing coinbase statuses (for refresh)
  */
-export const incrementCoinbaseVerificationChecks = () => {
-  if (coinbaseVerificationChecksCounter) {
-    coinbaseVerificationChecksCounter.add(1);
-  }
+export const clearMissingCoinbaseStatuses = () => {
+  attesterMissingCoinbaseMap.clear();
 };
 
 /**
- * Increment coinbase verification failures counter
+ * Record attester information (static metric with value=1)
  */
-export const incrementCoinbaseVerificationFailures = () => {
-  if (coinbaseVerificationFailuresCounter) {
-    coinbaseVerificationFailuresCounter.add(1);
-  }
+export const recordAttesterInfo = (attester: string) => {
+  attesterInfoMap.set(attester, 1);
 };
 
 /**
- * Set attester queue status gauge
+ * Clear all attester info (for refresh)
  */
-export const setAttesterQueueStatus = (count: number) => {
-  if (attesterQueueStatusGauge) {
-    // UpDownCounter doesn't have a set method, so we need to track the delta
-    // For simplicity, we'll just add the value (not ideal for a gauge, but works)
-    // In a production system, you'd want to use an ObservableGauge instead
-    attesterQueueStatusGauge.add(count);
-  }
+export const clearAttesterInfo = () => {
+  attesterInfoMap.clear();
+};
+
+/**
+ * Record coinbase information (static metric with value=1)
+ */
+export const recordCoinbaseInfo = (coinbase: string) => {
+  coinbaseInfoMap.set(coinbase, 1);
+};
+
+/**
+ * Clear all coinbase info (for refresh)
+ */
+export const clearCoinbaseInfo = () => {
+  coinbaseInfoMap.clear();
+};
+
+/**
+ * Update attester state count metrics
+ */
+export const updateAttesterStateCount = (state: string, count: number) => {
+  attesterStateCountMap.set(state, count);
+};
+
+/**
+ * Clear all attester state counts (for refresh)
+ */
+export const clearAttesterStateCounts = () => {
+  attesterStateCountMap.clear();
 };

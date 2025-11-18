@@ -9,3 +9,5 @@ A tool for helping out with chores on an aztec-node server.
 1. Watcher for on-chain events with required actions
    - update coinbase if new delegated stake
    - create and add keys to provider (and propose to multisig to fund proposer-address)
+
+IMPORTANT!!! Implement logic to avoid adding same attester-key multiple times!
