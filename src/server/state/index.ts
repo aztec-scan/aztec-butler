@@ -41,7 +41,7 @@ export type StakingProviderData = z.infer<typeof StakingProviderDataSchema>;
 // Attester state types
 export enum AttesterState {
   NEW = "NEW",
-  WAITING_FOR_ADD_TO_QUEUE = "WAITING_FOR_ADD_TO_QUEUE",
+  WAITING_FOR_MULTISIG_SIGN = "WAITING_FOR_MULTISIG_SIGN",
   IN_STAKING_PROVIDER_QUEUE = "IN_STAKING_PROVIDER_QUEUE",
   NO_COINBASE = "NO_COINBASE",
   IN_STAKING_QUEUE = "IN_STAKING_QUEUE",
@@ -425,7 +425,7 @@ export const updateAttesterState = (
   ) {
     console.error(
       `ERROR: Invalid state transition to NO_COINBASE from ${oldState} for attester ${attesterAddress}. ` +
-        `NO_COINBASE can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
+      `NO_COINBASE can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
   }

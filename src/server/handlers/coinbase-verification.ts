@@ -41,9 +41,6 @@ export class CoinbaseVerificationHandler {
       `  Keystore: ${change.keystorePath} (ID: ${change.keystoreId})`,
     );
 
-    // TODO: When proposing transaction to Gnosis Safe multisig:
-    // updateAttesterState(change.attesterEth, AttesterState.WAITING_FOR_ADD_TO_QUEUE);
-
     // Wait a bit to allow on-chain state to update
     // This accounts for timing differences between file updates and blockchain state
     if (this.verificationDelayMs > 0) {

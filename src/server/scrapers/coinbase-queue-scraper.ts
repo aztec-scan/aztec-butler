@@ -57,7 +57,7 @@ export class CoinbaseQueueScraper extends AbstractScraper {
 
   async scrape(): Promise<void> {
     if (!this.ethClient) {
-      // Not configured, skip
+      console.warn(`Ethereum client not initialized, skipping scrape`);
       return;
     }
 
