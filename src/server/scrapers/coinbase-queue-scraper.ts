@@ -10,15 +10,6 @@ import {
   getAttesterState,
   AttesterState,
 } from "../state/index.js";
-import {
-  setAttesterMissingCoinbase,
-  clearMissingCoinbaseStatuses,
-  recordAttesterInfo,
-  clearAttesterInfo,
-  updateAttesterStateCount,
-  clearAttesterStateCounts,
-  getAttesterStateCountMap,
-} from "../metrics/coinbase-metrics.js";
 import { getAddressFromPrivateKey } from "@aztec/ethereum";
 
 /**
@@ -87,10 +78,6 @@ export class CoinbaseQueueScraper extends AbstractScraper {
       // Get attesters from DataDir
       const dirData = await getDockerDirData(this.config.AZTEC_DOCKER_DIR);
 
-      // Clear previous metrics
-      clearMissingCoinbaseStatuses();
-      clearAttesterInfo();
-
       // Track attesters and their coinbase status
       const attesterAddresses: string[] = [];
       const attestersWithCoinbase: string[] = [];
@@ -113,9 +100,6 @@ export class CoinbaseQueueScraper extends AbstractScraper {
           } else {
             attestersWithoutCoinbase++;
           }
-
-          // Set missing coinbase gauge (1 = missing, 0 = has coinbase)
-          setAttesterMissingCoinbase(attesterAddress, !hasCoinbase);
 
           // State transition logic
           // Defensive initialization: ensure attester exists in state map
@@ -177,20 +161,13 @@ export class CoinbaseQueueScraper extends AbstractScraper {
         }
       }
 
-      // Record static attester info metrics (only for attesters with coinbase)
-      for (const [attester, coinbase] of attesterCoinbaseMap.entries()) {
-        recordAttesterInfo(attester, coinbase);
-      }
-
-      // Update attester state count metrics
-      clearAttesterStateCounts();
+      // Log state counts (derived from state module)
       const stateCounts = countAttestersByState();
-      for (const [state, count] of stateCounts.entries()) {
-        updateAttesterStateCount(state, count);
-      }
-
+      const stateCountsStr = Array.from(stateCounts.entries())
+        .map(([state, count]) => `\n  ${state}: ${count}`)
+        .join("");
       console.log(
-        `[${this.name}] Scraped: ProviderId ${providerId}${getAttesterStateCountMap().entries().toArray().map(([state, count]) => `\n  ${state}: ${count}`)}`
+        `[${this.name}] Scraped: ProviderId ${providerId}${stateCountsStr}`,
       );
     } catch (error) {
       console.error(`[${this.name}] Error during scrape: `, error);

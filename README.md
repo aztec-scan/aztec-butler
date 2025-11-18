@@ -2,6 +2,22 @@
 
 A tool for helping out with chores on an aztec-node server.
 
+## Requirements
+
+- **Node.js v22.0.0 or higher** (required for modern JavaScript features like Iterator.prototype.toArray)
+
+Check your version:
+
+```bash
+node --version
+```
+
+If you need to upgrade:
+
+- Using nvm: `nvm install 22 && nvm use 22`
+- Ubuntu/Debian: https://github.com/nodesource/distributions
+- Other systems: https://nodejs.org/
+
 ## TODO
 
 1. Prometheus scraper for aztec-node metrics

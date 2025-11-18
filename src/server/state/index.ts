@@ -529,3 +529,33 @@ export const initAttesterStates = (dirData: DirData): void => {
     `[State] Attester states initialized: ${appState.attesterStates.size} attesters`,
   );
 };
+
+/**
+ * Get all attester coinbase information from directory data
+ * Returns map of attester address -> coinbase address (or undefined if missing)
+ */
+export const getAttesterCoinbaseInfo = (): Map<string, string | undefined> => {
+  const coinbaseMap = new Map<string, string | undefined>();
+
+  if (!appState.dirData) {
+    return coinbaseMap;
+  }
+
+  for (const keystore of appState.dirData.keystores) {
+    for (const validator of keystore.data.validators) {
+      const attesterAddress = getAddressFromPrivateKey(
+        validator.attester.eth as `0x${string}`,
+      );
+      coinbaseMap.set(attesterAddress, validator.coinbase);
+    }
+  }
+
+  return coinbaseMap;
+};
+
+/**
+ * Get directory data
+ */
+export const getDirData = (): DirData | null => {
+  return appState.dirData;
+};

@@ -6,11 +6,4 @@ export {
 } from "./registry.js";
 export { initConfigMetrics, updateConfigMetric } from "./config-metrics.js";
 export { initStakingProviderMetrics } from "./staking-provider-metrics.js";
-export {
-  initCoinbaseMetrics,
-  setAttesterMissingCoinbase,
-  clearMissingCoinbaseStatuses,
-  recordAttesterInfo,
-  updateAttesterStateCount,
-  clearAttesterStateCounts,
-} from "./coinbase-metrics.js";
+export { initAttesterMetrics } from "./attester-metrics.js";

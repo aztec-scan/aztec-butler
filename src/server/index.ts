@@ -3,7 +3,7 @@ import {
   initMetricsRegistry,
   initConfigMetrics,
   initStakingProviderMetrics,
-  initCoinbaseMetrics,
+  initAttesterMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
 import {
@@ -102,8 +102,8 @@ export const startServer = async () => {
   initLog("Initializing staking provider metrics...");
   initStakingProviderMetrics(stakingProviderScraper);
 
-  initLog("Initializing coinbase metrics...");
-  initCoinbaseMetrics();
+  initLog("Initializing attester metrics...");
+  initAttesterMetrics();
 
   initLog("Initializing watchers...");
   await initWatchers({
