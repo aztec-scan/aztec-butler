@@ -17,6 +17,7 @@ import {
   clearAttesterInfo,
   updateAttesterStateCount,
   clearAttesterStateCounts,
+  getAttesterStateCountMap,
 } from "../metrics/coinbase-metrics.js";
 import { getAddressFromPrivateKey } from "@aztec/ethereum";
 
@@ -189,10 +190,10 @@ export class CoinbaseQueueScraper extends AbstractScraper {
       }
 
       console.log(
-        `[${this.name}] Scraped: ProviderId ${providerId}, Queue: ${queueLength}, Attesters without coinbase: ${attestersWithoutCoinbase}`,
+        `[${this.name}] Scraped: ProviderId ${providerId}${getAttesterStateCountMap().entries().toArray().map(([state, count]) => `\n  ${state}: ${count}`)}`
       );
     } catch (error) {
-      console.error(`[${this.name}] Error during scrape:`, error);
+      console.error(`[${this.name}] Error during scrape: `, error);
       throw error;
     }
   }

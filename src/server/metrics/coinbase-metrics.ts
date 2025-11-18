@@ -119,3 +119,8 @@ export const updateAttesterStateCount = (state: string, count: number) => {
 export const clearAttesterStateCounts = () => {
   attesterStateCountMap.clear();
 };
+
+export const getAttesterStateCountMap = () => {
+  return attesterStateCountMap;
+};
+
