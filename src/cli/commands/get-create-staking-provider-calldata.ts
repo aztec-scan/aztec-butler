@@ -9,12 +9,15 @@ const DEFAULT_COMISSION_RATE_PERCENTAGE = 10;
 const command = async (
   ethClient: EthereumClient,
   dirData: DirData,
-  providerAdmin: ButlerConfig["PROVIDER_ADMIN_ADDRESS"],
+  stakingProviderAdmin: ButlerConfig["PROVIDER_ADMIN_ADDRESS"],
 ) => {
-  assert(providerAdmin, "Provider admin address must be provided.");
+  assert(
+    stakingProviderAdmin,
+    "Staking provider admin address must be provided.",
+  );
   const stakingRegistryAddress = ethClient.getStakingRegistryAddress();
-  const providerAdminAddress = getAddress(providerAdmin);
-  const rewardsRecipientAddress = providerAdminAddress; // For simplicity, using the same address
+  const stakingProviderAdminAddress = getAddress(stakingProviderAdmin);
+  const rewardsRecipientAddress = stakingProviderAdminAddress; // For simplicity, using the same address
   const comissionBasisPoints = DEFAULT_COMISSION_RATE_PERCENTAGE * 100; // Convert percentage to basis points
   const callData = {
     contractToCall: stakingRegistryAddress,
@@ -22,21 +25,23 @@ const command = async (
       abi: MOCK_REGISTRY_ABI,
       functionName: "registerProvider",
       args: [
-        providerAdminAddress,
+        stakingProviderAdminAddress,
         comissionBasisPoints,
         rewardsRecipientAddress,
       ],
     }),
   };
-  const providerData = await ethClient.getStakingProvider(providerAdminAddress);
-  if (providerData) {
-    console.log("Provider already registered on-chain.");
+  const stakingProviderData = await ethClient.getStakingProvider(
+    stakingProviderAdminAddress,
+  );
+  if (stakingProviderData) {
+    console.log("Staking provider already registered on-chain.");
     console.log(
-      `${providerData.providerId} - Admin: ${providerData.admin}, Take Rate: ${providerData.takeRate}, Rewards Recipient: ${providerData.rewardsRecipient}`,
+      `${stakingProviderData.providerId} - Admin: ${stakingProviderData.admin}, Take Rate: ${stakingProviderData.takeRate}, Rewards Recipient: ${stakingProviderData.rewardsRecipient}`,
     );
   } else {
     console.log(
-      "REGISTER PROVIDER CALL DATA:",
+      "REGISTER STAKING PROVIDER CALL DATA:",
       JSON.stringify(callData, null, 2),
     );
   }

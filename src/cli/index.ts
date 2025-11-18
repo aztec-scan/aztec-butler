@@ -53,12 +53,12 @@ export const runCli = async () => {
   for (const attesterReg of data.attesterRegistrations) {
     console.log(`✅ Attester registration data: ${attesterReg.path}`);
   }
-  await command.getCreateProviderCallData(
+  await command.getCreateStakingProviderCallData(
     ethClient,
     data,
     config.PROVIDER_ADMIN_ADDRESS,
   );
-  await command.getAddKeysToProviderCalldata(
+  await command.getAddKeysToStakingProviderCalldata(
     ethClient,
     data,
     config.PROVIDER_ADMIN_ADDRESS,

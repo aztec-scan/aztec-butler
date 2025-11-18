@@ -78,7 +78,7 @@ export class CoinbaseVerificationHandler {
       );
 
       console.log(
-        `[CoinbaseVerification] Current queue length for provider ${this.providerId}: ${queueLength}`,
+        `[CoinbaseVerification] Current queue length for staking provider ${this.providerId}: ${queueLength}`,
       );
 
       // Update metrics
@@ -90,7 +90,7 @@ export class CoinbaseVerificationHandler {
 
       if (queueLength > 0n) {
         console.warn(
-          `[CoinbaseVerification] ⚠️  WARNING: Provider has ${queueLength} attester(s) in queue`,
+          `[CoinbaseVerification] ⚠️  WARNING: Staking provider has ${queueLength} attester(s) in queue`,
         );
         console.warn(
           `  This might include attester ${change.attesterEth} that should have been removed`,

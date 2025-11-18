@@ -1,16 +1,18 @@
 import type { ObservableGauge } from "@opentelemetry/api";
 import { createObservableGauge } from "./registry.js";
-import type { ProviderScraper } from "../scrapers/provider-scraper.js";
+import type { StakingProviderScraper } from "../scrapers/staking-provider-scraper.js";
 
 let stakingProviderQueueLengthGauge: ObservableGauge | null = null;
-let scraper: ProviderScraper | null = null;
+let scraper: StakingProviderScraper | null = null;
 
 /**
- * Initialize staking provider metrics that expose scraped provider data
- * This only sets up the metric exposure layer - scraping is done by ProviderScraper
+ * Initialize staking provider metrics that expose scraped staking provider data
+ * This only sets up the metric exposure layer - scraping is done by StakingProviderScraper
  */
-export const initProviderMetrics = (providerScraper: ProviderScraper) => {
-  scraper = providerScraper;
+export const initStakingProviderMetrics = (
+  stakingProviderScraper: StakingProviderScraper,
+) => {
+  scraper = stakingProviderScraper;
 
   // Create observable gauge for staking provider queue length
   stakingProviderQueueLengthGauge = createObservableGauge(

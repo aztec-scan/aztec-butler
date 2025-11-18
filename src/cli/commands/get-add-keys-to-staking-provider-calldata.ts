@@ -7,23 +7,28 @@ import { ButlerConfig } from "../../core/config/index.js";
 const command = async (
   ethClient: EthereumClient,
   dirData: DirData,
-  providerAdminAddress: ButlerConfig["PROVIDER_ADMIN_ADDRESS"],
+  stakingProviderAdminAddress: ButlerConfig["PROVIDER_ADMIN_ADDRESS"],
 ) => {
-  assert(providerAdminAddress, "Provider admin address must be provided.");
-  const providerData = await ethClient.getStakingProvider(providerAdminAddress);
+  assert(
+    stakingProviderAdminAddress,
+    "Staking provider admin address must be provided.",
+  );
+  const stakingProviderData = await ethClient.getStakingProvider(
+    stakingProviderAdminAddress,
+  );
 
-  if (!providerData) {
+  if (!stakingProviderData) {
     console.error(
-      "Provider not registered. Please register the provider first.",
+      "Staking provider not registered. Please register the staking provider first.",
     );
     return;
   }
 
-  // Log provider information
+  // Log staking provider information
   console.log(
-    `${providerData.providerId} - Admin: ${providerData.admin}, Take Rate: ${providerData.takeRate}, Rewards Recipient: ${providerData.rewardsRecipient}`,
+    `${stakingProviderData.providerId} - Admin: ${stakingProviderData.admin}, Take Rate: ${stakingProviderData.takeRate}, Rewards Recipient: ${stakingProviderData.rewardsRecipient}`,
   );
-  console.log(`Provider ID: ${providerData.providerId}`);
+  console.log(`Staking Provider ID: ${stakingProviderData.providerId}`);
 
   // TODO: check which attesters are already added to rollup
   // TODO: check which attesters are in rollup queue
@@ -71,12 +76,12 @@ const command = async (
       callData: encodeFunctionData({
         abi: MOCK_REGISTRY_ABI,
         functionName: "addKeysToProvider",
-        args: [providerData.providerId, keyStores],
+        args: [stakingProviderData.providerId, keyStores],
       }),
     };
 
     console.log(
-      `\nADD KEYS TO PROVIDER CALL DATA for ${attesterRegistration.path}:`,
+      `\nADD KEYS TO STAKING PROVIDER CALL DATA for ${attesterRegistration.path}:`,
     );
     console.log(JSON.stringify(callData, null, 2));
 

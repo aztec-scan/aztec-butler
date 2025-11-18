@@ -194,7 +194,7 @@ supply: ${await stakingAssetContract.read.totalSupply()}
 
   /**
    * Get staking provider data for a given admin address
-   * Iterates through provider registry until a match is found
+   * Iterates through staking provider registry until a match is found
    * Results are memoized per admin address
    */
   async getStakingProvider(
@@ -243,8 +243,8 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   }
 
   /**
-   * Get provider configuration using memoized provider data
-   * This method uses the cached provider ID from getStakingProvider
+   * Get staking provider configuration using memoized staking provider data
+   * This method uses the cached providerId from getStakingProvider
    */
   async getProviderConfiguration(adminAddress: string): Promise<{
     takeRate: number;

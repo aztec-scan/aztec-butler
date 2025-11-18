@@ -2,11 +2,11 @@ import { initConfig } from "../core/config/index.js";
 import {
   initMetricsRegistry,
   initConfigMetrics,
-  initProviderMetrics,
+  initStakingProviderMetrics,
   initCoinbaseMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
-import { ScraperManager, ProviderScraper } from "./scrapers/index.js";
+import { ScraperManager, StakingProviderScraper } from "./scrapers/index.js";
 import { initWatchers, shutdownWatchers } from "./watchers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
 import { initState } from "./state/index.js";
@@ -53,9 +53,9 @@ export const startServer = async () => {
   console.log("\nStep 4: Initializing scrapers...");
   const scraperManager = new ScraperManager();
 
-  // Register provider scraper (30 second interval)
-  const providerScraper = new ProviderScraper(config);
-  scraperManager.register(providerScraper, 30_000);
+  // Register staking provider scraper (30 second interval)
+  const stakingProviderScraper = new StakingProviderScraper(config);
+  scraperManager.register(stakingProviderScraper, 30_000);
 
   // TODO: Add more scrapers here with their own intervals
   // scraperManager.register(new NodeScraper(config), 60_000);
@@ -64,9 +64,9 @@ export const startServer = async () => {
   await scraperManager.init();
   await scraperManager.start();
 
-  // 5. Initialize provider metrics (uses scraper data)
-  console.log("\nStep 5: Initializing provider metrics...");
-  initProviderMetrics(providerScraper);
+  // 5. Initialize staking provider metrics (uses scraper data)
+  console.log("\nStep 5: Initializing staking provider metrics...");
+  initStakingProviderMetrics(stakingProviderScraper);
 
   // 6. Initialize coinbase metrics
   console.log("\nStep 6: Initializing coinbase metrics...");
@@ -82,12 +82,12 @@ export const startServer = async () => {
     dataDirPath: config.AZTEC_DOCKER_DIR,
   });
 
-  // 9. Initialize handlers (only if provider is configured)
+  // 9. Initialize handlers (only if staking provider is configured)
   console.log("\nStep 9: Initializing handlers...");
   if (config.PROVIDER_ADMIN_ADDRESS) {
-    // Get provider data from scraper to initialize handler
-    const providerData = providerScraper.getData();
-    if (providerData) {
+    // Get staking provider data from scraper to initialize handler
+    const stakingProviderData = stakingProviderScraper.getData();
+    if (stakingProviderData) {
       // Initialize Aztec client to get node info for Ethereum client
       const aztecClient = new AztecClient({
         nodeUrl: config.AZTEC_NODE_URL,
@@ -103,16 +103,16 @@ export const startServer = async () => {
 
       await initHandlers({
         ethClient,
-        providerId: providerData.providerId,
+        providerId: stakingProviderData.providerId,
       });
     } else {
       console.log(
-        "Provider not yet scraped, handlers will be initialized after first scrape completes",
+        "Staking provider not yet scraped, handlers will be initialized after first scrape completes",
       );
     }
   } else {
     console.log(
-      "Provider admin address not configured, skipping handler initialization",
+      "Staking provider admin address not configured, skipping handler initialization",
     );
   }
 

@@ -3,7 +3,7 @@
  *
  * Manages in-memory state for:
  * - Directory data (keystores, attester registrations)
- * - Provider data (from scrapers)
+ * - Staking provider data (from scrapers)
  * - State comparison for detecting changes
  */
 
@@ -22,8 +22,8 @@ export const CoinbaseChangeSchema = z.object({
 
 export type CoinbaseChange = z.infer<typeof CoinbaseChangeSchema>;
 
-// Schema for provider data (from scraper)
-export const ProviderDataSchema = z.object({
+// Schema for staking provider data (from scraper)
+export const StakingProviderDataSchema = z.object({
   providerId: z.bigint(),
   queueLength: z.bigint(),
   adminAddress: z.string(),
@@ -31,13 +31,13 @@ export const ProviderDataSchema = z.object({
   lastUpdated: z.date(),
 });
 
-export type ProviderData = z.infer<typeof ProviderDataSchema>;
+export type StakingProviderData = z.infer<typeof StakingProviderDataSchema>;
 
 // Schema for app state
 export const AppStateSchema = z.object({
   dirData: DirDataSchema.nullable(),
   previousDirData: DirDataSchema.nullable(),
-  providerData: ProviderDataSchema.nullable(),
+  stakingProviderData: StakingProviderDataSchema.nullable(),
 });
 
 export type AppState = z.infer<typeof AppStateSchema>;
@@ -74,7 +74,7 @@ function deepFreeze<T>(obj: T): Readonly<T> {
 let appState: AppState = {
   dirData: null,
   previousDirData: null,
-  providerData: null,
+  stakingProviderData: null,
 };
 
 /**
@@ -176,33 +176,33 @@ export const updateDirData = (newDirData: unknown): CoinbaseChange[] => {
 };
 
 /**
- * Update provider data from scraper
+ * Update staking provider data from scraper
  */
-export const updateProviderData = (newProviderData: unknown) => {
-  // Allow null values (when provider is not configured)
-  if (newProviderData === null) {
-    appState.providerData = null;
+export const updateStakingProviderData = (newStakingProviderData: unknown) => {
+  // Allow null values (when staking provider is not configured)
+  if (newStakingProviderData === null) {
+    appState.stakingProviderData = null;
     return;
   }
 
   // Validate input
-  let validated: ProviderData;
+  let validated: StakingProviderData;
   try {
-    validated = ProviderDataSchema.parse(newProviderData);
+    validated = StakingProviderDataSchema.parse(newStakingProviderData);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error("[State] Invalid ProviderData:", error.errors);
+      console.error("[State] Invalid StakingProviderData:", error.errors);
       // Log detailed validation errors
       for (const err of error.errors) {
         console.error(`  - ${err.path.join(".")}: ${err.message}`);
       }
     }
-    throw new Error("Failed to update provider data: invalid format");
+    throw new Error("Failed to update staking provider data: invalid format");
   }
 
   // Freeze for immutability
   const frozenData = deepFreeze(validated);
-  appState.providerData = frozenData;
+  appState.stakingProviderData = frozenData;
 };
 
 /**
@@ -213,9 +213,9 @@ export const onCoinbaseChange = (callback: StateChangeCallback): void => {
 };
 
 /**
- * Check if an attester is in the provider's staking registry queue
+ * Check if an attester is in the staking provider's staking registry queue
  * This requires querying the blockchain, which should be done by the handler
  */
-export const getProviderData = (): ProviderData | null => {
-  return appState.providerData;
+export const getStakingProviderData = (): StakingProviderData | null => {
+  return appState.stakingProviderData;
 };

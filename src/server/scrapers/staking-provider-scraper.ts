@@ -4,35 +4,35 @@ import { AztecClient } from "../../core/components/AztecClient.js";
 import { EthereumClient } from "../../core/components/EthereumClient.js";
 import { getDockerDirData } from "../../core/utils/fileOperations.js";
 import {
-  updateProviderData,
-  ProviderDataSchema,
-  type ProviderData,
+  updateStakingProviderData,
+  StakingProviderDataSchema,
+  type StakingProviderData,
 } from "../state/index.js";
 
 /**
  * Scraper for staking provider-related data from the staking registry
  */
-export class ProviderScraper extends AbstractScraper {
+export class StakingProviderScraper extends AbstractScraper {
   readonly name = "staking-provider";
 
   private ethClient: EthereumClient | null = null;
-  private providerAdmin: string | null = null;
-  private lastScrapedData: ProviderData | null = null;
+  private stakingProviderAdmin: string | null = null;
+  private lastScrapedData: StakingProviderData | null = null;
 
   constructor(private config: ButlerConfig) {
     super();
   }
 
   async init(): Promise<void> {
-    // Only initialize if provider admin is configured
+    // Only initialize if staking provider admin is configured
     if (!this.config.PROVIDER_ADMIN_ADDRESS) {
       console.log(
-        "Provider admin address not configured, provider scraper will not run",
+        "Staking provider admin address not configured, staking provider scraper will not run",
       );
       return;
     }
 
-    this.providerAdmin = this.config.PROVIDER_ADMIN_ADDRESS;
+    this.stakingProviderAdmin = this.config.PROVIDER_ADMIN_ADDRESS;
 
     // Get data from Docker directory like the CLI does
     const data = await getDockerDirData(this.config.AZTEC_DOCKER_DIR);
@@ -62,52 +62,52 @@ export class ProviderScraper extends AbstractScraper {
     });
 
     console.log(
-      `Provider scraper initialized for admin: ${this.providerAdmin}`,
+      `Staking provider scraper initialized for admin: ${this.stakingProviderAdmin}`,
     );
   }
 
   async scrape(): Promise<void> {
-    if (!this.ethClient || !this.providerAdmin) {
+    if (!this.ethClient || !this.stakingProviderAdmin) {
       // Not configured, skip
       return;
     }
 
     try {
-      // Get provider data from admin address
-      const providerData = await this.ethClient.getStakingProvider(
-        this.providerAdmin,
+      // Get staking provider data from admin address
+      const stakingProviderData = await this.ethClient.getStakingProvider(
+        this.stakingProviderAdmin,
       );
 
-      if (!providerData) {
+      if (!stakingProviderData) {
         console.log(
-          `Provider not registered for admin address: ${this.providerAdmin}`,
+          `Staking provider not registered for admin address: ${this.stakingProviderAdmin}`,
         );
         this.lastScrapedData = null;
         return;
       }
 
-      // Get queue length for this provider
+      // Get queue length for this staking provider
       const queueLength = await this.ethClient.getProviderQueueLength(
-        providerData.providerId,
+        stakingProviderData.providerId,
       );
 
       const rawData = {
-        providerId: providerData.providerId,
+        providerId: stakingProviderData.providerId,
         queueLength,
-        adminAddress: this.providerAdmin,
-        rewardsRecipient: providerData.rewardsRecipient,
+        adminAddress: this.stakingProviderAdmin,
+        rewardsRecipient: stakingProviderData.rewardsRecipient,
         lastUpdated: new Date(),
       };
 
       // Validate before storing
-      this.lastScrapedData = ProviderDataSchema.parse(rawData);
+      this.lastScrapedData = StakingProviderDataSchema.parse(rawData);
 
       console.log(
-        `[${this.name}] Scraped: Staking Provider ${providerData.providerId}, Queue Length: ${queueLength}`,
+        `[${this.name}] Scraped: Staking Provider ${stakingProviderData.providerId}, Queue Length: ${queueLength}`,
       );
 
       // Update shared state (now guaranteed to be valid)
-      updateProviderData(this.lastScrapedData);
+      updateStakingProviderData(this.lastScrapedData);
     } catch (error) {
       console.error(`[${this.name}] Error during scrape:`, error);
       throw error;
@@ -118,13 +118,13 @@ export class ProviderScraper extends AbstractScraper {
     console.log(`[${this.name}] Shutting down...`);
     this.ethClient = null;
     this.lastScrapedData = null;
-    updateProviderData(null);
+    updateStakingProviderData(null);
   }
 
   /**
    * Get the last scraped data
    */
-  getData(): ProviderData | null {
+  getData(): StakingProviderData | null {
     return this.lastScrapedData;
   }
 }

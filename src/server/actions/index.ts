@@ -3,8 +3,8 @@
  *
  * This module will contain:
  * - update-coinbase.ts: Updates coinbase address
- * - create-provider.ts: Creates new provider
- * - add-keys.ts: Adds keys to provider
+ * - create-staking-provider.ts: Creates new staking provider
+ * - add-keys.ts: Adds keys to staking provider
  *
  * These actions will reuse the CLI command implementations from src/cli/commands/
  *
