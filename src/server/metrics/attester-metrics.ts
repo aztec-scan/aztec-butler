@@ -54,9 +54,6 @@ export const initAttesterMetrics = () => {
         exportedCount++;
       }
     }
-    console.log(
-      `[Metrics] attester_info metric callback: exported ${exportedCount} attester(s) with coinbase`,
-    );
   });
 
   attesterMissingCoinbaseGauge.addCallback((observableResult) => {
