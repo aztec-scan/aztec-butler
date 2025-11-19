@@ -146,12 +146,13 @@ export class FileWatcher {
         `[FileWatcher] Successfully read directory data: ${dirData.keystores.length} keystores, ${dirData.attesterRegistrations.length} registrations`,
       );
 
-      // Detect new attesters and update their states
+      // Emit event FIRST to update global state before triggering callbacks
+      this.emitEvent(eventType, dirData);
+
+      // Detect new attesters and update their states AFTER state is updated
       if (eventType === "keystoreChange") {
         this.detectAndUpdateNewAttesters(dirData);
       }
-
-      this.emitEvent(eventType, dirData);
     } catch (error) {
       console.error("[FileWatcher] Failed to read directory data:", error);
       this.emitEvent("error", error as Error);

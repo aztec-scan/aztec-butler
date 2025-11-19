@@ -3,6 +3,7 @@ import {
   GSEContract,
   ViemPublicClient,
 } from "@aztec/ethereum";
+import { getAddress } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { AttesterRegistration, DirData, HexString } from "../../types/index.js";
 import fs from "fs/promises";
@@ -29,7 +30,7 @@ const command = async (
     });
   const gse = new GSEContract(
     client as ViemPublicClient,
-    await rollupContract.read.getGSE(),
+    getAddress(await rollupContract.read.getGSE()) as any,
   );
   const newAttesterRegistrations: DirData["attesterRegistrations"] = [];
   for (const keystore of keystoresMissingRegistrationFiles) {

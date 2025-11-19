@@ -17,6 +17,7 @@ import { initHandlers, shutdownHandlers } from "./handlers/index.js";
 import { initState, initAttesterStates, updateDirData } from "./state/index.js";
 import { AztecClient } from "../core/components/AztecClient.js";
 import { EthereumClient } from "../core/components/EthereumClient.js";
+import { SafeGlobalClient } from "../core/components/SafeGlobalClient.js";
 import { getDockerDirData } from "../core/utils/fileOperations.js";
 
 let logCounter = 0;
@@ -143,9 +144,33 @@ export const startServer = async () => {
         rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
       });
 
+      // Create SafeGlobal client if configured
+      let safeClient: SafeGlobalClient | null = null;
+      if (config.SAFE_ADDRESS) {
+        // Validate that required Safe credentials are present
+        if (!config.MULTISIG_PROPOSER_PRIVATE_KEY || !config.SAFE_API_KEY) {
+          throw new Error(
+            "SAFE_ADDRESS is configured but MULTISIG_PROPOSER_PRIVATE_KEY or SAFE_API_KEY is missing. " +
+            "Both are required for Safe multisig functionality.",
+          );
+        }
+
+        safeClient = new SafeGlobalClient({
+          safeAddress: config.SAFE_ADDRESS,
+          chainId: nodeInfo.l1ChainId,
+          rpcUrl: config.ETHEREUM_NODE_URL,
+          proposerPrivateKey: config.MULTISIG_PROPOSER_PRIVATE_KEY,
+          safeApiKey: config.SAFE_API_KEY,
+        });
+        console.log(
+          `SafeGlobal client initialized for Safe at ${config.SAFE_ADDRESS}`,
+        );
+      }
+
       await initHandlers({
         ethClient,
         providerId: stakingProviderData.providerId,
+        safeClient,
       });
     } else {
       console.log(

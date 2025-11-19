@@ -43,6 +43,19 @@ export const initConfig = async (
       .length(42)
       .optional()
       .parse(process.env.PROVIDER_ADMIN_ADDRESS),
+    SAFE_ADDRESS: z
+      .string()
+      .startsWith("0x")
+      .length(42)
+      .optional()
+      .parse(process.env.SAFE_ADDRESS || process.env.PROVIDER_ADMIN_ADDRESS),
+    MULTISIG_PROPOSER_PRIVATE_KEY: z
+      .string()
+      .startsWith("0x")
+      .length(66)
+      .optional()
+      .parse(process.env.MULTISIG_PROPOSER_PRIVATE_KEY),
+    SAFE_API_KEY: z.string().optional().parse(process.env.SAFE_API_KEY),
     METRICS_BEARER_TOKEN: z
       .string()
       .parse(process.env.METRICS_BEARER_TOKEN || "default-api-key"),
@@ -53,8 +66,8 @@ export const initConfig = async (
     // TODO: add default false "showSensitiveInfo"
     console.log(`CONFIGURATION (reading from ${configFilePath}):
 ${Object.entries(config)
-  .map(([key, value]) => `  ${key}\t${value}`)
-  .join("\n")}
+        .map(([key, value]) => `  ${key}\t${value}`)
+        .join("\n")}
 `);
   }
   return config;

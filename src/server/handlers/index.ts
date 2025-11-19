@@ -2,28 +2,57 @@
  * Handlers module - event handlers that trigger actions
  *
  * This module contains:
- * - coinbase-verification.ts: Handles coinbase address verification
+ * - attester-new-state-handler.ts: Handles NEW attester state
  */
 
-import { onCoinbaseChange } from "../state/index.js";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
+import type { SafeGlobalClient } from "../../core/components/SafeGlobalClient.js";
+import { AttesterNewStateHandler } from "./attester-new-state-handler.js";
 
 export interface HandlersConfig {
   ethClient: EthereumClient;
   providerId: bigint;
+  safeClient: SafeGlobalClient | null;
 }
+
+let attesterNewStateHandler: AttesterNewStateHandler | null = null;
+
+// Default debounce delay: 30 seconds
+// This means if attesters keep arriving within 30s windows, processing is delayed
+// Once 30s pass without new attesters, the batch is processed
+const DEBOUNCE_DELAY_MS = 30_000;
 
 /**
  * Initialize event handlers
  */
 export const initHandlers = async (config: HandlersConfig) => {
-  // TODO
-  console.log("NO HANDLERS TO INITIALIZE");
+  // Initialize attester NEW state handler with debounced batch processing
+  attesterNewStateHandler = new AttesterNewStateHandler(
+    config.ethClient,
+    config.providerId,
+    config.safeClient,
+    DEBOUNCE_DELAY_MS,
+  );
+
+  // Trigger debounced processing if there are any NEW attesters
+  // This handles attesters that were already in NEW state from a previous run
+  // All processing goes through the same debounced path for consistency
+  attesterNewStateHandler.triggerDebouncedProcessing();
+
+  console.log(
+    `Handlers initialized (NEW attesters will be batched with ${DEBOUNCE_DELAY_MS / 1000}s debounce)`,
+  );
 };
 
 /**
  * Shutdown handlers
  */
 export const shutdownHandlers = async () => {
-  // TODO
+  // Cancel any pending debounced processing
+  if (attesterNewStateHandler) {
+    attesterNewStateHandler.cancelPendingProcessing();
+  }
+
+  // Cleanup handler
+  attesterNewStateHandler = null;
 };

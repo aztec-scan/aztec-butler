@@ -21,6 +21,8 @@ import {
   STAKING_REGISTRY_ABI,
   StakingRegistryContract,
   type StakingProviderData,
+  type AttesterRegistration,
+  type HexString,
 } from "../../types/index.js";
 
 const SUPPORTED_CHAINS = [sepolia, mainnet];
@@ -196,7 +198,6 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   async getStakingProvider(
     adminAddress: string,
   ): Promise<StakingProviderData | null> {
-
     // Check cache first
     if (this.providerDataCache.has(adminAddress)) {
       return this.providerDataCache.get(adminAddress)!;
@@ -335,7 +336,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
 
     const gse = new GSEContract(
       this.client as ViemPublicClient,
-      await rollupContract.read.getGSE(),
+      getAddress(await rollupContract.read.getGSE()) as any,
     );
     const registrationTuple = await gse.makeRegistrationTuple(
       BigInt(blsSecretKey),
@@ -380,5 +381,91 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
         calldatata,
       );
     }
+  }
+
+  /**
+   * Convert bigint to 0x-prefixed hex string (for JSON serialization)
+   * @private
+   */
+  private bigintToHexString(bn: bigint): HexString {
+    return `0x${bn.toString(16).padStart(64, "0")}`;
+  }
+
+  /**
+   * Generate attester registration data from keystore BLS private key
+   * @param attesterAddress - Ethereum address of the attester
+   * @param blsSecretKey - BLS private key as string
+   * @returns AttesterRegistration with public keys and proof of possession as bigint strings
+   */
+  async generateAttesterRegistrationData(
+    attesterAddress: string,
+    blsSecretKey: string,
+  ): Promise<AttesterRegistration> {
+    const rollupContract = this.getRollupContract();
+    const gse = new GSEContract(
+      this.client as ViemPublicClient,
+      getAddress(await rollupContract.read.getGSE()) as any,
+    );
+
+    const registrationTuple = await gse.makeRegistrationTuple(
+      BigInt(blsSecretKey),
+    );
+
+    return {
+      attester: attesterAddress,
+      publicKeyG1: {
+        x: this.bigintToHexString(registrationTuple.publicKeyInG1.x),
+        y: this.bigintToHexString(registrationTuple.publicKeyInG1.y),
+      },
+      publicKeyG2: {
+        x0: this.bigintToHexString(registrationTuple.publicKeyInG2.x0),
+        x1: this.bigintToHexString(registrationTuple.publicKeyInG2.x1),
+        y0: this.bigintToHexString(registrationTuple.publicKeyInG2.y0),
+        y1: this.bigintToHexString(registrationTuple.publicKeyInG2.y1),
+      },
+      proofOfPossession: {
+        x: this.bigintToHexString(registrationTuple.proofOfPossession.x),
+        y: this.bigintToHexString(registrationTuple.proofOfPossession.y),
+      },
+    };
+  }
+
+  /**
+   * Generate calldata for adding attester keys to staking provider
+   * @param providerId - The staking provider ID
+   * @param attesterRegistrations - Array of attester registration data
+   * @returns CalldataExport with contract address and encoded calldata
+   */
+  async generateAddKeysToProviderCalldata(
+    providerId: bigint,
+    attesterRegistrations: AttesterRegistration[],
+  ): Promise<CalldataExport> {
+    // Transform attester data to match ABI structure
+    const keyStores = attesterRegistrations.map((attesterData) => ({
+      attester: getAddress(attesterData.attester),
+      publicKeyG1: {
+        x: BigInt(attesterData.publicKeyG1.x),
+        y: BigInt(attesterData.publicKeyG1.y),
+      },
+      publicKeyG2: {
+        x0: BigInt(attesterData.publicKeyG2.x0),
+        x1: BigInt(attesterData.publicKeyG2.x1),
+        y0: BigInt(attesterData.publicKeyG2.y0),
+        y1: BigInt(attesterData.publicKeyG2.y1),
+      },
+      proofOfPossession: {
+        x: BigInt(attesterData.proofOfPossession.x),
+        y: BigInt(attesterData.proofOfPossession.y),
+      },
+    }));
+
+    return {
+      address: this.getStakingRegistryAddress(),
+      calldata: encodeFunctionData({
+        abi: STAKING_REGISTRY_ABI,
+        functionName: "addKeysToProvider",
+        args: [providerId, keyStores],
+      }),
+    };
   }
 }
