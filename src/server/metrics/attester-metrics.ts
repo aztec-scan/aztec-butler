@@ -8,12 +8,14 @@ import type { ObservableGauge } from "@opentelemetry/api";
 import {
   countAttestersByState,
   getAttesterCoinbaseInfo,
+  getAttestersByState,
+  AttesterState,
 } from "../state/index.js";
 import { createObservableGauge } from "./registry.js";
 
 // Metrics instances
 let attesterInfoGauge: ObservableGauge | null = null;
-let attesterMissingCoinbaseGauge: ObservableGauge | null = null;
+let attesterCoinbaseNeededGauge: ObservableGauge | null = null;
 let nbrofAttestersInStateGauge: ObservableGauge | null = null;
 // TODO: add gauge for proposer ETH balance
 
@@ -26,11 +28,10 @@ export const initAttesterMetrics = () => {
       "Attester address, coinbase address and (TODO) publisher address (value=1)",
   });
 
-  attesterMissingCoinbaseGauge = createObservableGauge(
-    "attesters_missing_coinbase_address",
+  attesterCoinbaseNeededGauge = createObservableGauge(
+    "attesters_coinbase_needed",
     {
-      description:
-        "Attesters missing coinbase address (0=has coinbase, 1=missing coinbase)",
+      description: "Attesters in COINBASE_NEEDED state (value=1 per attester)",
     },
   );
 
@@ -56,16 +57,15 @@ export const initAttesterMetrics = () => {
     }
   });
 
-  attesterMissingCoinbaseGauge.addCallback((observableResult) => {
-    const coinbaseInfo = getAttesterCoinbaseInfo();
+  attesterCoinbaseNeededGauge.addCallback((observableResult) => {
+    const attestersNeedingCoinbase = getAttestersByState(
+      AttesterState.COINBASE_NEEDED,
+    );
 
-    let missingCount = 0;
-    for (const [attester, coinbase] of coinbaseInfo.entries()) {
-      const isMissing = !coinbase;
-      observableResult.observe(isMissing ? 1 : 0, {
-        attester_address: attester,
+    for (const entry of attestersNeedingCoinbase) {
+      observableResult.observe(1, {
+        attester_address: entry.attesterAddress,
       });
-      if (isMissing) missingCount++;
     }
   });
 

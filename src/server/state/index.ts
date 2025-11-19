@@ -44,7 +44,7 @@ export enum AttesterState {
   NEW = "NEW",
   WAITING_FOR_MULTISIG_SIGN = "WAITING_FOR_MULTISIG_SIGN",
   IN_STAKING_PROVIDER_QUEUE = "IN_STAKING_PROVIDER_QUEUE",
-  NO_COINBASE = "NO_COINBASE",
+  COINBASE_NEEDED = "COINBASE_NEEDED",
   IN_STAKING_QUEUE = "IN_STAKING_QUEUE",
   ACTIVE = "ACTIVE",
 }
@@ -422,15 +422,15 @@ export const updateAttesterState = (
     `Trying to update attester ${attesterAddress} state: ${oldState || "none"} -> ${newState}`,
   );
 
-  // Validate NO_COINBASE can only be entered from IN_STAKING_PROVIDER_QUEUE
+  // Validate COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE
   if (
-    newState === AttesterState.NO_COINBASE &&
+    newState === AttesterState.COINBASE_NEEDED &&
     oldState !== AttesterState.IN_STAKING_PROVIDER_QUEUE &&
     oldState !== undefined
   ) {
     console.error(
-      `ERROR: Invalid state transition to NO_COINBASE from ${oldState} for attester ${attesterAddress}. ` +
-      `NO_COINBASE can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
+      `ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
+      `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
   }

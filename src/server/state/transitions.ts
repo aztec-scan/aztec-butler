@@ -74,14 +74,14 @@ export async function handleStateTransitions(
       const stillInQueue = isAttesterInProviderQueue(attesterAddress);
       if (!stillInQueue && !hasCoinbase) {
         // No longer in queue and no coinbase
-        updateAttesterState(attesterAddress, AttesterState.NO_COINBASE);
+        updateAttesterState(attesterAddress, AttesterState.COINBASE_NEEDED);
       } else if (hasCoinbase) {
         // Got coinbase while in queue
         updateAttesterState(attesterAddress, AttesterState.IN_STAKING_QUEUE);
       }
       break;
 
-    case AttesterState.NO_COINBASE:
+    case AttesterState.COINBASE_NEEDED:
       // Check if coinbase was added
       if (hasCoinbase) {
         updateAttesterState(attesterAddress, AttesterState.IN_STAKING_QUEUE);
@@ -103,7 +103,7 @@ export async function handleStateTransitions(
         console.warn(
           `Warning: Attester ${attesterAddress} in IN_STAKING_QUEUE lost its coinbase`,
         );
-        updateAttesterState(attesterAddress, AttesterState.NO_COINBASE);
+        updateAttesterState(attesterAddress, AttesterState.COINBASE_NEEDED);
       }
       break;
 
