@@ -14,5 +14,5 @@ echo "Using Bearer token: $TOKEN"
 echo ""
 
 curl -s -w "\nHTTP Status: %{http_code}\n" \
-     -H "Authorization: Bearer $TOKEN" \
-     "$URL" | head -30
+  -H "Authorization: Bearer $TOKEN" \
+  "$URL"
