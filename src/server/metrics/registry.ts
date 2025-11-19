@@ -38,6 +38,8 @@ export const initMetricsRegistry = (options: MetricsOptions) => {
       // Check for Bearer token
       const authHeader = req.headers.authorization;
 
+      console.log(`Incoming request to ${req.url} with auth: ${authHeader}`);
+
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         res.writeHead(401, {
           "Content-Type": "text/plain",
