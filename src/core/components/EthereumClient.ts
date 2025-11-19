@@ -199,11 +199,10 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   async getStakingProvider(
     adminAddress: string,
   ): Promise<StakingProviderData | null> {
-    const normalizedAddress = adminAddress.toLowerCase();
 
     // Check cache first
-    if (this.providerDataCache.has(normalizedAddress)) {
-      return this.providerDataCache.get(normalizedAddress)!;
+    if (this.providerDataCache.has(adminAddress)) {
+      return this.providerDataCache.get(adminAddress)!;
     }
 
     const stakingReg = this.getStakingRegistryContract();
@@ -213,7 +212,7 @@ supply: ${await stakingAssetContract.read.totalSupply()}
       try {
         const [admin, takeRate, rewardsRecipient] =
           await stakingReg.read.providerConfigurations([index]);
-        if (admin.toLowerCase() === normalizedAddress) {
+        if (admin === adminAddress) {
           const providerData: StakingProviderData = {
             providerId: index,
             admin,
@@ -221,13 +220,13 @@ supply: ${await stakingAssetContract.read.totalSupply()}
             rewardsRecipient,
           };
           // Cache the result
-          this.providerDataCache.set(normalizedAddress, providerData);
+          this.providerDataCache.set(adminAddress, providerData);
           return providerData;
         }
         index++;
       } catch (error) {
         // No more providers found
-        this.providerDataCache.set(normalizedAddress, null);
+        this.providerDataCache.set(adminAddress, null);
         return null;
       }
     }
@@ -261,7 +260,7 @@ supply: ${await stakingAssetContract.read.totalSupply()}
           i,
         ]);
         // Extract attester address from the tuple (first element)
-        queue.push(entry.attester.toLowerCase());
+        queue.push(entry.attester);
       } catch (error) {
         console.warn(`Failed to fetch queue entry at index ${i}:`, error);
         // Continue with next index

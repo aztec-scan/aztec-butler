@@ -22,16 +22,14 @@ import {
  */
 export function isAttesterInProviderQueue(attesterAddress: string): boolean {
   const stakingProviderData = getStakingProviderData();
+  console.log(`====== staking provider queue: ${stakingProviderData?.queue}`);
 
   if (!stakingProviderData) {
     return false;
   }
 
-  // Normalize address to lowercase for comparison
-  const normalizedAddress = attesterAddress.toLowerCase();
-
   // Check if attester is in the queue array
-  return stakingProviderData.queue.includes(normalizedAddress);
+  return stakingProviderData.queue.includes(attesterAddress);
 }
 
 /**
@@ -68,9 +66,6 @@ export async function handleStateTransitions(
             attesterAddress,
             AttesterState.IN_STAKING_PROVIDER_QUEUE,
           );
-          // Immediately check if it needs coinbase
-          // (it should, since it's in the queue without coinbase)
-          updateAttesterState(attesterAddress, AttesterState.NO_COINBASE);
         }
       }
       break;
