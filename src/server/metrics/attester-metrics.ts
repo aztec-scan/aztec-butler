@@ -21,12 +21,11 @@ let nbrofAttestersInStateGauge: ObservableGauge | null = null;
  * Initialize attester metrics that expose attester state and metadata
  */
 export const initAttesterMetrics = () => {
-  // Observable Gauge: Static attester information
   attesterInfoGauge = createObservableGauge("attester_info", {
-    description: "Static information about registered attesters (value=1)",
+    description:
+      "Attester address, coinbase address and (TODO) publisher address (value=1)",
   });
 
-  // Observable Gauge: Attesters missing coinbase address (0 or 1 per attester)
   attesterMissingCoinbaseGauge = createObservableGauge(
     "attesters_missing_coinbase_address",
     {
@@ -35,7 +34,6 @@ export const initAttesterMetrics = () => {
     },
   );
 
-  // Observable Gauge: Number of attesters in each state
   nbrofAttestersInStateGauge = createObservableGauge(
     "nbrof_attesters_in_state",
     {
@@ -43,35 +41,38 @@ export const initAttesterMetrics = () => {
     },
   );
 
-  // Add callbacks to observe the gauge values
   attesterInfoGauge.addCallback((observableResult) => {
-    // Derive attester info directly from state module (single source of truth)
     const coinbaseInfo = getAttesterCoinbaseInfo();
 
+    let exportedCount = 0;
     for (const [attester, coinbase] of coinbaseInfo.entries()) {
       if (coinbase) {
         observableResult.observe(1, {
           attester_address: attester,
           coinbase_address: coinbase,
         });
+        exportedCount++;
       }
     }
+    console.log(
+      `[Metrics] attester_info metric callback: exported ${exportedCount} attester(s) with coinbase`,
+    );
   });
 
   attesterMissingCoinbaseGauge.addCallback((observableResult) => {
-    // Derive missing coinbase status directly from state module
     const coinbaseInfo = getAttesterCoinbaseInfo();
 
+    let missingCount = 0;
     for (const [attester, coinbase] of coinbaseInfo.entries()) {
       const isMissing = !coinbase;
       observableResult.observe(isMissing ? 1 : 0, {
         attester_address: attester,
       });
+      if (isMissing) missingCount++;
     }
   });
 
   nbrofAttestersInStateGauge.addCallback((observableResult) => {
-    // Derive state counts directly from the state module (single source of truth)
     const stateCounts = countAttestersByState();
 
     for (const [state, count] of stateCounts.entries()) {

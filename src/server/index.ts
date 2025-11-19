@@ -9,7 +9,7 @@ import {
 import { ScraperManager, StakingProviderScraper } from "./scrapers/index.js";
 import { initWatchers, shutdownWatchers } from "./watchers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
-import { initState, initAttesterStates } from "./state/index.js";
+import { initState, initAttesterStates, updateDirData } from "./state/index.js";
 import { AztecClient } from "../core/components/AztecClient.js";
 import { EthereumClient } from "../core/components/EthereumClient.js";
 import { getDockerDirData } from "../core/utils/fileOperations.js";
@@ -71,6 +71,15 @@ export const startServer = async () => {
     console.log(
       `Loaded ${initialDirData.keystores.length} keystores with ${initialDirData.keystores.reduce((sum, ks) => sum + ks.data.validators.length, 0)} validators`,
     );
+
+    // Update state with directory data (sets appState.dirData)
+    // This must be called before initAttesterStates so metrics have access to the data
+    const coinbaseChanges = updateDirData(initialDirData);
+    console.log(
+      `[Init] Directory data loaded into state (${coinbaseChanges.length} coinbase changes detected)`,
+    );
+
+    // Initialize attester states based on directory data
     initAttesterStates(initialDirData);
   } catch (error) {
     console.error("Failed to load initial directory data:", error);

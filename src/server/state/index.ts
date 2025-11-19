@@ -418,7 +418,9 @@ export const updateAttesterState = (
     return;
   }
 
-  console.log(`Trying to update attester ${attesterAddress} state: ${oldState || "none"} -> ${newState}`);
+  console.log(
+    `Trying to update attester ${attesterAddress} state: ${oldState || "none"} -> ${newState}`,
+  );
 
   // Validate NO_COINBASE can only be entered from IN_STAKING_PROVIDER_QUEUE
   if (
@@ -552,7 +554,6 @@ export const getAttesterCoinbaseInfo = (): Map<string, string | undefined> => {
       coinbaseMap.set(attesterAddress, validator.coinbase);
     }
   }
-
   return coinbaseMap;
 };
 
