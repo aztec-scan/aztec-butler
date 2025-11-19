@@ -22,7 +22,7 @@ import {
  */
 export function isAttesterInProviderQueue(attesterAddress: string): boolean {
   const stakingProviderData = getStakingProviderData();
-  console.log(`====== staking provider queue: ${stakingProviderData?.queue}`);
+  console.log(`====== checking attesterAddress (${attesterAddress}) in staking provider queue: ${JSON.stringify(stakingProviderData?.queue)}`);
 
   if (!stakingProviderData) {
     return false;
@@ -86,7 +86,16 @@ export async function handleStateTransitions(
       // Check if coinbase was added
       if (hasCoinbase) {
         updateAttesterState(attesterAddress, AttesterState.IN_STAKING_QUEUE);
+      } else {
+        const isInProviderQueue = isAttesterInProviderQueue(attesterAddress);
+        if (isInProviderQueue) {
+          updateAttesterState(
+            attesterAddress,
+            AttesterState.IN_STAKING_PROVIDER_QUEUE,
+          );
+        }
       }
+
       break;
 
     case AttesterState.IN_STAKING_QUEUE:
@@ -95,16 +104,7 @@ export async function handleStateTransitions(
         console.warn(
           `Warning: Attester ${attesterAddress} in IN_STAKING_QUEUE lost its coinbase`,
         );
-        // Check if still in provider queue to determine next state
-        const inProviderQueue = isAttesterInProviderQueue(attesterAddress);
-        if (inProviderQueue) {
-          updateAttesterState(
-            attesterAddress,
-            AttesterState.IN_STAKING_PROVIDER_QUEUE,
-          );
-        } else {
-          updateAttesterState(attesterAddress, AttesterState.NO_COINBASE);
-        }
+        updateAttesterState(attesterAddress, AttesterState.NO_COINBASE);
       }
       break;
 
