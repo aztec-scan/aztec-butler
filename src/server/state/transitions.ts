@@ -22,7 +22,6 @@ import {
  */
 export function isAttesterInProviderQueue(attesterAddress: string): boolean {
   const stakingProviderData = getStakingProviderData();
-  console.log(`====== checking attesterAddress (${attesterAddress}) in staking provider queue: ${JSON.stringify(stakingProviderData?.queue)}`);
 
   if (!stakingProviderData) {
     return false;

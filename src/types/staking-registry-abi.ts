@@ -1,3 +1,10 @@
+import { GetContractReturnType, PublicClient } from "viem";
+
+export type StakingRegistryContract = GetContractReturnType<
+  typeof STAKING_REGISTRY_ABI,
+  PublicClient
+>;
+
 export const STAKING_REGISTRY_ABI = [
   {
     type: "constructor",

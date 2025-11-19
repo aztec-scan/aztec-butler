@@ -19,16 +19,13 @@ import { mainnet, sepolia } from "viem/chains";
 import {
   CuratedKeystoreData,
   STAKING_REGISTRY_ABI,
+  StakingRegistryContract,
   type StakingProviderData,
 } from "../../types/index.js";
 
 const SUPPORTED_CHAINS = [sepolia, mainnet];
 
 type RollupContract = GetContractReturnType<typeof RollupAbi, PublicClient>;
-type StakingRegistryContract = GetContractReturnType<
-  typeof STAKING_REGISTRY_ABI,
-  PublicClient
->;
 
 export interface EthereumClientConfig {
   rpcUrl: string;
