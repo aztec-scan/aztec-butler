@@ -1,7 +1,7 @@
 import assert from "assert";
 import { encodeFunctionData, getAddress } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
-import { DirData, MOCK_REGISTRY_ABI } from "../../types.js";
+import { DirData, STAKING_REGISTRY_ABI } from "../../types/index.js";
 import { ButlerConfig } from "../../core/config/index.js";
 
 const command = async (
@@ -74,7 +74,7 @@ const command = async (
     const callData = {
       contractToCall: ethClient.getStakingRegistryAddress(),
       callData: encodeFunctionData({
-        abi: MOCK_REGISTRY_ABI,
+        abi: STAKING_REGISTRY_ABI,
         functionName: "addKeysToProvider",
         args: [stakingProviderData.providerId, keyStores],
       }),

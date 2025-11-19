@@ -7,7 +7,11 @@ import {
   updateStakingProviderData,
   StakingProviderDataSchema,
   type StakingProviderData,
+  getAttesterState,
+  countAttestersByState,
 } from "../state/index.js";
+import { processAttesterState } from "../state/transitions.js";
+import { getAddressFromPrivateKey } from "@aztec/ethereum";
 
 /**
  * Scraper for staking provider-related data from the staking registry
@@ -91,9 +95,15 @@ export class StakingProviderScraper extends AbstractScraper {
         stakingProviderData.providerId,
       );
 
+      // Fetch the actual queue contents
+      const queue = await this.ethClient.getProviderQueue(
+        stakingProviderData.providerId,
+      );
+
       const rawData = {
         providerId: stakingProviderData.providerId,
         queueLength,
+        queue,
         adminAddress: this.stakingProviderAdmin,
         rewardsRecipient: stakingProviderData.rewardsRecipient,
         lastUpdated: new Date(),
@@ -108,8 +118,55 @@ export class StakingProviderScraper extends AbstractScraper {
 
       // Update shared state (now guaranteed to be valid)
       updateStakingProviderData(this.lastScrapedData);
+
+      // Now handle attester state management
+      await this.manageAttesterStates(stakingProviderData.providerId);
     } catch (error) {
       console.error(`[${this.name}] Error during scrape:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Manage attester states based on DataDir and on-chain data
+   */
+  private async manageAttesterStates(providerId: bigint): Promise<void> {
+    try {
+      // Get attesters from DataDir
+      const dirData = await getDockerDirData(this.config.AZTEC_DOCKER_DIR);
+
+      // Process each attester
+      for (const keystore of dirData.keystores) {
+        for (const validator of keystore.data.validators) {
+          // Derive address from private key
+          const attesterAddress = getAddressFromPrivateKey(
+            validator.attester.eth as `0x${string}`,
+          );
+
+          const hasCoinbase = !!validator.coinbase;
+
+          // Get current state
+          const currentState = getAttesterState(attesterAddress);
+
+          // Process state transitions (handled by state/transitions module)
+          await processAttesterState(
+            attesterAddress,
+            hasCoinbase,
+            currentState?.state,
+          );
+        }
+      }
+
+      // Log state counts
+      const stateCounts = countAttestersByState();
+      const stateCountsStr = Array.from(stateCounts.entries())
+        .map(([state, count]) => `\n  ${state}: ${count}`)
+        .join("");
+      console.log(
+        `[${this.name}] Attester States: ProviderId ${providerId}${stateCountsStr}`,
+      );
+    } catch (error) {
+      console.error(`[${this.name}] Error managing attester states:`, error);
       throw error;
     }
   }

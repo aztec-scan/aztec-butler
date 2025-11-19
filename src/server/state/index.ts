@@ -8,7 +8,7 @@
  */
 
 import { z } from "zod";
-import { DirDataSchema, type DirData } from "../../types.js";
+import { DirDataSchema, type DirData } from "../../types/index.js";
 import fs from "fs/promises";
 import path from "path";
 import { getAddressFromPrivateKey } from "@aztec/ethereum";
@@ -31,6 +31,7 @@ export type CoinbaseChange = z.infer<typeof CoinbaseChangeSchema>;
 export const StakingProviderDataSchema = z.object({
   providerId: z.bigint(),
   queueLength: z.bigint(),
+  queue: z.array(z.string()),
   adminAddress: z.string(),
   rewardsRecipient: z.string(),
   lastUpdated: z.date(),
@@ -425,7 +426,7 @@ export const updateAttesterState = (
   ) {
     console.error(
       `ERROR: Invalid state transition to NO_COINBASE from ${oldState} for attester ${attesterAddress}. ` +
-      `NO_COINBASE can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
+        `NO_COINBASE can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
   }

@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import { createRequire } from "module";
 import path, { join } from "path";
 import { z } from "zod";
-import { DirDataSchema, type DirData } from "../../types.js";
+import { DirDataSchema, type DirData } from "../../types/index.js";
 
 const require = createRequire(import.meta.url);
 export const ATTESTER_REGISTRATIONS_DIR_NAME = "attester-registrations";

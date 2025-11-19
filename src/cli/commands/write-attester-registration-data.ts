@@ -4,7 +4,7 @@ import {
   ViemPublicClient,
 } from "@aztec/ethereum";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
-import { AttesterRegistration, DirData, HexString } from "../../types.js";
+import { AttesterRegistration, DirData, HexString } from "../../types/index.js";
 import fs from "fs/promises";
 
 const get0xString = (bn: bigint): HexString => {

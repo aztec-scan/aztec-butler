@@ -1,7 +1,7 @@
 import chokidar from "chokidar";
 import { join } from "path";
 import { getDockerDirData } from "../../core/utils/fileOperations.js";
-import type { DirData } from "../../types.js";
+import type { DirData } from "../../types/index.js";
 import {
   getAttesterState,
   updateAttesterState,

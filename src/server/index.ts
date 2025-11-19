@@ -6,11 +6,7 @@ import {
   initAttesterMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
-import {
-  ScraperManager,
-  StakingProviderScraper,
-  CoinbaseQueueScraper,
-} from "./scrapers/index.js";
+import { ScraperManager, StakingProviderScraper } from "./scrapers/index.js";
 import { initWatchers, shutdownWatchers } from "./watchers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
 import { initState, initAttesterStates } from "./state/index.js";
@@ -85,12 +81,9 @@ export const startServer = async () => {
   const scraperManager = new ScraperManager();
 
   // Register staking provider scraper (30 second interval)
+  // This scraper now handles both staking provider data AND attester state management
   const stakingProviderScraper = new StakingProviderScraper(config);
   scraperManager.register(stakingProviderScraper, 30_000);
-
-  // Register coinbase queue scraper (60 second interval)
-  const coinbaseQueueScraper = new CoinbaseQueueScraper(config);
-  scraperManager.register(coinbaseQueueScraper, 60_000);
 
   // TODO: Add more scrapers here with their own intervals
   // scraperManager.register(new NodeScraper(config), 60_000);

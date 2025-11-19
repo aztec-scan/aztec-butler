@@ -1,4 +1,3 @@
-import type { NodeInfo } from "@aztec/aztec.js";
 import {
   getAddressFromPrivateKey,
   GSEContract,
@@ -19,15 +18,15 @@ import {
 import { mainnet, sepolia } from "viem/chains";
 import {
   CuratedKeystoreData,
-  MOCK_REGISTRY_ABI,
+  STAKING_REGISTRY_ABI,
   type StakingProviderData,
-} from "../../types.js";
+} from "../../types/index.js";
 
 const SUPPORTED_CHAINS = [sepolia, mainnet];
 
 type RollupContract = GetContractReturnType<typeof RollupAbi, PublicClient>;
 type StakingRegistryContract = GetContractReturnType<
-  typeof MOCK_REGISTRY_ABI,
+  typeof STAKING_REGISTRY_ABI,
   PublicClient
 >;
 
@@ -107,11 +106,11 @@ export class EthereumClient {
   /**
    * Get the staking registry contract instance (lazy initialization)
    */
-  getStakingRegistryContract() {
+  getStakingRegistryContract(): StakingRegistryContract {
     if (!this.stakingRegistryContract) {
       this.stakingRegistryContract = getContract({
         address: this.getStakingRegistryAddress(),
-        abi: MOCK_REGISTRY_ABI,
+        abi: STAKING_REGISTRY_ABI,
         client: this.client,
       });
     }
@@ -240,6 +239,36 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   async getProviderQueueLength(providerId: bigint): Promise<bigint> {
     const stakingReg = this.getStakingRegistryContract();
     return await stakingReg.read.getProviderQueueLength([providerId]);
+  }
+
+  /**
+   * Get the full queue of attesters for a provider
+   * Iterates through queue indices to fetch all attester addresses
+   */
+  async getProviderQueue(providerId: bigint): Promise<string[]> {
+    const stakingReg = this.getStakingRegistryContract();
+
+    const firstIndex = await stakingReg.read.getFirstIndexInQueue([providerId]);
+    const lastIndex = await stakingReg.read.getLastIndexInQueue([providerId]);
+
+    const queue: string[] = [];
+
+    // Iterate through queue indices
+    for (let i = firstIndex; i < lastIndex; i++) {
+      try {
+        const entry = await stakingReg.read.getValueAtIndexInQueue([
+          providerId,
+          i,
+        ]);
+        // Extract attester address from the tuple (first element)
+        queue.push(entry.attester.toLowerCase());
+      } catch (error) {
+        console.warn(`Failed to fetch queue entry at index ${i}:`, error);
+        // Continue with next index
+      }
+    }
+
+    return queue;
   }
 
   /**

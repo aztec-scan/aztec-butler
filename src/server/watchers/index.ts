@@ -7,7 +7,7 @@
 
 import { FileWatcher } from "./file-watcher.js";
 import { updateDirData } from "../state/index.js";
-import type { DirData } from "../../types.js";
+import type { DirData } from "../../types/index.js";
 
 let fileWatcher: FileWatcher | null = null;
 
