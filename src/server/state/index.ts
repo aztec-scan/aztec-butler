@@ -8,7 +8,11 @@
  */
 
 import { z } from "zod";
-import { DirDataSchema, type DirData } from "../../types/index.js";
+import {
+  DirDataSchema,
+  type DirData,
+  type PublisherDataMap,
+} from "../../types/index.js";
 import fs from "fs/promises";
 import path from "path";
 import { getAddressFromPrivateKey } from "@aztec/ethereum";
@@ -70,6 +74,7 @@ export const AppStateSchema = z.object({
 
 export type AppState = z.infer<typeof AppStateSchema> & {
   attesterStates: AttesterStateMap;
+  publisherData: PublisherDataMap | null;
 };
 
 /**
@@ -106,6 +111,7 @@ let appState: AppState = {
   previousDirData: null,
   stakingProviderData: null,
   attesterStates: new Map(),
+  publisherData: null,
 };
 
 /**
@@ -430,7 +436,7 @@ export const updateAttesterState = (
   ) {
     console.error(
       `ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
-      `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
+        `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
   }
@@ -562,4 +568,20 @@ export const getAttesterCoinbaseInfo = (): Map<string, string | undefined> => {
  */
 export const getDirData = (): DirData | null => {
   return appState.dirData;
+};
+
+/**
+ * Update publisher data from scraper
+ */
+export const updatePublisherData = (
+  newPublisherData: PublisherDataMap | null,
+) => {
+  appState.publisherData = newPublisherData;
+};
+
+/**
+ * Get publisher data
+ */
+export const getPublisherData = (): PublisherDataMap | null => {
+  return appState.publisherData;
 };

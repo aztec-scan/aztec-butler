@@ -4,9 +4,14 @@ import {
   initConfigMetrics,
   initStakingProviderMetrics,
   initAttesterMetrics,
+  initPublisherMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
-import { ScraperManager, StakingProviderScraper } from "./scrapers/index.js";
+import {
+  ScraperManager,
+  StakingProviderScraper,
+  PublisherScraper,
+} from "./scrapers/index.js";
 import { initWatchers, shutdownWatchers } from "./watchers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
 import { initState, initAttesterStates, updateDirData } from "./state/index.js";
@@ -94,6 +99,11 @@ export const startServer = async () => {
   const stakingProviderScraper = new StakingProviderScraper(config);
   scraperManager.register(stakingProviderScraper, 30_000);
 
+  // Register publisher scraper (30 second interval)
+  // Tracks publisher ETH balances and required top-ups
+  const publisherScraper = new PublisherScraper(config);
+  scraperManager.register(publisherScraper, 30_000);
+
   // TODO: Add more scrapers here with their own intervals
   // scraperManager.register(new NodeScraper(config), 60_000);
   // scraperManager.register(new L1Scraper(config), 120_000);
@@ -106,6 +116,9 @@ export const startServer = async () => {
 
   initLog("Initializing attester metrics...");
   initAttesterMetrics();
+
+  initLog("Initializing publisher metrics...");
+  initPublisherMetrics();
 
   initLog("Initializing watchers...");
   await initWatchers({
