@@ -36,26 +36,51 @@ if ! command -v node &>/dev/null || [ $(node -v | cut -d'v' -f2 | cut -d'.' -f1)
 fi
 
 # Detect the actual node and npm paths for the user
-# Use bash -l -c to load user's profile, but suppress stderr to avoid noise
-NODE_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'command -v node 2>/dev/null' 2>/dev/null | grep -v "^$" | head -n1)
-NPM_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'command -v npm 2>/dev/null' 2>/dev/null | grep -v "^$" | head -n1)
+echo "Detecting Node.js and npm paths for user $ACTUAL_USER..."
+
+# Try multiple methods to find node/npm
+# Method 1: Using bash -l -c (login shell)
+NODE_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'which node 2>/dev/null' 2>/dev/null | grep -v "^$" | head -n1)
+NPM_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'which npm 2>/dev/null' 2>/dev/null | grep -v "^$" | head -n1)
+
+# Method 2: If method 1 fails, try with explicit PATH from common locations
+if [ -z "$NODE_PATH" ]; then
+  echo "Method 1 failed, trying common paths..."
+  for node_dir in /usr/local/bin /usr/bin ~/.nvm/versions/node/*/bin /home/$ACTUAL_USER/.nvm/versions/node/*/bin; do
+    if [ -x "$node_dir/node" ]; then
+      NODE_PATH="$node_dir/node"
+      NPM_PATH="$node_dir/npm"
+      echo "Found in $node_dir"
+      break
+    fi
+  done
+fi
 
 if [ -z "$NODE_PATH" ] || [ -z "$NPM_PATH" ]; then
   echo "Error: Could not detect node or npm paths for user $ACTUAL_USER"
   echo "NODE_PATH: '$NODE_PATH'"
   echo "NPM_PATH: '$NPM_PATH'"
+  echo ""
+  echo "Please ensure Node.js 22+ is installed and accessible to user $ACTUAL_USER"
+  echo "Try running: sudo -u $ACTUAL_USER which node"
   exit 1
 fi
 
-# Verify node works
+# Verify node works and check version
 NODE_VERSION=$(sudo -u "$ACTUAL_USER" "$NODE_PATH" --version 2>/dev/null)
 if [ -z "$NODE_VERSION" ]; then
   echo "Error: Detected node at $NODE_PATH but it doesn't work"
   exit 1
 fi
 
-echo "Detected Node.js: $NODE_PATH ($NODE_VERSION)"
-echo "Detected npm: $NPM_PATH"
+NODE_MAJOR_VERSION=$(echo "$NODE_VERSION" | cut -d'v' -f2 | cut -d'.' -f1)
+if [ "$NODE_MAJOR_VERSION" -lt 22 ]; then
+  echo "Error: Node.js version 22+ required, found $NODE_VERSION at $NODE_PATH"
+  exit 1
+fi
+
+echo "✓ Detected Node.js: $NODE_PATH ($NODE_VERSION)"
+echo "✓ Detected npm: $NPM_PATH"
 
 # Extract directory paths for PATH environment variable
 NODE_BIN_DIR=$(dirname "$NODE_PATH")
@@ -91,6 +116,11 @@ Environment="PATH=$NODE_BIN_DIR:/usr/bin:/usr/local/bin:/bin"
 [Install]
 WantedBy=multi-user.target
 EOF
+
+echo ""
+echo "Generated service file:"
+cat "$SERVICE_FILE"
+echo ""
 
 # Reload systemd
 echo "Reloading systemd..."
