@@ -35,6 +35,22 @@ if ! command -v node &>/dev/null || [ $(node -v | cut -d'v' -f2 | cut -d'.' -f1)
   apt-get install -y nodejs
 fi
 
+# Detect the actual node and npm paths for the user
+NODE_PATH=$(sudo -u "$ACTUAL_USER" -i bash -c 'command -v node')
+NPM_PATH=$(sudo -u "$ACTUAL_USER" -i bash -c 'command -v npm')
+
+if [ -z "$NODE_PATH" ] || [ -z "$NPM_PATH" ]; then
+  echo "Error: Could not detect node or npm paths for user $ACTUAL_USER"
+  exit 1
+fi
+
+echo "Detected Node.js: $NODE_PATH ($(sudo -u "$ACTUAL_USER" "$NODE_PATH" --version))"
+echo "Detected npm: $NPM_PATH"
+
+# Extract directory paths for PATH environment variable
+NODE_BIN_DIR=$(dirname "$NODE_PATH")
+NPM_BIN_DIR=$(dirname "$NPM_PATH")
+
 # Build the project
 echo "Building project..."
 sudo -u "$ACTUAL_USER" npm ci
@@ -53,11 +69,11 @@ Type=simple
 User=$ACTUAL_USER
 Group=$USER_GROUP
 WorkingDirectory=$INSTALL_DIR
-ExecStart=/usr/bin/npm run start:serve
+ExecStart=$NPM_PATH run start:serve
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
-Environment=PATH=/usr/bin:/usr/local/bin:/bin
+Environment=PATH=$NODE_BIN_DIR:/usr/bin:/usr/local/bin:/bin
 
 [Install]
 WantedBy=multi-user.target
