@@ -36,15 +36,25 @@ if ! command -v node &>/dev/null || [ $(node -v | cut -d'v' -f2 | cut -d'.' -f1)
 fi
 
 # Detect the actual node and npm paths for the user
-NODE_PATH=$(sudo -u "$ACTUAL_USER" -i bash -c 'command -v node')
-NPM_PATH=$(sudo -u "$ACTUAL_USER" -i bash -c 'command -v npm')
+# Use bash -l -c to load user's profile, but suppress stderr to avoid noise
+NODE_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'command -v node 2>/dev/null' 2>/dev/null | grep -v "^$" | head -n1)
+NPM_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'command -v npm 2>/dev/null' 2>/dev/null | grep -v "^$" | head -n1)
 
 if [ -z "$NODE_PATH" ] || [ -z "$NPM_PATH" ]; then
   echo "Error: Could not detect node or npm paths for user $ACTUAL_USER"
+  echo "NODE_PATH: '$NODE_PATH'"
+  echo "NPM_PATH: '$NPM_PATH'"
   exit 1
 fi
 
-echo "Detected Node.js: $NODE_PATH ($(sudo -u "$ACTUAL_USER" "$NODE_PATH" --version))"
+# Verify node works
+NODE_VERSION=$(sudo -u "$ACTUAL_USER" "$NODE_PATH" --version 2>/dev/null)
+if [ -z "$NODE_VERSION" ]; then
+  echo "Error: Detected node at $NODE_PATH but it doesn't work"
+  exit 1
+fi
+
+echo "Detected Node.js: $NODE_PATH ($NODE_VERSION)"
 echo "Detected npm: $NPM_PATH"
 
 # Extract directory paths for PATH environment variable
