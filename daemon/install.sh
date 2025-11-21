@@ -58,7 +58,7 @@ sudo -u "$ACTUAL_USER" npm run build
 
 # Generate service file dynamically
 echo "Generating service file..."
-cat > "$SERVICE_FILE" <<EOF
+cat > "$SERVICE_FILE" <<'EOF_HEADER'
 [Unit]
 Description=Aztec Butler - Prometheus monitoring and automation for Aztec nodes
 After=network.target
@@ -66,14 +66,17 @@ Wants=network.target
 
 [Service]
 Type=simple
+EOF_HEADER
+
+cat >> "$SERVICE_FILE" <<EOF
 User=$ACTUAL_USER
 Group=$USER_GROUP
 WorkingDirectory=$INSTALL_DIR
 ExecStart=$NPM_PATH run start:serve
 Restart=always
 RestartSec=5
-Environment=NODE_ENV=production
-Environment=PATH=$NODE_BIN_DIR:/usr/bin:/usr/local/bin:/bin
+Environment="NODE_ENV=production"
+Environment="PATH=$NODE_BIN_DIR:/usr/bin:/usr/local/bin:/bin"
 
 [Install]
 WantedBy=multi-user.target

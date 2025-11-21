@@ -27,4 +27,4 @@ systemctl daemon-reload
 echo ""
 echo "✅ Aztec Butler uninstalled"
 echo ""
-echo "Note: Project files in /home/ubuntu/aztec-butler were not removed"
+echo "Note: Project files were not removed. Delete them manually if needed."

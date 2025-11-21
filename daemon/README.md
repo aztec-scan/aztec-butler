@@ -11,13 +11,14 @@ Scripts for manually setting up aztec-butler as a systemd service.
 ## Quick Start
 
 1. **Clone the project to the server:**
+
    ```bash
-   cd /home/ubuntu
-   git clone <repository-url> aztec-butler
-   cd aztec-butler
+   git clone <repository-url>
+   cd <project-directory>
    ```
 
 2. **Install as a service:**
+
    ```bash
    sudo ./daemon/install.sh
    ```
@@ -55,15 +56,16 @@ Scripts for manually setting up aztec-butler as a systemd service.
 
 The service runs with these settings:
 
-- **User:** `ubuntu`
-- **Working Directory:** `/home/ubuntu/aztec-butler`
-- **Command:** `node dist/index.js serve`
+- **User:** Detected automatically (the user who runs the install script with sudo)
+- **Working Directory:** Detected automatically (the directory where install.sh is located)
+- **Command:** `npm run start:serve` (using detected npm and node paths)
 - **Environment:** `NODE_ENV=production`
 - **Auto-restart:** Enabled (5 second delay)
 
 ### Configuration Files
 
-Make sure any required configuration files are present in `/home/ubuntu/aztec-butler/`:
+Make sure any required configuration files are present in your installation directory:
+
 - `.env` (if needed)
 - Any other config files your application requires
 
@@ -72,7 +74,7 @@ Make sure any required configuration files are present in `/home/ubuntu/aztec-bu
 To update the code and restart the service:
 
 ```bash
-cd /home/ubuntu/aztec-butler
+cd <your-installation-directory>
 git pull
 npm install
 npm run build
@@ -92,8 +94,8 @@ To completely remove everything:
 
 ```bash
 sudo ./daemon/uninstall.sh
-cd /home/ubuntu
-rm -rf aztec-butler
+cd ..
+rm -rf <installation-directory>
 ```
 
 ## Troubleshooting
@@ -101,24 +103,27 @@ rm -rf aztec-butler
 ### Service won't start
 
 1. **Check the logs:**
+
    ```bash
    ./daemon/logs.sh --lines 100
    ```
 
 2. **Verify Node.js version:**
+
    ```bash
    node -v  # Should be >= 22.0.0
    ```
 
 3. **Check build output exists:**
+
    ```bash
    ls -la dist/index.js
    ```
 
 4. **Verify file permissions:**
    ```bash
-   ls -la /home/ubuntu/aztec-butler
-   # Should be owned by ubuntu:ubuntu
+   ls -la <your-installation-directory>
+   # Should be owned by the user running the service
    ```
 
 ### Port conflicts
@@ -134,13 +139,12 @@ sudo lsof -i :9090  # Replace with your port
 If you see permission errors:
 
 ```bash
-sudo chown -R ubuntu:ubuntu /home/ubuntu/aztec-butler
+sudo chown -R $USER:$USER <your-installation-directory>
 ```
 
 ## Files Included
 
-- `aztec-butler.service` - Systemd service configuration
-- `install.sh` - Installation script (requires sudo)
+- `install.sh` - Installation script (requires sudo) - dynamically generates service file
 - `uninstall.sh` - Uninstallation script (requires sudo)
 - `status.sh` - Check service status
 - `logs.sh` - View service logs
