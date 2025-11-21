@@ -11,7 +11,9 @@ import {
   AttesterState,
   updateAttesterState,
   getStakingProviderData,
+  getAttesterState,
 } from "./index.js";
+import { AttesterOnChainStatus } from "../../types/index.js";
 
 /**
  * Check if an attester is in the provider's queue
@@ -98,8 +100,16 @@ export async function handleStateTransitions(
       break;
 
     case AttesterState.IN_STAKING_QUEUE:
-      // Check if coinbase was removed (shouldn't happen, but handle it)
-      if (!hasCoinbase) {
+      // Check if attester is now active on-chain
+      const attesterState = getAttesterState(attesterAddress);
+      if (
+        attesterState?.onChainView &&
+        attesterState.onChainView.status !== AttesterOnChainStatus.NONE
+      ) {
+        // Attester is now on-chain and active
+        updateAttesterState(attesterAddress, AttesterState.ACTIVE);
+      } else if (!hasCoinbase) {
+        // Check if coinbase was removed (shouldn't happen, but handle it)
         console.warn(
           `Warning: Attester ${attesterAddress} in IN_STAKING_QUEUE lost its coinbase`,
         );
@@ -108,7 +118,13 @@ export async function handleStateTransitions(
       break;
 
     case AttesterState.WAITING_FOR_MULTISIG_SIGN:
-      // TODO: Implement multisig logic
+      const isInProviderQueue = isAttesterInProviderQueue(attesterAddress);
+      if (isInProviderQueue) {
+        updateAttesterState(
+          attesterAddress,
+          AttesterState.IN_STAKING_PROVIDER_QUEUE,
+        );
+      }
       break;
 
     default:

@@ -9,14 +9,17 @@ import {
   countAttestersByState,
   getAttesterCoinbaseInfo,
   getAttestersByState,
+  getAttesterStates,
   AttesterState,
 } from "../state/index.js";
 import { createObservableGauge } from "./registry.js";
+import { AttesterOnChainStatus } from "../../types/index.js";
 
 // Metrics instances
 let attesterInfoGauge: ObservableGauge | null = null;
 let attesterCoinbaseNeededGauge: ObservableGauge | null = null;
 let nbrofAttestersInStateGauge: ObservableGauge | null = null;
+let attesterOnChainStatusGauge: ObservableGauge | null = null;
 // TODO: add gauge for proposer ETH balance
 
 /**
@@ -74,6 +77,28 @@ export const initAttesterMetrics = () => {
 
     for (const [state, count] of stateCounts.entries()) {
       observableResult.observe(count, { attester_state: state });
+    }
+  });
+
+  attesterOnChainStatusGauge = createObservableGauge(
+    "attester_on_chain_status",
+    {
+      description:
+        "On-chain status of attesters: NONE=0, VALIDATING=1, ZOMBIE=2, EXITING=3",
+    },
+  );
+
+  attesterOnChainStatusGauge.addCallback((observableResult) => {
+    const allAttesterStates = getAttesterStates();
+
+    for (const [address, entry] of allAttesterStates.entries()) {
+      if (entry.onChainView) {
+        // Export the on-chain status as a metric
+        observableResult.observe(entry.onChainView.status, {
+          attester_address: address,
+          status: AttesterOnChainStatus[entry.onChainView.status],
+        });
+      }
     }
   });
 

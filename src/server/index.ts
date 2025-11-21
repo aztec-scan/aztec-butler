@@ -11,6 +11,7 @@ import {
   ScraperManager,
   StakingProviderScraper,
   PublisherScraper,
+  RollupScraper,
 } from "./scrapers/index.js";
 import { initWatchers, shutdownWatchers } from "./watchers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
@@ -95,6 +96,11 @@ export const startServer = async () => {
   initLog("Initializing scrapers...");
   const scraperManager = new ScraperManager();
 
+  // Register rollup scraper (60 second interval)
+  // Fetches on-chain attester status from the rollup contract
+  const rollupScraper = new RollupScraper(config);
+  scraperManager.register(rollupScraper, 60_000);
+
   // Register staking provider scraper (30 second interval)
   // This scraper now handles both staking provider data AND attester state management
   const stakingProviderScraper = new StakingProviderScraper(config);
@@ -151,7 +157,7 @@ export const startServer = async () => {
         if (!config.MULTISIG_PROPOSER_PRIVATE_KEY || !config.SAFE_API_KEY) {
           throw new Error(
             "SAFE_ADDRESS is configured but MULTISIG_PROPOSER_PRIVATE_KEY or SAFE_API_KEY is missing. " +
-            "Both are required for Safe multisig functionality.",
+              "Both are required for Safe multisig functionality.",
           );
         }
 

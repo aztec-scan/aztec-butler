@@ -23,6 +23,8 @@ import {
   type StakingProviderData,
   type AttesterRegistration,
   type HexString,
+  type AttesterView,
+  AttesterOnChainStatus,
 } from "../../types/index.js";
 
 const SUPPORTED_CHAINS = [sepolia, mainnet];
@@ -467,5 +469,48 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
         args: [providerId, keyStores],
       }),
     };
+  }
+
+  /**
+   * Get attester view from the rollup contract
+   * This returns the on-chain state of an attester including their status
+   * @param attesterAddress - The attester's Ethereum address
+   * @returns AttesterView with status and other on-chain data, or null if not found/error
+   */
+  async getAttesterView(attesterAddress: string): Promise<AttesterView | null> {
+    try {
+      const rollupContract = this.getRollupContract();
+      const result = await rollupContract.read.getAttesterView([
+        getAddress(attesterAddress),
+      ]);
+
+      return {
+        status: result.status as AttesterOnChainStatus,
+        effectiveBalance: result.effectiveBalance,
+        exit: {
+          withdrawalId: result.exit.withdrawalId,
+          amount: result.exit.amount,
+          exitableAt: result.exit.exitableAt,
+          recipientOrWithdrawer: result.exit.recipientOrWithdrawer,
+          isRecipient: result.exit.isRecipient,
+          exists: result.exit.exists,
+        },
+        config: {
+          publicKey: {
+            x: result.config.publicKey.x,
+            y: result.config.publicKey.y,
+          },
+          withdrawer: result.config.withdrawer,
+        },
+      };
+    } catch (error) {
+      // If attester is not found on-chain, the call may revert or return default values
+      // We'll return null to indicate the attester is not on-chain
+      console.debug(
+        `Attester ${attesterAddress} not found on-chain or error occurred:`,
+        error,
+      );
+      return null;
+    }
   }
 }

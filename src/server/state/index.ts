@@ -12,6 +12,8 @@ import {
   DirDataSchema,
   type DirData,
   type PublisherDataMap,
+  type AttesterView,
+  AttesterViewSchema,
 } from "../../types/index.js";
 import fs from "fs/promises";
 import path from "path";
@@ -58,6 +60,7 @@ export const AttesterStateEntrySchema = z.object({
   attesterAddress: z.string(),
   state: z.nativeEnum(AttesterState),
   lastUpdated: z.date(),
+  onChainView: AttesterViewSchema.optional(),
 });
 
 export type AttesterStateEntry = z.infer<typeof AttesterStateEntrySchema>;
@@ -159,14 +162,36 @@ export const initState = async () => {
  */
 const serializeAttesterStates = (): Record<
   string,
-  { state: string; lastUpdated: string }
+  { state: string; lastUpdated: string; onChainView?: any }
 > => {
-  const serialized: Record<string, { state: string; lastUpdated: string }> = {};
+  const serialized: Record<
+    string,
+    { state: string; lastUpdated: string; onChainView?: any }
+  > = {};
 
   for (const [address, entry] of appState.attesterStates.entries()) {
     serialized[address] = {
       state: entry.state,
       lastUpdated: entry.lastUpdated.toISOString(),
+      ...(entry.onChainView && {
+        onChainView: {
+          status: entry.onChainView.status,
+          effectiveBalance: entry.onChainView.effectiveBalance.toString(),
+          exit: {
+            ...entry.onChainView.exit,
+            withdrawalId: entry.onChainView.exit.withdrawalId.toString(),
+            amount: entry.onChainView.exit.amount.toString(),
+            exitableAt: entry.onChainView.exit.exitableAt.toString(),
+          },
+          config: {
+            ...entry.onChainView.config,
+            publicKey: {
+              x: entry.onChainView.config.publicKey.x.toString(),
+              y: entry.onChainView.config.publicKey.y.toString(),
+            },
+          },
+        },
+      }),
     };
   }
 
@@ -177,17 +202,56 @@ const serializeAttesterStates = (): Record<
  * Deserialize attester state from JSON storage
  */
 const deserializeAttesterStates = (
-  data: Record<string, { state: string; lastUpdated: string }>,
+  data: Record<
+    string,
+    { state: string; lastUpdated: string; onChainView?: any }
+  >,
 ): void => {
-  for (const [address, { state, lastUpdated }] of Object.entries(data)) {
-    if (Object.values(AttesterState).includes(state as AttesterState)) {
+  for (const [address, record] of Object.entries(data)) {
+    if (Object.values(AttesterState).includes(record.state as AttesterState)) {
+      let onChainView: AttesterView | undefined;
+
+      // Deserialize on-chain view if present
+      if (record.onChainView) {
+        try {
+          onChainView = {
+            status: record.onChainView.status,
+            effectiveBalance: BigInt(record.onChainView.effectiveBalance),
+            exit: {
+              withdrawalId: BigInt(record.onChainView.exit.withdrawalId),
+              amount: BigInt(record.onChainView.exit.amount),
+              exitableAt: BigInt(record.onChainView.exit.exitableAt),
+              recipientOrWithdrawer:
+                record.onChainView.exit.recipientOrWithdrawer,
+              isRecipient: record.onChainView.exit.isRecipient,
+              exists: record.onChainView.exit.exists,
+            },
+            config: {
+              publicKey: {
+                x: BigInt(record.onChainView.config.publicKey.x),
+                y: BigInt(record.onChainView.config.publicKey.y),
+              },
+              withdrawer: record.onChainView.config.withdrawer,
+            },
+          };
+        } catch (error) {
+          console.warn(
+            `[State] Failed to deserialize on-chain view for attester ${address}:`,
+            error,
+          );
+        }
+      }
+
       appState.attesterStates.set(address, {
         attesterAddress: address,
-        state: state as AttesterState,
-        lastUpdated: new Date(lastUpdated),
+        state: record.state as AttesterState,
+        lastUpdated: new Date(record.lastUpdated),
+        onChainView,
       });
     } else {
-      console.warn(`[State] Invalid state "${state}" for attester ${address}`);
+      console.warn(
+        `[State] Invalid state "${record.state}" for attester ${address}`,
+      );
     }
   }
 };
@@ -445,6 +509,7 @@ export const updateAttesterState = (
     attesterAddress,
     state: newState,
     lastUpdated: new Date(),
+    onChainView: oldEntry?.onChainView, // Preserve on-chain view data
   };
 
   appState.attesterStates.set(attesterAddress, newEntry);
@@ -460,6 +525,41 @@ export const updateAttesterState = (
     } catch (error) {
       console.error("[State] Error in attester state change callback:", error);
     }
+  }
+
+  // Mark that we have pending changes to save
+  scheduleSaveAttesterStates();
+};
+
+/**
+ * Update attester on-chain view data
+ */
+export const updateAttesterOnChainView = (
+  attesterAddress: string,
+  onChainView: AttesterView | null,
+): void => {
+  const existingEntry = appState.attesterStates.get(attesterAddress);
+
+  if (!existingEntry) {
+    // If attester doesn't exist in state, create it with NEW state
+    const newEntry: AttesterStateEntry = {
+      attesterAddress,
+      state: AttesterState.NEW,
+      lastUpdated: new Date(),
+      onChainView: onChainView || undefined,
+    };
+    appState.attesterStates.set(attesterAddress, newEntry);
+    console.log(
+      `[State] Created new attester ${attesterAddress} with on-chain view`,
+    );
+  } else {
+    // Update existing entry with new on-chain view
+    const updatedEntry: AttesterStateEntry = {
+      ...existingEntry,
+      onChainView: onChainView || undefined,
+      lastUpdated: new Date(),
+    };
+    appState.attesterStates.set(attesterAddress, updatedEntry);
   }
 
   // Mark that we have pending changes to save
