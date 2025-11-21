@@ -39,9 +39,9 @@ fi
 echo "Detecting Node.js and npm paths for user $ACTUAL_USER..."
 
 # Try multiple methods to find node/npm
-# Method 1: Using bash -l -c (login shell)
-NODE_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'which node 2>/dev/null' 2>/dev/null | grep -v "^$" | head -n1)
-NPM_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'which npm 2>/dev/null' 2>/dev/null | grep -v "^$" | head -n1)
+# Method 1: Using bash -l -c (login shell) - get only lines starting with /
+NODE_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'which node 2>/dev/null' 2>/dev/null | grep '^/' | head -n1)
+NPM_PATH=$(sudo -u "$ACTUAL_USER" bash -l -c 'which npm 2>/dev/null' 2>/dev/null | grep '^/' | head -n1)
 
 # Method 2: If method 1 fails, try with explicit PATH from common locations
 if [ -z "$NODE_PATH" ]; then
