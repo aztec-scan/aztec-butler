@@ -12,8 +12,6 @@ import type {
   PublisherDataMap,
 } from "../../types/index.js";
 
-const RECOMMENDED_ETH_PER_ATTESTER = parseEther("0.1");
-
 /**
  * Scraper for publisher ETH balances and required top-ups
  * Similar to the CLI command get-publisher-eth.ts but runs periodically
@@ -23,9 +21,11 @@ export class PublisherScraper extends AbstractScraper {
 
   private ethClient: EthereumClient | null = null;
   private lastScrapedData: PublisherDataMap | null = null;
+  private recommendedEthPerAttester: bigint = 0n
 
   constructor(private config: ButlerConfig) {
     super();
+    this.recommendedEthPerAttester = parseEther(config.MIN_ETH_PER_ATTESTER)
   }
 
   async init(): Promise<void> {
@@ -89,6 +89,7 @@ export class PublisherScraper extends AbstractScraper {
               currentBalance: 0n,
               requiredTopUp: 0n,
             };
+
             pub.load += 1;
             publishers[publisherKey] = pub;
           } else {
@@ -121,7 +122,7 @@ export class PublisherScraper extends AbstractScraper {
 
         // Calculate required top-up
         const requiredTopUp =
-          BigInt(Math.ceil(info.load)) * RECOMMENDED_ETH_PER_ATTESTER -
+          BigInt(Math.ceil(info.load)) * this.recommendedEthPerAttester -
           currentBalance;
 
         const publisherData: PublisherData = {

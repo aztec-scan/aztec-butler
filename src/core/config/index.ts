@@ -55,6 +55,9 @@ export const initConfig = async (
       .length(66)
       .optional()
       .parse(process.env.MULTISIG_PROPOSER_PRIVATE_KEY),
+    MIN_ETH_PER_ATTESTER: z
+      .string()
+      .parse(process.env.MIN_ETH_PER_ATTESTER),
     SAFE_API_KEY: z.string().optional().parse(process.env.SAFE_API_KEY),
     METRICS_BEARER_TOKEN: z
       .string()
