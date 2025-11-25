@@ -14,6 +14,8 @@ import {
   type PublisherDataMap,
   type AttesterView,
   AttesterViewSchema,
+  PublisherData,
+  PublisherDataEntry,
 } from "../../types/index.js";
 import fs from "fs/promises";
 import path from "path";
@@ -129,6 +131,13 @@ type AttesterStateChangeCallback = (
   oldState: AttesterState | undefined,
 ) => void;
 const attesterStateChangeCallbacks: AttesterStateChangeCallback[] = [];
+
+type PublisherBalanceUpdateCallback = (
+  publisherAddress: string,
+  currentBalance: PublisherData["currentBalance"],
+  requiredTopup: PublisherData["requiredTopup"],
+) => void;
+const PublisherBalanceUpdateCallbacks: PublisherBalanceUpdateCallback[] = [];
 
 /**
  * State file path (using env-paths data directory)
@@ -500,7 +509,7 @@ export const updateAttesterState = (
   ) {
     console.error(
       `ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
-        `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
+      `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
   }
@@ -676,12 +685,51 @@ export const getDirData = (): DirData | null => {
 export const updatePublisherData = (
   newPublisherData: PublisherDataMap | null,
 ) => {
+  if (!newPublisherData) return
+
+  newPublisherData.forEach((data, privKey) => {
+    if (isNewPublisherData(privKey, data)) {
+      for (const callback of PublisherBalanceUpdateCallbacks) {
+        try {
+          callback(data.publisherAddress, data.currentBalance, data.requiredTopup);
+        } catch (error) {
+          console.error("[State] Error in publisher data change callback:", error);
+        }
+      }
+    }
+  })
+
   appState.publisherData = newPublisherData;
 };
+
+const isNewPublisherData = (address: string, data: PublisherDataEntry) => {
+  if (!appState.publisherData) return true
+  if (appState.publisherData.get(address) == data) return false
+  return true // as catch-all just always update 
+}
 
 /**
  * Get publisher data
  */
 export const getPublisherData = (): PublisherDataMap | null => {
   return appState.publisherData;
+};
+
+/**
+ * Get data for a specific publisher
+ */
+export const getPublisherDataEntry = (
+  publisherAddress: string,
+): PublisherDataEntry | undefined => {
+  if (!appState.publisherData) return undefined
+  return appState.publisherData.get(publisherAddress);
+};
+
+/**
+ * Register a callback for publisher balance updates
+ */
+export const onPublisherBalanceUpdate = (
+  callback: PublisherBalanceUpdateCallback,
+): void => {
+  PublisherBalanceUpdateCallbacks.push(callback);
 };

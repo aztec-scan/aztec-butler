@@ -8,7 +8,7 @@
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { SafeGlobalClient } from "../../core/components/SafeGlobalClient.js";
 import { AttesterNewStateHandler } from "./attester-new-state-handler.js";
-
+import { PublisherTopUpHandler } from "./publisher-top-up-handler.js"
 export interface HandlersConfig {
   ethClient: EthereumClient;
   providerId: bigint;
@@ -16,6 +16,7 @@ export interface HandlersConfig {
 }
 
 let attesterNewStateHandler: AttesterNewStateHandler | null = null;
+let publisherTopUpHandler: PublisherTopUpHandler | null = null;
 
 // Default debounce delay: 30 seconds
 // This means if attesters keep arriving within 30s windows, processing is delayed
@@ -26,6 +27,15 @@ const DEBOUNCE_DELAY_MS = 30_000;
  * Initialize event handlers
  */
 export const initHandlers = async (config: HandlersConfig) => {
+  initAttesterNewStateHandler(config)
+  initPublisherTopUpHandler(config)
+
+  console.log(
+    `Handlers initialized (NEW attesters will be batched with ${DEBOUNCE_DELAY_MS / 1000}s debounce)`,
+  );
+};
+
+const initAttesterNewStateHandler = async (config: HandlersConfig) => {
   // Initialize attester NEW state handler with debounced batch processing
   attesterNewStateHandler = new AttesterNewStateHandler(
     config.ethClient,
@@ -38,11 +48,14 @@ export const initHandlers = async (config: HandlersConfig) => {
   // This handles attesters that were already in NEW state from a previous run
   // All processing goes through the same debounced path for consistency
   attesterNewStateHandler.triggerDebouncedProcessing();
+}
 
-  console.log(
-    `Handlers initialized (NEW attesters will be batched with ${DEBOUNCE_DELAY_MS / 1000}s debounce)`,
+const initPublisherTopUpHandler = async (config: HandlersConfig) => {
+  // Initialize publisher top up handler
+  publisherTopUpHandler = new PublisherTopUpHandler(
+    config.safeClient,
   );
-};
+}
 
 /**
  * Shutdown handlers
@@ -53,6 +66,7 @@ export const shutdownHandlers = async () => {
     attesterNewStateHandler.cancelPendingProcessing();
   }
 
-  // Cleanup handler
+  // Cleanup handlers
   attesterNewStateHandler = null;
+  publisherTopUpHandler = null;
 };

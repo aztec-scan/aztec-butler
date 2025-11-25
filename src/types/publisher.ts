@@ -20,3 +20,5 @@ export type PublisherData = z.infer<typeof PublisherDataSchema>;
  * Map of publisher private keys to their data
  */
 export type PublisherDataMap = Map<string, PublisherData>;
+
+export type PublisherDataEntry = z.infer<typeof PublisherDataSchema>;
