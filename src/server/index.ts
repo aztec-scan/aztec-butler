@@ -157,7 +157,7 @@ export const startServer = async () => {
         if (!config.MULTISIG_PROPOSER_PRIVATE_KEY || !config.SAFE_API_KEY) {
           throw new Error(
             "SAFE_ADDRESS is configured but MULTISIG_PROPOSER_PRIVATE_KEY or SAFE_API_KEY is missing. " +
-              "Both are required for Safe multisig functionality.",
+            "Both are required for Safe multisig functionality.",
           );
         }
 
@@ -171,6 +171,7 @@ export const startServer = async () => {
         console.log(
           `SafeGlobal client initialized for Safe at ${config.SAFE_ADDRESS}`,
         );
+        safeClient.startPendingTransactionsPoll()
       }
 
       await initHandlers({
