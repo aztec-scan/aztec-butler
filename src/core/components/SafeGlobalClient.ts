@@ -232,14 +232,14 @@ export class SafeGlobalClient {
       );
 
       // Propose transaction to the Safe Transaction Service
-      // await this.apiKit.proposeTransaction({
-      //   safeAddress: this.config.safeAddress,
-      //   safeTransactionData: safeTransaction.data,
-      //   safeTxHash,
-      //   senderAddress: this.proposerAddress,
-      //   senderSignature: signature.data,
-      //   origin: "aztec-butler automatic proposal",
-      // });
+      await this.apiKit.proposeTransaction({
+        safeAddress: this.config.safeAddress,
+        safeTransactionData: safeTransaction.data,
+        safeTxHash,
+        senderAddress: this.proposerAddress,
+        senderSignature: signature.data,
+        origin: "aztec-butler automatic proposal",
+      });
 
       console.log("[SafeGlobalClient] ✓ Transaction proposed successfully!");
       console.log("[SafeGlobalClient] Safe TX Hash:", safeTxHash);
