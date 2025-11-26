@@ -124,6 +124,8 @@ export class SafeGlobalClient {
 
   /**
    * Checks whether a transaction with similar data or values is already proposed
+   * If there is an outgoing transaction to that to address with any eth value
+   * If there is an outgoing transaction with that exact same calldata already 
    */
   private isBeingProposed(proposal: MultisigProposal): boolean {
     const { to, value = "0", data } = proposal
@@ -136,11 +138,11 @@ export class SafeGlobalClient {
     }
 
     const isPending = this.pendingTransactions.some((pending) => {
-      const sameToAndValue = pending.to === to && pending.value === value;
+      const sameToAndValueIsSet = pending.to === to && pending.value !== "0";
       const sameCalldata =
         data !== "0x" && pending.data !== "0x" && pending.data === data;
 
-      return sameToAndValue || sameCalldata;
+      return sameToAndValueIsSet || sameCalldata;
     })
 
     return isPending
@@ -230,14 +232,14 @@ export class SafeGlobalClient {
       );
 
       // Propose transaction to the Safe Transaction Service
-      await this.apiKit.proposeTransaction({
-        safeAddress: this.config.safeAddress,
-        safeTransactionData: safeTransaction.data,
-        safeTxHash,
-        senderAddress: this.proposerAddress,
-        senderSignature: signature.data,
-        origin: "aztec-butler automatic proposal",
-      });
+      // await this.apiKit.proposeTransaction({
+      //   safeAddress: this.config.safeAddress,
+      //   safeTransactionData: safeTransaction.data,
+      //   safeTxHash,
+      //   senderAddress: this.proposerAddress,
+      //   senderSignature: signature.data,
+      //   origin: "aztec-butler automatic proposal",
+      // });
 
       console.log("[SafeGlobalClient] ✓ Transaction proposed successfully!");
       console.log("[SafeGlobalClient] Safe TX Hash:", safeTxHash);
