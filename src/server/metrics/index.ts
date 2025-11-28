@@ -8,3 +8,4 @@ export { initConfigMetrics, updateConfigMetric } from "./config-metrics.js";
 export { initStakingProviderMetrics } from "./staking-provider-metrics.js";
 export { initAttesterMetrics } from "./attester-metrics.js";
 export { initPublisherMetrics } from "./publisher-metrics.js";
+export { initStakingRewardsMetrics } from "./staking-rewards-metrics.js";

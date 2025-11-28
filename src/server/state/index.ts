@@ -16,6 +16,11 @@ import {
   AttesterViewSchema,
   PublisherData,
   PublisherDataEntry,
+  StakingRewardsMap,
+  StakingRewardsSnapshot,
+  StakingRewardsSnapshotSchema,
+  StakingRewardsDailyAggregate,
+  StakingRewardsDailyAggregateSchema,
 } from "../../types/index.js";
 import fs from "fs/promises";
 import path from "path";
@@ -80,6 +85,8 @@ export const AppStateSchema = z.object({
 export type AppState = z.infer<typeof AppStateSchema> & {
   attesterStates: AttesterStateMap;
   publisherData: PublisherDataMap | null;
+  stakingRewardsData: StakingRewardsMap | null;
+  stakingRewardsHistory: StakingRewardsSnapshot[];
 };
 
 /**
@@ -117,6 +124,8 @@ let appState: AppState = {
   stakingProviderData: null,
   attesterStates: new Map(),
   publisherData: null,
+  stakingRewardsData: null,
+  stakingRewardsHistory: [],
 };
 
 /**
@@ -143,12 +152,15 @@ const PublisherBalanceUpdateCallbacks: PublisherBalanceUpdateCallback[] = [];
  * State file path (using env-paths data directory)
  */
 let stateFilePath: string | null = null;
+let stakingRewardsHistoryFilePath: string | null = null;
 
 /**
  * Debounce timer for saving state to file
  */
 let saveTimer: NodeJS.Timeout | null = null;
+let stakingRewardsSaveTimer: NodeJS.Timeout | null = null;
 const SAVE_DEBOUNCE_MS = 5000; // Save at most once every 5 seconds
+const STAKING_HISTORY_SAVE_DEBOUNCE_MS = 5000;
 
 /**
  * Initialize state management with persistence
@@ -160,10 +172,18 @@ export const initState = async () => {
   const dataDir = envPath(PACKAGE_NAME, { suffix: "" }).data;
   await fs.mkdir(dataDir, { recursive: true });
   stateFilePath = path.join(dataDir, "attester-state.json");
+  stakingRewardsHistoryFilePath = path.join(
+    dataDir,
+    "staking-rewards-history.json",
+  );
   console.log(`[State] State file path: ${stateFilePath}`);
+  console.log(
+    `[State] Staking rewards history file path: ${stakingRewardsHistoryFilePath}`,
+  );
 
   // Load state from file if it exists
   await loadAttesterStatesFromFile();
+  await loadStakingRewardsHistoryFromFile();
 };
 
 /**
@@ -289,6 +309,94 @@ const loadAttesterStatesFromFile = async (): Promise<void> => {
   }
 };
 
+type SerializedStakingRewardsSnapshot = {
+  coinbase: string;
+  attesters: string[];
+  pendingRewards: string;
+  ourShare: string;
+  otherShare: string;
+  totalAllocation: string;
+  ourAllocation: string;
+  recipients: { address: string; allocation: string }[];
+  lastUpdated: string;
+  blockNumber: string;
+  timestamp: string;
+};
+
+const serializeStakingRewardsHistory = (): SerializedStakingRewardsSnapshot[] =>
+  appState.stakingRewardsHistory.map((snapshot) => ({
+    coinbase: snapshot.coinbase,
+    attesters: snapshot.attesters,
+    pendingRewards: snapshot.pendingRewards.toString(),
+    ourShare: snapshot.ourShare.toString(),
+    otherShare: snapshot.otherShare.toString(),
+    totalAllocation: snapshot.totalAllocation.toString(),
+    ourAllocation: snapshot.ourAllocation.toString(),
+    recipients: snapshot.recipients.map((recipient) => ({
+      address: recipient.address,
+      allocation: recipient.allocation.toString(),
+    })),
+    lastUpdated: snapshot.lastUpdated.toISOString(),
+    blockNumber: snapshot.blockNumber.toString(),
+    timestamp: snapshot.timestamp.toISOString(),
+  }));
+
+const deserializeStakingRewardsHistory = (
+  data: SerializedStakingRewardsSnapshot[],
+) => {
+  for (const entry of data) {
+    try {
+      const parsed = StakingRewardsSnapshotSchema.parse({
+        ...entry,
+        pendingRewards: BigInt(entry.pendingRewards),
+        ourShare: BigInt(entry.ourShare),
+        otherShare: BigInt(entry.otherShare),
+        totalAllocation: BigInt(entry.totalAllocation),
+        ourAllocation: BigInt(entry.ourAllocation),
+        recipients: entry.recipients.map((recipient) => ({
+          ...recipient,
+          allocation: BigInt(recipient.allocation),
+        })),
+        lastUpdated: new Date(entry.lastUpdated),
+        blockNumber: BigInt(entry.blockNumber),
+        timestamp: new Date(entry.timestamp),
+      });
+      appState.stakingRewardsHistory.push(parsed);
+    } catch (error) {
+      console.warn(
+        `[State] Failed to deserialize staking rewards snapshot at block ${entry.blockNumber}:`,
+        error,
+      );
+    }
+  }
+};
+
+const loadStakingRewardsHistoryFromFile = async (): Promise<void> => {
+  if (!stakingRewardsHistoryFilePath) {
+    return;
+  }
+
+  try {
+    const fileContent = await fs.readFile(
+      stakingRewardsHistoryFilePath,
+      "utf-8",
+    );
+    const data: SerializedStakingRewardsSnapshot[] = JSON.parse(fileContent);
+    deserializeStakingRewardsHistory(data);
+    console.log(
+      `[State] Loaded ${appState.stakingRewardsHistory.length} staking rewards snapshots from file`,
+    );
+  } catch (error: any) {
+    if (error.code === "ENOENT") {
+      console.log(
+        "[State] No existing staking rewards history file found, starting fresh",
+      );
+    } else {
+      console.error("[State] Error loading staking rewards history:", error);
+    }
+  }
+};
+
 /**
  * Save attester states to file
  */
@@ -308,6 +416,28 @@ export const saveAttesterStatesToFile = async (): Promise<void> => {
   }
 };
 
+export const saveStakingRewardsHistoryToFile = async (): Promise<void> => {
+  if (!stakingRewardsHistoryFilePath) {
+    return;
+  }
+
+  try {
+    const serialized = serializeStakingRewardsHistory();
+    await fs.writeFile(
+      stakingRewardsHistoryFilePath,
+      JSON.stringify(serialized, null, 2),
+    );
+    console.log(
+      `[State] Saved ${appState.stakingRewardsHistory.length} staking rewards snapshots to file (${stakingRewardsHistoryFilePath})`,
+    );
+  } catch (error) {
+    console.error(
+      "[State] Error saving staking rewards history to file:",
+      error,
+    );
+  }
+};
+
 /**
  * Schedule a debounced save to file
  * This prevents excessive file writes when many state updates occur
@@ -323,6 +453,17 @@ const scheduleSaveAttesterStates = (): void => {
     void saveAttesterStatesToFile();
     saveTimer = null;
   }, SAVE_DEBOUNCE_MS);
+};
+
+const scheduleSaveStakingRewardsHistory = (): void => {
+  if (stakingRewardsSaveTimer) {
+    clearTimeout(stakingRewardsSaveTimer);
+  }
+
+  stakingRewardsSaveTimer = setTimeout(() => {
+    void saveStakingRewardsHistoryToFile();
+    stakingRewardsSaveTimer = null;
+  }, STAKING_HISTORY_SAVE_DEBOUNCE_MS);
 };
 
 /**
@@ -733,3 +874,103 @@ export const onPublisherBalanceUpdate = (
 ): void => {
   PublisherBalanceUpdateCallbacks.push(callback);
 };
+
+/**
+ * Update staking rewards data map
+ */
+export const updateStakingRewardsData = (
+  rewardsData: StakingRewardsMap | null,
+) => {
+  appState.stakingRewardsData = rewardsData;
+};
+
+/**
+ * Get the latest staking rewards data map
+ */
+export const getStakingRewardsData = (): StakingRewardsMap | null => {
+  return appState.stakingRewardsData;
+};
+
+/**
+ * Record staking rewards snapshots and persist to disk
+ */
+export const recordStakingRewardsSnapshots = (
+  snapshots: StakingRewardsSnapshot[],
+): void => {
+  if (!snapshots.length) {
+    return;
+  }
+
+  let added = false;
+  for (const snapshot of snapshots) {
+    const existing = appState.stakingRewardsHistory.find(
+      (entry) =>
+        entry.coinbase.toLowerCase() === snapshot.coinbase.toLowerCase() &&
+        entry.blockNumber === snapshot.blockNumber,
+    );
+
+    if (existing) {
+      continue;
+    }
+
+    appState.stakingRewardsHistory.push(snapshot);
+    added = true;
+  }
+
+  if (added) {
+    appState.stakingRewardsHistory.sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+    );
+    scheduleSaveStakingRewardsHistory();
+  }
+};
+
+/**
+ * Get recorded staking rewards history snapshots
+ */
+export const getStakingRewardsHistory = (): StakingRewardsSnapshot[] => {
+  return appState.stakingRewardsHistory;
+};
+
+/**
+ * Get timestamp of latest staking rewards snapshot (if any)
+ */
+export const getLatestStakingRewardsSnapshotTimestamp = (): Date | null => {
+  const last =
+    appState.stakingRewardsHistory[appState.stakingRewardsHistory.length - 1];
+  return last ? last.timestamp : null;
+};
+
+/**
+ * Aggregate staking rewards snapshots into daily buckets for reporting
+ */
+export const getStakingRewardsDailyAggregates =
+  (): StakingRewardsDailyAggregate[] => {
+    const aggregates = new Map<string, StakingRewardsDailyAggregate>();
+
+    for (const snapshot of appState.stakingRewardsHistory) {
+      const dateKey = snapshot.timestamp.toISOString().slice(0, 10);
+      const mapKey = `${dateKey}:${snapshot.coinbase.toLowerCase()}`;
+      const current =
+        aggregates.get(mapKey) ?? {
+          date: dateKey,
+          coinbase: snapshot.coinbase,
+          totalPendingRewards: 0n,
+          totalOurShare: 0n,
+          totalOtherShare: 0n,
+          sampleCount: 0,
+        };
+
+      aggregates.set(mapKey, {
+        ...current,
+        totalPendingRewards: current.totalPendingRewards + snapshot.pendingRewards,
+        totalOurShare: current.totalOurShare + snapshot.ourShare,
+        totalOtherShare: current.totalOtherShare + snapshot.otherShare,
+        sampleCount: current.sampleCount + 1,
+      });
+    }
+
+    return Array.from(aggregates.values()).map((entry) =>
+      StakingRewardsDailyAggregateSchema.parse(entry),
+    );
+  };

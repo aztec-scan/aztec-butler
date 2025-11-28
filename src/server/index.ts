@@ -5,6 +5,7 @@ import {
   initStakingProviderMetrics,
   initAttesterMetrics,
   initPublisherMetrics,
+  initStakingRewardsMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
 import {
@@ -12,6 +13,7 @@ import {
   StakingProviderScraper,
   PublisherScraper,
   RollupScraper,
+  StakingRewardsScraper,
 } from "./scrapers/index.js";
 import { initWatchers, shutdownWatchers } from "./watchers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
@@ -111,6 +113,20 @@ export const startServer = async () => {
   const publisherScraper = new PublisherScraper(config);
   scraperManager.register(publisherScraper, 30_000);
 
+  // Register staking rewards scraper (default hourly interval)
+  let stakingRewardsScraper: StakingRewardsScraper | null = null;
+  if (config.SAFE_ADDRESS) {
+    stakingRewardsScraper = new StakingRewardsScraper(config);
+    scraperManager.register(
+      stakingRewardsScraper,
+      config.STAKING_REWARDS_SCRAPE_INTERVAL_MS,
+    );
+  } else {
+    console.log(
+      "SAFE_ADDRESS not configured, skipping staking rewards scraper",
+    );
+  }
+
   // TODO: Add more scrapers here with their own intervals
   // scraperManager.register(new NodeScraper(config), 60_000);
   // scraperManager.register(new L1Scraper(config), 120_000);
@@ -127,11 +143,15 @@ export const startServer = async () => {
   initLog("Initializing publisher metrics...");
   initPublisherMetrics();
 
+  initLog("Initializing staking rewards metrics...");
+  initStakingRewardsMetrics();
+
   initLog("Initializing watchers...");
   await initWatchers({
     dataDirPath: config.AZTEC_DOCKER_DIR,
   });
 
+  let safeClient: SafeGlobalClient | null = null;
   initLog("Initializing handlers...");
   if (config.PROVIDER_ADMIN_ADDRESS) {
     // Get staking provider data from scraper to initialize handler
@@ -146,12 +166,15 @@ export const startServer = async () => {
       // Create Ethereum client for handler
       const ethClient = new EthereumClient({
         rpcUrl: config.ETHEREUM_NODE_URL,
+        ...(config.ETHEREUM_ARCHIVE_NODE_URL
+          ? { archiveRpcUrl: config.ETHEREUM_ARCHIVE_NODE_URL }
+          : {}),
         chainId: nodeInfo.l1ChainId,
         rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
       });
 
       // Create SafeGlobal client if configured
-      let safeClient: SafeGlobalClient | null = null;
+
       if (config.SAFE_ADDRESS) {
         // Validate that required Safe credentials are present
         if (!config.MULTISIG_PROPOSER_PRIVATE_KEY || !config.SAFE_API_KEY) {
@@ -215,6 +238,13 @@ export const startServer = async () => {
       console.log("Shutting down scrapers...");
       await scraperManager.shutdown();
       console.log("Scrapers shut down");
+
+      // Shutdown scrapers
+      if (safeClient) {
+        console.log("Shutting down Safe client poller...");
+        safeClient.cancelPendingTransactionsPoll()
+        console.log("Safe client shut down");
+      }
 
       // Shutdown metrics
       const { exporter, authServer } = getMetricsRegistry();

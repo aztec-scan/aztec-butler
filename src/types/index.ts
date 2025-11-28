@@ -6,3 +6,4 @@ export * from "./staking-provider.js";
 export * from "./publisher.js";
 export * from "./directory.js";
 export * from "./staking-registry-abi.js";
+export * from "./staking-rewards.js";
