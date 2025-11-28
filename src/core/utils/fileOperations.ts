@@ -74,7 +74,7 @@ export const getDockerDirData = async (dockerDirPath: string) => {
   }
   for (const reqFile of [".env", "keys", ATTESTER_REGISTRATIONS_DIR_NAME]) {
     if (!files.includes(reqFile)) {
-      throw new Error(`Missing required file or directory: ${reqFile}`);
+      console.warn(`Missing required file or directory: ${reqFile}`);
     }
   }
   for (const file of files) {
