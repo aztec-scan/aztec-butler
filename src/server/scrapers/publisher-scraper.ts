@@ -52,6 +52,9 @@ export class PublisherScraper extends AbstractScraper {
     // Initialize Ethereum client using node info
     this.ethClient = new EthereumClient({
       rpcUrl: this.config.ETHEREUM_NODE_URL,
+      ...(this.config.ETHEREUM_ARCHIVE_NODE_URL
+        ? { archiveRpcUrl: this.config.ETHEREUM_ARCHIVE_NODE_URL }
+        : {}),
       chainId: nodeInfo.l1ChainId,
       rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
     });

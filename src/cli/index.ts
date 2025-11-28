@@ -35,6 +35,9 @@ export const runCli = async () => {
   // Initialize Ethereum client
   const ethClient = new EthereumClient({
     rpcUrl: config.ETHEREUM_NODE_URL,
+    ...(config.ETHEREUM_ARCHIVE_NODE_URL
+      ? { archiveRpcUrl: config.ETHEREUM_ARCHIVE_NODE_URL }
+      : {}),
     chainId: nodeInfo.l1ChainId,
     rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
   });

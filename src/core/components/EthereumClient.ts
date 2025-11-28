@@ -11,8 +11,10 @@ import {
   getAddress,
   getContract,
   http,
+  parseAbiItem,
   type Address,
   type GetContractReturnType,
+  type Hex,
   type PublicClient,
 } from "viem";
 import { mainnet, sepolia } from "viem/chains";
@@ -31,8 +33,15 @@ const SUPPORTED_CHAINS = [sepolia, mainnet];
 
 type RollupContract = GetContractReturnType<typeof RollupAbi, PublicClient>;
 
+const SPLIT_UPDATED_EVENT = parseAbiItem(
+  "event SplitUpdated((address[] recipients,uint256[] allocations,uint256 totalAllocation,uint16 distributorFee) split)",
+);
+const ADDRESS_MASK = (1n << 160n) - 1n;
+const LOG_RANGE_LIMIT = 50_000n;
+
 export interface EthereumClientConfig {
   rpcUrl: string;
+  archiveRpcUrl?: string;
   chainId: number;
   rollupAddress: Address;
 }
@@ -44,8 +53,10 @@ export type CalldataExport = {
 
 export class EthereumClient {
   private readonly client: PublicClient;
+  private readonly archiveClient?: PublicClient;
   private readonly config: EthereumClientConfig;
   private rollupContract?: RollupContract;
+  private archiveRollupContract?: RollupContract;
   private stakingRegistryContract?: StakingRegistryContract;
   private providerDataCache: Map<string, StakingProviderData | null> =
     new Map();
@@ -62,6 +73,13 @@ export class EthereumClient {
       transport: http(config.rpcUrl),
       chain,
     });
+
+    if (config.archiveRpcUrl) {
+      this.archiveClient = createPublicClient({
+        transport: http(config.archiveRpcUrl),
+        chain,
+      });
+    }
   }
 
   /**
@@ -69,6 +87,13 @@ export class EthereumClient {
    */
   getPublicClient(): PublicClient {
     return this.client;
+  }
+
+  /**
+   * Get archive client (if configured)
+   */
+  getArchiveClient(): PublicClient | null {
+    return this.archiveClient ?? null;
   }
 
   /**
@@ -90,6 +115,23 @@ export class EthereumClient {
       });
     }
     return this.rollupContract;
+  }
+
+  /**
+   * Get rollup contract using archive client when available (for historical calls)
+   */
+  getRollupContractForHistorical(): RollupContract {
+    if (this.archiveClient) {
+      if (!this.archiveRollupContract) {
+        this.archiveRollupContract = getContract({
+          address: this.config.rollupAddress,
+          abi: RollupAbi,
+          client: this.archiveClient,
+        });
+      }
+      return this.archiveRollupContract;
+    }
+    return this.getRollupContract();
   }
 
   /**
@@ -134,7 +176,8 @@ export class EthereumClient {
    * Get Etherscan address URL for the current chain
    */
   private getEtherscanAddressUrl(address: Address): string {
-    const etherscanBaseUrl = this.client.chain?.blockExplorers?.default.url!;
+    const etherscanBaseUrl =
+      this.client.chain?.blockExplorers?.default.url!;
     return `${etherscanBaseUrl}/address/${address}`;
   }
 
@@ -142,19 +185,20 @@ export class EthereumClient {
    * Print important contract information
    */
   async printImportantInfo(): Promise<void> {
-    console.log(`Ethereum chain: ${this.client?.chain?.id} (${this.client?.chain?.name})
+    const primaryClient = this.client;
+    console.log(`Ethereum chain: ${primaryClient?.chain?.id} (${primaryClient?.chain?.name})
 `);
     const rollupContract = this.getRollupContract();
     const gse = await rollupContract.read.getGSE();
     const governance = await getContract({
       address: gse,
       abi: GSEAbi,
-      client: this.client,
+      client: primaryClient,
     }).read.getGovernance();
     const governanceConfig = await getContract({
       address: governance,
       abi: GovernanceAbi,
-      client: this.client,
+      client: primaryClient,
     }).read.getConfiguration();
     // NOTE: withdrawal delay copied from https://github.com/AztecProtocol/l1-contracts/blob/f0b17231361e40b6802e927fda98b8d5f84c1c24/src/governance/libraries/ConfigurationLib.sol#L36
     const { votingDelay, votingDuration, executionDelay } = governanceConfig;
@@ -173,7 +217,7 @@ export class EthereumClient {
     const feeTokenContract = getContract({
       address: await rollupContract.read.getFeeAsset(),
       abi: erc20Abi,
-      client: this.client,
+      client: primaryClient,
     });
     console.log(`Fee token(${this.getEtherscanAddressUrl(feeTokenContract.address)}):
 name: ${await feeTokenContract.read.name()}
@@ -183,7 +227,7 @@ supply: ${await feeTokenContract.read.totalSupply()}
     const stakingAssetContract = getContract({
       address: await rollupContract.read.getStakingAsset(),
       abi: erc20Abi,
-      client: this.client,
+      client: primaryClient,
     });
     console.log(`Staking token(${this.getEtherscanAddressUrl(stakingAssetContract.address)}):
 name: ${await stakingAssetContract.read.name()}
@@ -268,6 +312,79 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     }
 
     return queue;
+  }
+
+  /**
+   * Fetch the latest SplitUpdated event data for a split (coinbase) contract
+   */
+  async getLatestSplitAllocations(
+    splitAddress: string,
+    fromBlock?: bigint,
+    toBlock?: bigint,
+  ): Promise<{
+    recipients: string[];
+    allocations: bigint[];
+    totalAllocation: bigint;
+  } | null> {
+    const address = getAddress(splitAddress);
+    const latestBlock = toBlock ?? (await this.client.getBlockNumber());
+    const lowerBound = fromBlock ?? 0n;
+
+    const fetchLogs = async (
+      rangeFrom: bigint,
+      rangeTo: bigint,
+    ): Promise<any[]> => {
+      try {
+        return await this.client.getLogs({
+          address,
+          event: SPLIT_UPDATED_EVENT,
+          fromBlock: rangeFrom,
+          toBlock: rangeTo,
+        });
+      } catch (err) {
+        if (!this.archiveClient) {
+          throw err;
+        }
+        console.warn(
+          "[EthereumClient] Primary RPC getLogs failed, trying archive client...",
+          err,
+        );
+        return await this.archiveClient.getLogs({
+          address,
+          event: SPLIT_UPDATED_EVENT,
+          fromBlock: rangeFrom,
+          toBlock: rangeTo,
+        });
+      }
+    };
+
+    let logs: any[] = [];
+    let windowEnd = latestBlock;
+    while (windowEnd >= lowerBound) {
+      const windowStart =
+        windowEnd > LOG_RANGE_LIMIT
+          ? windowEnd - LOG_RANGE_LIMIT + 1n
+          : 0n;
+      const rangeFrom = windowStart < lowerBound ? lowerBound : windowStart;
+      logs = await fetchLogs(rangeFrom, windowEnd);
+      if (logs.length > 0) {
+        break;
+      }
+      if (rangeFrom === 0n || rangeFrom === lowerBound) {
+        break;
+      }
+      windowEnd = rangeFrom - 1n;
+    }
+
+    if (!logs.length) {
+      return null;
+    }
+
+    const latestLog = logs[logs.length - 1];
+    if (!latestLog) {
+      return null;
+    }
+    return this.decodeSplitUpdatedData(latestLog.data);
   }
 
   /**
@@ -512,5 +629,76 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
       );
       return null;
     }
+  }
+
+  private decodeSplitUpdatedData(data: Hex): {
+    recipients: string[];
+    allocations: bigint[];
+    totalAllocation: bigint;
+  } {
+    const payload = data.startsWith("0x") ? data.slice(2) : data;
+    if (!payload || payload.length % 64 !== 0) {
+      throw new Error("Invalid SplitUpdated payload");
+    }
+
+    const words: bigint[] = [];
+    for (let i = 0; i < payload.length; i += 64) {
+      words.push(BigInt(`0x${payload.slice(i, i + 64)}`));
+    }
+
+    if (words.length === 0) {
+      throw new Error("Empty SplitUpdated payload");
+    }
+
+    const tupleBaseWord = words[0];
+    if (tupleBaseWord === undefined) {
+      throw new Error("Invalid SplitUpdated payload");
+    }
+
+    const tupleBaseIndex = Number(tupleBaseWord / 32n);
+    const addressesOffsetBytes = words[tupleBaseIndex] ?? 0n;
+    const allocationsOffsetBytes = words[tupleBaseIndex + 1] ?? 0n;
+    const totalAllocation = words[tupleBaseIndex + 2] ?? 0n;
+
+    const addressesIndex =
+      tupleBaseIndex + Number(addressesOffsetBytes / 32n);
+    const allocationsIndex =
+      tupleBaseIndex + Number(allocationsOffsetBytes / 32n);
+
+    const recipientCount = Number(words[addressesIndex] ?? 0n);
+    const allocationCount = Number(words[allocationsIndex] ?? 0n);
+
+    if (recipientCount !== allocationCount) {
+      throw new Error(
+        "SplitUpdated payload mismatch in recipient/allocation length",
+      );
+    }
+
+    const recipients: string[] = [];
+    const allocations: bigint[] = [];
+
+    for (let i = 0; i < recipientCount; i++) {
+      const word = words[addressesIndex + 1 + i];
+      if (word === undefined) {
+        throw new Error("Incomplete SplitUpdated payload (recipients)");
+      }
+      const masked = word & ADDRESS_MASK;
+      const hexValue = masked.toString(16).padStart(40, "0");
+      recipients.push(getAddress(`0x${hexValue}`));
+    }
+
+    for (let i = 0; i < allocationCount; i++) {
+      const word = words[allocationsIndex + 1 + i];
+      if (word === undefined) {
+        throw new Error("Incomplete SplitUpdated payload (allocations)");
+      }
+      allocations.push(word);
+    }
+
+    return {
+      recipients,
+      allocations,
+      totalAllocation,
+    };
   }
 }

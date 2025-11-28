@@ -33,6 +33,11 @@ export const initConfig = async (
       .string()
       .url()
       .parse(process.env.ETHEREUM_NODE_URL || "http://localhost:8545"),
+    ETHEREUM_ARCHIVE_NODE_URL: z
+      .string()
+      .url()
+      .optional()
+      .parse(process.env.ETHEREUM_ARCHIVE_NODE_URL),
     AZTEC_NODE_URL: z
       .string()
       .url()
@@ -62,6 +67,45 @@ export const initConfig = async (
     METRICS_BEARER_TOKEN: z
       .string()
       .parse(process.env.METRICS_BEARER_TOKEN || "default-api-key"),
+    STAKING_REWARDS_SPLIT_FROM_BLOCK: z
+      .coerce.bigint()
+      .optional()
+      .parse(process.env.STAKING_REWARDS_SPLIT_FROM_BLOCK ?? "23083526"),
+    STAKING_REWARDS_SCRAPE_INTERVAL_MS: z
+      .coerce.number()
+      .int()
+      .positive()
+      .parse(
+        process.env.STAKING_REWARDS_SCRAPE_INTERVAL_MS ??
+        (60 * 60 * 1000).toString(),
+      ),
+    GOOGLE_SHEETS_SPREADSHEET_ID: z
+      .string()
+      .optional()
+      .parse(process.env.GOOGLE_SHEETS_SPREADSHEET_ID),
+    GOOGLE_SHEETS_RANGE: z
+      .string()
+      .optional()
+      .parse(process.env.GOOGLE_SHEETS_RANGE || "DailyTotal!A1"),
+    GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z
+      .string()
+      .optional()
+      .parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH),
+    GOOGLE_SHEETS_COINBASES_RANGE: z
+      .string()
+      .optional()
+      .parse(process.env.GOOGLE_SHEETS_COINBASES_RANGE || "Coinbases!A1"),
+    GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE: z
+      .string()
+      .optional()
+      .parse(
+        process.env.GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE ||
+        "DailyPerCoinbase!A1",
+      ),
+    GOOGLE_SHEETS_DAILY_EARNED_RANGE: z
+      .string()
+      .optional()
+      .parse(process.env.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1"),
   };
   await ensureConfigFile(configFilePath, !!userConfigFilePath, config);
 
