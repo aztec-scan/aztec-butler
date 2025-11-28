@@ -14,9 +14,12 @@ To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/
 
 ### features
 
-1. Prometheus scraper for aztec-node metrics
-1. Watcher for on-chain events with required actions
-   - create and add keys to provider (and propose to multisig to fund proposer-address)
+1. push metrics to OTEL-collector
+   1. disable exposing prom-server
+1. Change behaviour of creating+proposing attester keys
+   - should be part of CLI instead and run on operators machine (part of adding keys to web3signer flow)
+   - only publisher-keys should be private in clear-text on the node
+1. support for web3signer-schema
 
 ### gotchas
 
