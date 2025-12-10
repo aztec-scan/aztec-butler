@@ -10,8 +10,6 @@ export interface Keystore {
   data: KeystoreData;
 }
 
-export const ATTESTER_REGISTRATIONS_DIR_NAME = "attester-registrations";
-
 /**
  * Load keystores from specified file paths
  * Used by new CLI interface

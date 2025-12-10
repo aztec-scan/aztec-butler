@@ -17,16 +17,11 @@ const checkNodeVersion = () => {
   }
 };
 
-const mode = process.argv[2] || "cli";
+const mode = process.argv[2] || "serve";
 
 const main = async () => {
   checkNodeVersion();
   switch (mode) {
-    case "cli":
-      const { runCli } = await import("./cli/index.js");
-      await runCli();
-      break;
-
     case "serve":
       const { startServer } = await import("./server/index.js");
       await startServer();
@@ -34,7 +29,9 @@ const main = async () => {
 
     default:
       console.error(`Unknown mode: ${mode}`);
-      console.error("Available modes: cli, prometheus");
+      console.error("Available modes: serve");
+      console.error("");
+      console.error("For CLI commands, use: npm run cli -- <command>");
       process.exit(1);
   }
 };

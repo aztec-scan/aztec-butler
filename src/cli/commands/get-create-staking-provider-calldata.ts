@@ -1,22 +1,18 @@
 import assert from "assert";
 import { encodeFunctionData, getAddress } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
-import { DirData, STAKING_REGISTRY_ABI } from "../../types/index.js";
+import { STAKING_REGISTRY_ABI } from "../../types/index.js";
 import { ButlerConfig } from "../../core/config/index.js";
 
 const DEFAULT_COMISSION_RATE_PERCENTAGE = 10;
 
-const command = async (
-  ethClient: EthereumClient,
-  dirData: DirData,
-  stakingProviderAdmin: ButlerConfig["PROVIDER_ADMIN_ADDRESS"],
-) => {
+const command = async (ethClient: EthereumClient, config: ButlerConfig) => {
   assert(
-    stakingProviderAdmin,
+    config.PROVIDER_ADMIN_ADDRESS,
     "Staking provider admin address must be provided.",
   );
   const stakingRegistryAddress = ethClient.getStakingRegistryAddress();
-  const stakingProviderAdminAddress = getAddress(stakingProviderAdmin);
+  const stakingProviderAdminAddress = getAddress(config.PROVIDER_ADMIN_ADDRESS);
   const rewardsRecipientAddress = stakingProviderAdminAddress; // For simplicity, using the same address
   const comissionBasisPoints = DEFAULT_COMISSION_RATE_PERCENTAGE * 100; // Convert percentage to basis points
   const callData = {

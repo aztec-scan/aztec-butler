@@ -20,21 +20,26 @@
 - Publisher load calculated dynamically from scraper config
 - Coinbase field required in schema (uses zero address `0x0000000000000000000000000000000000000000` for missing values)
 - New metrics: `attesters_missing_coinbase`, `attesters_missing_coinbase_urgent`
-- CLI retains all Docker directory / keystore functionality
 
 **Result**: Clean separation - CLI has keys, server has none
+
+### Phase 3: Complete AZTEC_DOCKER_DIR Removal
+
+- ✅ Removed `AZTEC_DOCKER_DIR` from config schema
+- ✅ Deleted `src/cli/index.ts` (legacy `runCli()` function)
+- ✅ Deleted `src/cli/commands/write-attester-registration-data.ts`
+- ✅ Deleted `src/types/directory.ts` (`DirData` type)
+- ✅ Removed `getDockerDirData()`, `parseEnvFile()`, and related functions
+- ✅ CLI commands now use keystore paths directly via glob patterns
+- ✅ Updated `src/index.ts` to only support server mode
+- ✅ Removed all `ATTESTER_REGISTRATIONS_DIR_NAME` references
+- ✅ Scripts use `npm run cli` (no env var needed)
+
+**Result**: No more Docker directory dependencies anywhere in codebase
 
 ---
 
 ## What Needs to Be Done
-
-### Remove AZTEC_DOCKER_DIR Entirely
-
-- Remove `AZTEC_DOCKER_DIR` from CLI code (currently still required)
-- Update all CLI commands to accept keystore paths directly
-- Remove `getDockerDirData()` function and `DirData` types entirely
-- Update `./scripts/*.sh` to not require AZTEC_DOCKER_DIR env var
-- Update configuration schema to remove AZTEC_DOCKER_DIR
 
 ### Incremental Coinbase Scraping
 
