@@ -27,5 +27,6 @@
   },
   "ts-node": {
     "esm": true
-  }
+  },
+  "exclude": ["test-cli-commands.ts", "cli.ts"]
 }

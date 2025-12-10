@@ -12,20 +12,62 @@ assert(
 );
 export const PACKAGE_NAME = process.env.npm_package_name!;
 
-const DEFAULT_CONFIG_FILE_PATH =
-  envPath(PACKAGE_NAME, { suffix: "" }).config + "/basic";
+const getConfigDir = (): string => {
+  return envPath(PACKAGE_NAME, { suffix: "" }).config;
+};
 
-export type ButlerConfig = Awaited<ReturnType<typeof initConfig>>;
+/**
+ * Find all available network configs
+ */
+async function findNetworkConfigs(): Promise<string[]> {
+  try {
+    const configDir = getConfigDir();
+    const files = await fs.readdir(configDir);
+    return files
+      .filter((f) => f.endsWith("-base.env"))
+      .map((f) => f.replace("-base.env", ""));
+  } catch (error) {
+    // Directory doesn't exist yet
+    return [];
+  }
+}
 
-export const initConfig = async (
-  supressLog?: boolean,
+/**
+ * Load specific network config
+ */
+async function loadNetworkConfig(
+  network: string,
+  suppressLog?: boolean,
   userConfigFilePath?: string,
-) => {
-  console.log("\n\nInitializing configuration...\n\n");
-  let configFilePath = userConfigFilePath || DEFAULT_CONFIG_FILE_PATH;
-  dotenv.config({ path: configFilePath });
+): Promise<ReturnType<typeof buildConfig>> {
+  const configPath =
+    userConfigFilePath || path.join(getConfigDir(), `${network}-base.env`);
+  dotenv.config({ path: configPath });
 
-  const config = {
+  const config = buildConfig(network);
+  await ensureConfigFile(configPath, !!userConfigFilePath, config);
+
+  if (!suppressLog) {
+    // TODO: add default false "showSensitiveInfo"
+    console.log(`CONFIGURATION (reading from ${configPath}):
+${Object.entries(config)
+  .map(([key, value]) => `  ${key}\t${value}`)
+  .join("\n")}
+`);
+  }
+  return config;
+}
+
+/**
+ * Build config object from environment variables
+ */
+function buildConfig(network: string) {
+  return {
+    NETWORK: z.string().parse(network),
+    ETHEREUM_CHAIN_ID: z.coerce
+      .number()
+      .int()
+      .parse(process.env.ETHEREUM_CHAIN_ID),
     AZTEC_DOCKER_DIR: z
       .string()
       .parse(process.env.AZTEC_DOCKER_DIR || path.join(process.cwd(), "..")),
@@ -62,22 +104,22 @@ export const initConfig = async (
       .parse(process.env.MULTISIG_PROPOSER_PRIVATE_KEY),
     MIN_ETH_PER_ATTESTER: z
       .string()
-      .parse(process.env.MIN_ETH_PER_ATTESTER),
+      .parse(process.env.MIN_ETH_PER_ATTESTER || "0.1"),
     SAFE_API_KEY: z.string().optional().parse(process.env.SAFE_API_KEY),
     METRICS_BEARER_TOKEN: z
       .string()
       .parse(process.env.METRICS_BEARER_TOKEN || "default-api-key"),
-    STAKING_REWARDS_SPLIT_FROM_BLOCK: z
-      .coerce.bigint()
+    STAKING_REWARDS_SPLIT_FROM_BLOCK: z.coerce
+      .bigint()
       .optional()
       .parse(process.env.STAKING_REWARDS_SPLIT_FROM_BLOCK ?? "23083526"),
-    STAKING_REWARDS_SCRAPE_INTERVAL_MS: z
-      .coerce.number()
+    STAKING_REWARDS_SCRAPE_INTERVAL_MS: z.coerce
+      .number()
       .int()
       .positive()
       .parse(
         process.env.STAKING_REWARDS_SCRAPE_INTERVAL_MS ??
-        (60 * 60 * 1000).toString(),
+          (60 * 60 * 1000).toString(),
       ),
     GOOGLE_SHEETS_SPREADSHEET_ID: z
       .string()
@@ -100,24 +142,67 @@ export const initConfig = async (
       .optional()
       .parse(
         process.env.GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE ||
-        "DailyPerCoinbase!A1",
+          "DailyPerCoinbase!A1",
       ),
     GOOGLE_SHEETS_DAILY_EARNED_RANGE: z
       .string()
       .optional()
       .parse(process.env.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1"),
   };
-  await ensureConfigFile(configFilePath, !!userConfigFilePath, config);
+}
 
-  if (!supressLog) {
-    // TODO: add default false "showSensitiveInfo"
-    console.log(`CONFIGURATION (reading from ${configFilePath}):
-${Object.entries(config)
-        .map(([key, value]) => `  ${key}\t${value}`)
-        .join("\n")}
-`);
+export type ButlerConfig = ReturnType<typeof buildConfig>;
+
+/**
+ * Initialize configuration with network selection
+ */
+export const initConfig = async (options?: {
+  suppressLog?: boolean;
+  userConfigFilePath?: string;
+  network?: string;
+}): Promise<ButlerConfig> => {
+  console.log("\n\nInitializing configuration...\n\n");
+
+  const availableNetworks = await findNetworkConfigs();
+
+  let selectedNetwork: string;
+  if (options?.network) {
+    // User specified network
+    selectedNetwork = options.network;
+  } else if (options?.userConfigFilePath) {
+    // User provided a specific config file path
+    // Try to extract network name from filename
+    const fileName = path.basename(options.userConfigFilePath);
+    const match = fileName.match(/^(.+)-base\.env$/);
+    selectedNetwork = match?.[1] ?? "unknown";
+  } else if (availableNetworks.length === 1) {
+    // Only one network available
+    selectedNetwork = availableNetworks[0]!;
+    console.log(`Using network: ${selectedNetwork}`);
+  } else if (availableNetworks.length === 0) {
+    // No configs found, create testnet default
+    console.warn(
+      "No network configurations found. Creating default testnet config.",
+    );
+    selectedNetwork = "testnet";
+  } else if (availableNetworks.includes("testnet")) {
+    // Default to testnet
+    console.log(
+      `Multiple networks found (${availableNetworks.join(", ")}), defaulting to testnet`,
+    );
+    selectedNetwork = "testnet";
+  } else {
+    throw new Error(
+      "Multiple network configs found. Please specify --network flag.\n" +
+        `Available: ${availableNetworks.join(", ")}`,
+    );
   }
-  return config;
+
+  return await loadNetworkConfig(
+    selectedNetwork,
+    options?.suppressLog,
+    options?.userConfigFilePath,
+  );
 };
 
 const ensureConfigFile = async (
@@ -157,6 +242,6 @@ const ensureConfigFile = async (
     }
 
     await fs.mkdir(path.dirname(configFilePath), { recursive: true });
-    await fs.writeFile(configFilePath, configFormattedString);
+    await fs.writeFile(configFilePath, configFormattedString.join(""));
   }
 };

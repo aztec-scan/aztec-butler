@@ -1,183 +1,59 @@
-# Project "Stars Align" - Implementation Overview
+# Implementation Plan
 
-## Summary
+## Phase 1: CLI Commands ✅ COMPLETE
 
-Architectural overhaul splitting Aztec Butler into two distinct operational modes:
+**Objective**: Remove Docker directory dependency from CLI, work with keystore files directly
 
-1. **CLI Mode** (operator's machine) - Handles sensitive operations with private keys
-2. **Scraper Mode** (monitoring server) - Handles public monitoring, works only with public keys
+**Completed:**
 
-## Core Changes Required
+- ✅ Multi-network config system (`{network}-base.env`)
+- ✅ Scraper config schema + operations
+- ✅ Keystore operations (extract addresses, load from paths)
+- ✅ `generate-scraper-config` - Create config from keystores
+- ✅ `scrape-coinbases` - Scrape StakedWithProvider events
+- ✅ `add-keys` - Generate calldata with duplicate detection + optional config update
+- ✅ `check-publisher-eth` - Check balances + generate funding calldata
+- ✅ Removed `WAITING_FOR_MULTISIG_SIGN` state
+- ✅ Bash scripts in `./scripts/` for all commands
+- ✅ Comprehensive documentation in `./scripts/README.md`
 
-### 1. Remove Docker-Compose Config Parsing
+## Phase 2: Scraper Mode (Pending)
 
-**Blocker Level: HIGH** - Deeply integrated throughout codebase
+**Objective**: Update Scraper (Server) mode to use public-key-only configs
 
-- `getDockerDirData()` in `src/core/utils/fileOperations.ts` currently parses docker directory structure
-- Used by CLI (`src/cli/index.ts:12`) and Server (`src/server/index.ts:79`)
-- Parses `.env` files and `keys/` directory for private keys
+**Tasks:**
 
-**Required Changes:**
+1. Update `src/server/index.ts` to load `{network}-scrape-config.json` instead of keystores
+2. Update scrapers to work with public addresses only
+3. Remove `AZTEC_DOCKER_DIR` requirement from scraper mode
+4. Update metrics to use scraper config
+5. Add `ATTESTERS_MISSING_COINBASE` and `ATTESTERS_MISSING_COINBASE_URGENT` metrics
 
-- Complete removal of docker-dir `.env` file parsing logic
-- Aztec Butler config should be renamed from `basic` to `{network}-base.env`
-- Scraper needs separate config format containing only public keys for scraping - `{network}-scrape-config.json` in stdpath data-dir
-- Scraper should always start scrapers from available configs (i.e. multinetwork if both testnet and mainnet config exists)
-- CLI should default to testnet if two networks exist (user should use flag to run select config)
+## Phase 3: Enhancements (Optional)
 
-### 2. Scraper (Server) Refactoring
+**Objective**: Polish and automation
 
-**Current Private Key Usage:**
+**Tasks:**
 
-- Reads keystores via `getDockerDirData()` in `src/server/index.ts:79`
-- `StakingProviderScraper` accesses keystores (`src/server/scrapers/staking-provider-scraper.ts:42`)
-- State management derives addresses from private keys (`src/server/state/index.ts:771,807`)
+1. Auto-propose to Safe multisig (currently manual copy/paste)
+2. CLI argument improvements (`--target-balance`, `--threshold` flags)
+3. Incremental coinbase scraping (use `lastScrapedBlock`)
 
-**Required Changes:**
+## Phase 4: Deployment (External)
 
-- Rename "Server" to "Scraper" throughout codebase
-- Create new scraper config format accepting:
-  - Attester public keys (ETH addresses)
-    - connected coinbase (or 0x00..00 if none)
-  - Publisher public keys (ETH addresses)
+**Objective**: Ansible/infrastructure updates
 
-### 3. CLI Commands Implementation Status
+**External tasks** (other repos):
 
-#### Partially Implemented
+- Ansible: Key distribution
+- Ansible: Deploy scraper with new configs
+- Documentation: Migration guide
+- GCP: Secrets management
 
-**`addKeysToProvider` calldata** (`src/cli/commands/get-add-keys-to-staking-provider-calldata.ts`)
+---
 
-NOTE: this will still read the same keys.json format to generate calldata
+## Notes
 
-- ✅ Exists and generates calldata
-- ❌ Missing: THROW if keys already present in queue
-- ❌ Missing: always console.log, also propose multisig if config available (option to opt-out)
-
-**`fund publishers` calldata** (`src/cli/commands/get-publisher-eth.ts`)
-
-- ✅ Exists and checks publisher balances
-- ❌ Missing: Add better flags to easier just say e.g. "top-up to this amount" or "top-up X per attester it's sharing"
-- ❌ Missing: ensure proposals only are proposed for a sane threshold - no nitty-gritty additions of 0.00000001 ETH etc...
-- ❌ Missing: Generate actual calldata for funding
-- ❌ Missing: always console.log, also propose multisig if config available (option to opt-out)
-
-#### Not Implemented
-
-**`scrape on-chain coinbases`**
-
-- Inputs: start block, eth-rpc-url, attester addresses from web3signer
-- Verify coinbase mappings from blockchain
-- cache in butler stdpath data-dir
-  - {network}-mapped-coinbases.json
-  - should include up until what block it was scraped, and for which providerId
-- Output: {network}-mapped-coinbases.json to selected location
-- THROW for detected incorrect coinbases
-
-**`generate scraper config`**
-
-- Extract attester public keys from web3signer
-- Extract publisher public keys from private keys
-- Generate JSON config file for scraper (share zod-schema with scraper to avoid inconsistencies)
-
-### 4. Scraper Feature Requirements
-
-From goal.md, scraper needs to track:
-
-**Publisher Monitoring:**
-
-- ✅ Already implemented: ETH balance tracking
-- ❌ Load calculation should be removed (it will only be derived in Grafana to be general load i.e. attestersCount/publisherCount)
-
-**Attester State Tracking:**
-
-- ✅ State machine exists
-- ⚠️ Change in functionality:
-  - remove: `WAITING_FOR_MULTISIG_SIGN` (attesters will be in NEW until they are discovered in stakingProviderQueue)
-  - `IN_STAKING_QUEUE`
-    - when in this state, also export metric: ATTESTERS_MISSING_COINBASE if they have 0x00..00
-  - `ACTIVE`
-    - when in this state, also export metric: ATTESTERS_MISSING_COINBASE_URGENT if they have 0x00..00
-
-### 5. File Structure Changes
-
-**For CLI:**
-
-- Input: Private keys via key files (same format as previously)
-- Output: Calldata to console or create multisig proposals
-
-**For Scraper:**
-
-```
-scraper-config.json
-{
-  "rpcUrls": {
-    "l1": "https://...",
-    "l2": "https://..."
-  },
-  "attesters": [
-    {
-      "address": "0x...",
-      "coinbase": "0x..."
-    }
-  ],
-  "publishers": [
-    {
-      "address": "0x...",
-    }
-  ],
-  "stakingProviderId": {
-    "adminAddress": "0x..."
-  }
-}
-```
-
-## No Major Architectural Blockers
-
-The codebase is well-structured for this split:
-
-- ✅ State management already separated
-- ✅ Scrapers are modular
-- ✅ Handlers are event-driven
-- ✅ Config is centralized
-- ✅ Safe multisig client ready
-
-## Implementation Priority
-
-### Phase 1: Foundation
-
-1. Create new config format for scraper
-2. Add CLI command to generate scraper config from private keys
-3. Remove docker-compose parsing dependency
-
-### Phase 2: Scraper Refactoring
-
-1. Update scraper to read new config format
-2. Remove all private key access from scraper code
-
-### Phase 3: CLI Completion
-
-1. Implement "scrape on-chain coinbases" command
-2. Add multisig propose option to existing commands
-3. Add THROW for duplicate keys in addKeysToProvider
-
-### Phase 4: Deployment
-
-1. Update documentation
-2. Update daemon/install scripts if needed
-3. Document prerequisites (generating keys etc.)
-
-## Guidlines
-
-- There is no need for backwards compability for any functionality
-- There is no need to consider migration of existing systems
-
-## External Repository Changes Required
-
-As noted in goal.md, changes needed in other repos:
-
-- Aztec-CLI: Generate priv-keys
-- GCP: Add secrets management
-- Ansible: Extract pub-keys from web3signer
-- Ansible: Distribute keys in aztec-compliant JSON format
-- Ansible: Run butler-scraper on monitoring-server
-- Ansible: Handle coinbase mappings
+- No backward compatibility required
+- Phase 1 is production-ready for CLI usage
+- Scraper mode still works with old system (AZTEC_DOCKER_DIR)

@@ -1,6 +1,6 @@
 {
   "name": "aztec-butler",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "",
   "type": "module",
   "main": "index.js",
@@ -16,7 +16,9 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:cli": "node --import 'data:text/javascript,import { register } from \"node:module\"; import { pathToFileURL } from \"node:url\"; register(\"ts-node/esm\", pathToFileURL(\"./\"));' test-cli-commands.ts",
+    "cli": "node --import 'data:text/javascript,import { register } from \"node:module\"; import { pathToFileURL } from \"node:url\"; register(\"ts-node/esm\", pathToFileURL(\"./\"));' cli.ts"
   },
   "keywords": [],
   "author": "",
@@ -50,6 +52,7 @@
     "chokidar": "^4.0.3",
     "dotenv": "^17.2.3",
     "env-paths": "^3.0.0",
+    "glob": "^13.0.0",
     "viem": "^2.38.6",
     "zod": "^3.23.8"
   }

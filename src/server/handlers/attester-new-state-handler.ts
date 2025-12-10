@@ -274,11 +274,12 @@ export class AttesterNewStateHandler {
           data: calldata.calldata,
           value: "0",
         });
-        for (const newAttester of newAttesters) {
-          updateAttesterState(newAttester.attesterAddress, AttesterState.WAITING_FOR_MULTISIG_SIGN);
-        }
+        // Attesters stay in NEW state until keys are actually added to provider queue on-chain
         console.log(
           `[AttesterNewStateHandler] Successfully proposed batch transaction for ${registrationDataList.length} attesters`,
+        );
+        console.log(
+          `[AttesterNewStateHandler] Attesters will remain in NEW state until transaction is executed and keys are added on-chain`,
         );
       } else {
         console.log(

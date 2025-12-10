@@ -117,16 +117,6 @@ export async function handleStateTransitions(
       }
       break;
 
-    case AttesterState.WAITING_FOR_MULTISIG_SIGN:
-      const isInProviderQueue = isAttesterInProviderQueue(attesterAddress);
-      if (isInProviderQueue) {
-        updateAttesterState(
-          attesterAddress,
-          AttesterState.IN_STAKING_PROVIDER_QUEUE,
-        );
-      }
-      break;
-
     default:
       console.warn(
         `Unknown state ${currentState} for attester ${attesterAddress}`,

@@ -45,8 +45,10 @@ export const runCli = async () => {
   await ethClient.verifyChainId();
   await ethClient.printImportantInfo();
 
-  // Pass clients to commands
-  await command.getPublisherEth(ethClient, data);
+  // Pass clients to commands (old interface - uses DirData for backwards compatibility)
+  await command.getPublisherEth(ethClient, {
+    keystorePaths: data.keystores.map((k) => k.path),
+  });
   data.attesterRegistrations =
     await command.writeAttesterAttesterRegistrationData(
       ethClient,
@@ -61,9 +63,16 @@ export const runCli = async () => {
     data,
     config.PROVIDER_ADMIN_ADDRESS,
   );
-  await command.getAddKeysToStakingProviderCalldata(
-    ethClient,
-    data,
-    config.PROVIDER_ADMIN_ADDRESS,
-  );
+
+  // Note: The old getAddKeysToStakingProviderCalldata used DirData with attesterRegistrations
+  // The new version uses keystorePaths directly. For the "cli" mode, we still support
+  // the old workflow with attester-registrations directory
+  if (data.attesterRegistrations.length > 0) {
+    console.log(
+      "\n⚠️  Note: To use the new keystore-based workflow, run commands individually:",
+    );
+    console.log(
+      "    get-add-keys-to-staking-provider-calldata --keystore <path>",
+    );
+  }
 };

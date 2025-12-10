@@ -55,7 +55,6 @@ export type StakingProviderData = z.infer<typeof StakingProviderDataSchema>;
 // Attester state types
 export enum AttesterState {
   NEW = "NEW",
-  WAITING_FOR_MULTISIG_SIGN = "WAITING_FOR_MULTISIG_SIGN",
   IN_STAKING_PROVIDER_QUEUE = "IN_STAKING_PROVIDER_QUEUE",
   COINBASE_NEEDED = "COINBASE_NEEDED",
   IN_STAKING_QUEUE = "IN_STAKING_QUEUE",
@@ -650,7 +649,7 @@ export const updateAttesterState = (
   ) {
     console.error(
       `ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
-      `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
+        `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
   }
@@ -826,28 +825,35 @@ export const getDirData = (): DirData | null => {
 export const updatePublisherData = (
   newPublisherData: PublisherDataMap | null,
 ) => {
-  if (!newPublisherData) return
+  if (!newPublisherData) return;
 
   newPublisherData.forEach((data, privKey) => {
     if (isNewPublisherData(privKey, data)) {
       for (const callback of PublisherBalanceUpdateCallbacks) {
         try {
-          callback(data.publisherAddress, data.currentBalance, data.requiredTopup);
+          callback(
+            data.publisherAddress,
+            data.currentBalance,
+            data.requiredTopup,
+          );
         } catch (error) {
-          console.error("[State] Error in publisher data change callback:", error);
+          console.error(
+            "[State] Error in publisher data change callback:",
+            error,
+          );
         }
       }
     }
-  })
+  });
 
   appState.publisherData = newPublisherData;
 };
 
 const isNewPublisherData = (address: string, data: PublisherDataEntry) => {
-  if (!appState.publisherData) return true
-  if (appState.publisherData.get(address) == data) return false
-  return true // as catch-all just always update 
-}
+  if (!appState.publisherData) return true;
+  if (appState.publisherData.get(address) == data) return false;
+  return true; // as catch-all just always update
+};
 
 /**
  * Get publisher data
@@ -862,7 +868,7 @@ export const getPublisherData = (): PublisherDataMap | null => {
 export const getPublisherDataEntry = (
   publisherAddress: string,
 ): PublisherDataEntry | undefined => {
-  if (!appState.publisherData) return undefined
+  if (!appState.publisherData) return undefined;
   return appState.publisherData.get(publisherAddress);
 };
 
@@ -951,19 +957,19 @@ export const getStakingRewardsDailyAggregates =
     for (const snapshot of appState.stakingRewardsHistory) {
       const dateKey = snapshot.timestamp.toISOString().slice(0, 10);
       const mapKey = `${dateKey}:${snapshot.coinbase.toLowerCase()}`;
-      const current =
-        aggregates.get(mapKey) ?? {
-          date: dateKey,
-          coinbase: snapshot.coinbase,
-          totalPendingRewards: 0n,
-          totalOurShare: 0n,
-          totalOtherShare: 0n,
-          sampleCount: 0,
-        };
+      const current = aggregates.get(mapKey) ?? {
+        date: dateKey,
+        coinbase: snapshot.coinbase,
+        totalPendingRewards: 0n,
+        totalOurShare: 0n,
+        totalOtherShare: 0n,
+        sampleCount: 0,
+      };
 
       aggregates.set(mapKey, {
         ...current,
-        totalPendingRewards: current.totalPendingRewards + snapshot.pendingRewards,
+        totalPendingRewards:
+          current.totalPendingRewards + snapshot.pendingRewards,
         totalOurShare: current.totalOurShare + snapshot.ourShare,
         totalOtherShare: current.totalOtherShare + snapshot.otherShare,
         sampleCount: current.sampleCount + 1,
