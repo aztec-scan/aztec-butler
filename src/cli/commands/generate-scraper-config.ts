@@ -3,7 +3,7 @@ import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import {
   extractPublisherAddresses,
-  extractAttesterCoinbasePairs,
+  extractAttesterDataWithPublisher,
 } from "../../core/utils/keystoreOperations.js";
 import {
   saveScraperConfig,
@@ -43,46 +43,40 @@ const command = async (
   const keystores = await loadKeystoresFromPaths(options.keystorePaths);
   console.log(`✅ Loaded ${keystores.length} keystore file(s)`);
 
-  // 2. Extract attester addresses with coinbases
+  // 2. Extract attester data with publisher mappings
   console.log("\nExtracting attester addresses...");
-  const attesterPairs = extractAttesterCoinbasePairs(keystores);
-  console.log(`✅ Found ${attesterPairs.length} attester(s)`);
+  const attesterData = extractAttesterDataWithPublisher(keystores);
+  console.log(`✅ Found ${attesterData.length} attester(s)`);
 
   // 3. Load cached coinbase mappings if available
   console.log("\nChecking for cached coinbase mappings...");
+  const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
   const attesters: ScraperAttester[] = [];
-  for (const pair of attesterPairs) {
-    let coinbase = pair.coinbase;
 
-    // Try to load from cache if current is zero address
-    if (coinbase === "0x0000000000000000000000000000000000000000") {
-      const cached = await getCachedCoinbase(options.network, pair.address);
+  for (const data of attesterData) {
+    let coinbase = data.coinbase;
+
+    // Try to load from cache if coinbase is not set
+    if (!coinbase) {
+      const cached = await getCachedCoinbase(options.network, data.address);
       if (cached) {
         coinbase = cached.coinbaseAddress;
         console.log(
-          `  ✅ Loaded cached coinbase for ${pair.address}: ${coinbase}`,
+          `  ✅ Loaded cached coinbase for ${data.address}: ${coinbase}`,
         );
       } else {
+        // Use zero address if no coinbase found
+        coinbase = ZERO_ADDRESS;
         console.log(
-          `  ⚠️  No coinbase found for ${pair.address} (using 0x0...0)`,
+          `  ⚠️  No coinbase found for ${data.address}, using ${ZERO_ADDRESS}`,
         );
       }
     }
 
-    // Skip zero coinbases if not included
-    if (
-      !options.includeZeroCoinbases &&
-      coinbase === "0x0000000000000000000000000000000000000000"
-    ) {
-      console.log(
-        `  ⏭️  Skipping ${pair.address} (zero coinbase, use --include-zero-coinbases to include)`,
-      );
-      continue;
-    }
-
     attesters.push({
-      address: pair.address,
+      address: data.address,
       coinbase: coinbase,
+      publisher: data.publisher,
     });
   }
 

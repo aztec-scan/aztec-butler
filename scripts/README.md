@@ -105,7 +105,31 @@ Collection of bash scripts for common Aztec Butler operations.
 
 ---
 
-### 5. Get Metrics
+### 5. Start Server
+
+```bash
+./scripts/start-server.sh
+```
+
+**What it does:**
+
+- Starts Aztec Butler in server (scraper) mode
+- Loads scraper configuration from `~/.local/share/aztec-butler/{network}-scrape-config.json`
+- Starts Prometheus metrics exporter on port 9464
+- Runs periodic scrapers for on-chain data
+
+**Prerequisites:**
+
+- Scraper config must be generated first (use `generate-scraper-config.sh`)
+- Environment config at `~/.config/aztec-butler/{network}-base.env`
+
+**Use case:** Run monitoring server with public-keys-only configuration
+
+**Note:** Server uses scraper config only (no access to private keys). Press Ctrl+C to stop.
+
+---
+
+### 6. Get Metrics
 
 ```bash
 # Using default token and URL
@@ -137,6 +161,9 @@ Collection of bash scripts for common Aztec Butler operations.
 ./scripts/check-publisher-eth.sh
 
 # 5. If balances are low, use the funding calldata to top up
+
+# 6. Start monitoring server (optional - for metrics/monitoring)
+./scripts/start-server.sh
 ```
 
 ### Adding New Validators

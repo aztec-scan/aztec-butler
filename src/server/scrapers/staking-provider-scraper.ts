@@ -2,7 +2,6 @@ import { AbstractScraper } from "./base-scraper.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import { AztecClient } from "../../core/components/AztecClient.js";
 import { EthereumClient } from "../../core/components/EthereumClient.js";
-import { getDockerDirData } from "../../core/utils/fileOperations.js";
 import {
   updateStakingProviderData,
   StakingProviderDataSchema,
@@ -11,10 +10,11 @@ import {
   countAttestersByState,
 } from "../state/index.js";
 import { processAttesterState } from "../state/transitions.js";
-import { getAddressFromPrivateKey } from "@aztec/ethereum";
+import type { ScraperConfig } from "../../types/scraper-config.js";
 
 /**
  * Scraper for staking provider-related data from the staking registry
+ * Uses scraper config with public addresses only
  */
 export class StakingProviderScraper extends AbstractScraper {
   readonly name = "staking-provider";
@@ -23,42 +23,32 @@ export class StakingProviderScraper extends AbstractScraper {
   private stakingProviderAdmin: string | null = null;
   private lastScrapedData: StakingProviderData | null = null;
 
-  constructor(private config: ButlerConfig) {
+  constructor(
+    private config: ButlerConfig,
+    private scraperConfig: ScraperConfig,
+  ) {
     super();
   }
 
   async init(): Promise<void> {
-    // Only initialize if staking provider admin is configured
-    if (!this.config.PROVIDER_ADMIN_ADDRESS) {
-      console.log(
-        "Staking provider admin address not configured, staking provider scraper will not run",
-      );
-      return;
-    }
+    // Get admin address from scraper config
+    this.stakingProviderAdmin = this.scraperConfig.stakingProviderAdmin;
 
-    this.stakingProviderAdmin = this.config.PROVIDER_ADMIN_ADDRESS;
-
-    // Get data from Docker directory like the CLI does
-    const data = await getDockerDirData(this.config.AZTEC_DOCKER_DIR);
-    if (this.config.AZTEC_NODE_URL !== data.l2RpcUrl) {
-      console.warn(
-        `⚠️ Warning: AZTEC_NODE_URL in config (${this.config.AZTEC_NODE_URL}) does not match L2 RPC URL in docker dir (${data.l2RpcUrl})`,
-      );
-    }
-
-    // Initialize Aztec client to get node info
+    // Initialize Aztec client
     const aztecClient = new AztecClient({
       nodeUrl: this.config.AZTEC_NODE_URL,
     });
     const nodeInfo = await aztecClient.getNodeInfo();
 
-    if (this.config.ETHEREUM_NODE_URL !== data.l1RpcUrl) {
-      console.warn(
-        `⚠️ Warning: ETHEREUM_NODE_URL in config (${this.config.ETHEREUM_NODE_URL}) does not match L1 RPC URL in docker dir (${data.l1RpcUrl})`,
+    // Validate chain ID matches scraper config
+    if (this.scraperConfig.l1ChainId !== nodeInfo.l1ChainId) {
+      throw new Error(
+        `Chain ID mismatch: scraper config has ${this.scraperConfig.l1ChainId}, ` +
+          `but node reports ${nodeInfo.l1ChainId}`,
       );
     }
 
-    // Initialize Ethereum client using node info instead of hardcoded defaults
+    // Initialize Ethereum client
     this.ethClient = new EthereumClient({
       rpcUrl: this.config.ETHEREUM_NODE_URL,
       ...(this.config.ETHEREUM_ARCHIVE_NODE_URL
@@ -131,33 +121,24 @@ export class StakingProviderScraper extends AbstractScraper {
   }
 
   /**
-   * Manage attester states based on DataDir and on-chain data
+   * Manage attester states based on scraper config and on-chain data
    */
   private async manageAttesterStates(providerId: bigint): Promise<void> {
     try {
-      // Get attesters from DataDir
-      const dirData = await getDockerDirData(this.config.AZTEC_DOCKER_DIR);
+      const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+      // Get attesters from scraper config
+      const attestersToProcess = this.scraperConfig.attesters.map(
+        (attester) => ({
+          address: attester.address,
+          hasCoinbase: attester.coinbase !== ZERO_ADDRESS,
+        }),
+      );
 
       // Process each attester
-      for (const keystore of dirData.keystores) {
-        for (const validator of keystore.data.validators) {
-          // Derive address from private key
-          const attesterAddress = getAddressFromPrivateKey(
-            validator.attester.eth as `0x${string}`,
-          );
-
-          const hasCoinbase = !!validator.coinbase;
-
-          // Get current state
-          const currentState = getAttesterState(attesterAddress);
-
-          // Process state transitions (handled by state/transitions module)
-          await processAttesterState(
-            attesterAddress,
-            hasCoinbase,
-            currentState?.state,
-          );
-        }
+      for (const { address, hasCoinbase } of attestersToProcess) {
+        const currentState = getAttesterState(address);
+        await processAttesterState(address, hasCoinbase, currentState?.state);
       }
 
       // Log state counts

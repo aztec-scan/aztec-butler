@@ -6,7 +6,7 @@
 
 import type { ObservableGauge } from "@opentelemetry/api";
 import { createObservableGauge } from "./registry.js";
-import { getPublisherData } from "../state/index.js";
+import { getPublisherData, getScraperConfig } from "../state/index.js";
 import { formatEther } from "viem";
 
 // Metrics instances
@@ -28,14 +28,33 @@ export const initPublisherMetrics = () => {
 
   publisherLoadGauge.addCallback((observableResult) => {
     const data = getPublisherData();
+    const scraperConfig = getScraperConfig();
 
     if (!data) {
       console.warn("No publisher data available for publisherLoadGauge");
       return;
     }
 
+    if (!scraperConfig) {
+      console.warn("No scraper config available for publisherLoadGauge");
+      return;
+    }
+
+    // Calculate load for each publisher by counting attesters
+    const publisherLoadMap = new Map<string, number>();
+
+    for (const attester of scraperConfig.attesters) {
+      const publisherAddr = attester.publisher.toLowerCase();
+      publisherLoadMap.set(
+        publisherAddr,
+        (publisherLoadMap.get(publisherAddr) || 0) + 1,
+      );
+    }
+
     for (const [_privKey, publisherData] of data.entries()) {
-      observableResult.observe(publisherData.load, {
+      const load =
+        publisherLoadMap.get(publisherData.publisherAddress.toLowerCase()) || 0;
+      observableResult.observe(load, {
         publisher_address: publisherData.publisherAddress,
       });
     }
@@ -78,7 +97,9 @@ export const initPublisherMetrics = () => {
     const data = getPublisherData();
 
     if (!data) {
-      console.warn("No publisher data available for publisherCapacityRatioGauge");
+      console.warn(
+        "No publisher data available for publisherCapacityRatioGauge",
+      );
       return;
     }
 
@@ -91,7 +112,7 @@ export const initPublisherMetrics = () => {
       const ratio =
         requiredBalance > 0n
           ? parseFloat(formatEther(publisherData.currentBalance)) /
-          parseFloat(formatEther(requiredBalance))
+            parseFloat(formatEther(requiredBalance))
           : 1.0;
 
       observableResult.observe(ratio, {
@@ -113,7 +134,9 @@ export const initPublisherMetrics = () => {
     const data = getPublisherData();
 
     if (!data) {
-      console.warn("No publisher data available for publisherRequiredTopupGauge");
+      console.warn(
+        "No publisher data available for publisherRequiredTopupGauge",
+      );
       return;
     }
 

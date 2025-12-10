@@ -170,20 +170,25 @@ const command = async (
       console.log("✅ Loaded existing scraper config");
 
       // Extract new attesters and publishers from keystore
-      const attesterPairs = extractAttesterCoinbasePairs([keystore]);
+      const { extractAttesterDataWithPublisher } = await import(
+        "../../core/utils/keystoreOperations.js"
+      );
+      const attesterData = extractAttesterDataWithPublisher([keystore]);
       const publisherAddresses = extractPublisherAddresses([keystore]);
 
       // Add new attesters (avoid duplicates)
       const existingAttesterAddrs = new Set(
         scraperConfig.attesters.map((a) => a.address.toLowerCase()),
       );
-      const newAttesters = attesterPairs
+      const newAttesters = attesterData
         .filter(
-          (pair) => !existingAttesterAddrs.has(pair.address.toLowerCase()),
+          (data) => !existingAttesterAddrs.has(data.address.toLowerCase()),
         )
-        .map((pair) => ({
-          address: pair.address,
-          coinbase: pair.coinbase,
+        .map((data) => ({
+          address: data.address,
+          coinbase:
+            data.coinbase || "0x0000000000000000000000000000000000000000",
+          publisher: data.publisher,
         }));
 
       // Add new publishers (avoid duplicates)

@@ -68,9 +68,7 @@ function buildConfig(network: string) {
       .number()
       .int()
       .parse(process.env.ETHEREUM_CHAIN_ID),
-    AZTEC_DOCKER_DIR: z
-      .string()
-      .parse(process.env.AZTEC_DOCKER_DIR || path.join(process.cwd(), "..")),
+    AZTEC_DOCKER_DIR: z.string().optional().parse(process.env.AZTEC_DOCKER_DIR),
     ETHEREUM_NODE_URL: z
       .string()
       .url()

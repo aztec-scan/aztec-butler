@@ -9,6 +9,9 @@ import {
 
 export const runCli = async () => {
   const config = await initConfig();
+  if (!config.AZTEC_DOCKER_DIR) {
+    throw new Error("AZTEC_DOCKER_DIR must be configured for CLI mode");
+  }
   const data = await getDockerDirData(config.AZTEC_DOCKER_DIR);
   if (config.AZTEC_NODE_URL !== data.l2RpcUrl) {
     console.warn(

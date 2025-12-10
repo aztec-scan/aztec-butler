@@ -20,6 +20,8 @@ let attesterInfoGauge: ObservableGauge | null = null;
 let attesterCoinbaseNeededGauge: ObservableGauge | null = null;
 let nbrofAttestersInStateGauge: ObservableGauge | null = null;
 let attesterOnChainStatusGauge: ObservableGauge | null = null;
+let attestersMissingCoinbaseGauge: ObservableGauge | null = null;
+let attestersMissingCoinbaseUrgentGauge: ObservableGauge | null = null;
 // TODO: add gauge for proposer ETH balance
 
 /**
@@ -99,6 +101,48 @@ export const initAttesterMetrics = () => {
           status: AttesterOnChainStatus[entry.onChainView.status],
         });
       }
+    }
+  });
+
+  // New metric: attesters missing coinbase (all attesters without coinbase configured)
+  attestersMissingCoinbaseGauge = createObservableGauge(
+    "attesters_missing_coinbase",
+    {
+      description:
+        "Attesters without a coinbase address configured (value=1 per attester)",
+    },
+  );
+
+  attestersMissingCoinbaseGauge.addCallback((observableResult) => {
+    const coinbaseInfo = getAttesterCoinbaseInfo();
+
+    for (const [attester, coinbase] of coinbaseInfo.entries()) {
+      if (!coinbase) {
+        observableResult.observe(1, {
+          attester_address: attester,
+        });
+      }
+    }
+  });
+
+  // New metric: attesters missing coinbase in COINBASE_NEEDED state (urgent)
+  attestersMissingCoinbaseUrgentGauge = createObservableGauge(
+    "attesters_missing_coinbase_urgent",
+    {
+      description:
+        "Attesters in COINBASE_NEEDED state (urgent attention required, value=1 per attester)",
+    },
+  );
+
+  attestersMissingCoinbaseUrgentGauge.addCallback((observableResult) => {
+    const attestersNeedingCoinbase = getAttestersByState(
+      AttesterState.COINBASE_NEEDED,
+    );
+
+    for (const entry of attestersNeedingCoinbase) {
+      observableResult.observe(1, {
+        attester_address: entry.attesterAddress,
+      });
     }
   });
 

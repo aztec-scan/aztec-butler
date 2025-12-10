@@ -2,14 +2,13 @@ import { AbstractScraper } from "./base-scraper.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import { AztecClient } from "../../core/components/AztecClient.js";
 import { EthereumClient } from "../../core/components/EthereumClient.js";
-import { getDockerDirData } from "../../core/utils/fileOperations.js";
-import { updateAttesterOnChainView } from "../state/index.js";
-import { getAddressFromPrivateKey } from "@aztec/ethereum";
+import { updateAttesterOnChainView, getScraperConfig } from "../state/index.js";
 import { AttesterOnChainStatus } from "../../types/index.js";
 
 /**
  * Scraper for attester on-chain status from the rollup contract
  * Fetches getAttesterView for each attester to track their on-chain status
+ * Uses scraper config from state (loaded at server initialization)
  */
 export class RollupScraper extends AbstractScraper {
   readonly name = "rollup";
@@ -21,9 +20,6 @@ export class RollupScraper extends AbstractScraper {
   }
 
   async init(): Promise<void> {
-    // Verify Docker directory exists
-    await getDockerDirData(this.config.AZTEC_DOCKER_DIR);
-
     // Initialize Aztec client to get node info
     const aztecClient = new AztecClient({
       nodeUrl: this.config.AZTEC_NODE_URL,
@@ -52,8 +48,12 @@ export class RollupScraper extends AbstractScraper {
     }
 
     try {
-      // Get attesters from DataDir
-      const dirData = await getDockerDirData(this.config.AZTEC_DOCKER_DIR);
+      // Get attesters from scraper config in state
+      const scraperConfig = getScraperConfig();
+      if (!scraperConfig) {
+        console.warn("[rollup] Scraper config not loaded, skipping scrape");
+        return;
+      }
 
       let totalAttesters = 0;
       let onChainAttesters = 0;
@@ -66,40 +66,34 @@ export class RollupScraper extends AbstractScraper {
         }
       }
 
-      // Process each attester
-      for (const keystore of dirData.keystores) {
-        for (const validator of keystore.data.validators) {
-          totalAttesters++;
+      // Process each attester from scraper config
+      for (const attester of scraperConfig.attesters) {
+        totalAttesters++;
 
-          // Derive address from private key
-          const attesterAddress = getAddressFromPrivateKey(
-            validator.attester.eth as `0x${string}`,
-          );
+        // Fetch attester view from rollup contract
+        const attesterView = await this.ethClient.getAttesterView(
+          attester.address,
+        );
 
-          // Fetch attester view from rollup contract
-          const attesterView =
-            await this.ethClient.getAttesterView(attesterAddress);
+        if (attesterView) {
+          // Update state with on-chain view
+          updateAttesterOnChainView(attester.address, attesterView);
 
-          if (attesterView) {
-            // Update state with on-chain view
-            updateAttesterOnChainView(attesterAddress, attesterView);
-
-            // Track statistics
-            if (attesterView.status !== AttesterOnChainStatus.NONE) {
-              onChainAttesters++;
-            }
-            statusCounts.set(
-              attesterView.status,
-              (statusCounts.get(attesterView.status) || 0) + 1,
-            );
-          } else {
-            // No view returned (not on-chain or error)
-            updateAttesterOnChainView(attesterAddress, null);
-            statusCounts.set(
-              AttesterOnChainStatus.NONE,
-              (statusCounts.get(AttesterOnChainStatus.NONE) || 0) + 1,
-            );
+          // Track statistics
+          if (attesterView.status !== AttesterOnChainStatus.NONE) {
+            onChainAttesters++;
           }
+          statusCounts.set(
+            attesterView.status,
+            (statusCounts.get(attesterView.status) || 0) + 1,
+          );
+        } else {
+          // No view returned (not on-chain or error)
+          updateAttesterOnChainView(attester.address, null);
+          statusCounts.set(
+            AttesterOnChainStatus.NONE,
+            (statusCounts.get(AttesterOnChainStatus.NONE) || 0) + 1,
+          );
         }
       }
 

@@ -15,13 +15,15 @@ import {
   RollupScraper,
   StakingRewardsScraper,
 } from "./scrapers/index.js";
-import { initWatchers, shutdownWatchers } from "./watchers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
-import { initState, initAttesterStates, updateDirData } from "./state/index.js";
+import {
+  initState,
+  initAttesterStatesFromScraperConfig,
+  updateScraperConfigState,
+} from "./state/index.js";
 import { AztecClient } from "../core/components/AztecClient.js";
-import { EthereumClient } from "../core/components/EthereumClient.js";
 import { SafeGlobalClient } from "../core/components/SafeGlobalClient.js";
-import { getDockerDirData } from "../core/utils/fileOperations.js";
+import { loadScraperConfig } from "../core/utils/scraperConfigOperations.js";
 
 let logCounter = 0;
 
@@ -74,26 +76,15 @@ export const startServer = async () => {
   initLog("Initializing state management...");
   await initState();
 
-  initLog("Loading initial directory data and attester states...");
-  try {
-    const initialDirData = await getDockerDirData(config.AZTEC_DOCKER_DIR);
-    console.log(
-      `Loaded ${initialDirData.keystores.length} keystores with ${initialDirData.keystores.reduce((sum, ks) => sum + ks.data.validators.length, 0)} validators`,
-    );
+  initLog("Loading scraper configuration...");
+  const scraperConfig = await loadScraperConfig(config.NETWORK);
+  console.log(
+    `Loaded scraper config: ${scraperConfig.attesters.length} attesters, ${scraperConfig.publishers.length} publishers`,
+  );
 
-    // Update state with directory data (sets appState.dirData)
-    // This must be called before initAttesterStates so metrics have access to the data
-    const coinbaseChanges = updateDirData(initialDirData);
-    console.log(
-      `[Init] Directory data loaded into state (${coinbaseChanges.length} coinbase changes detected)`,
-    );
-
-    // Initialize attester states based on directory data
-    initAttesterStates(initialDirData);
-  } catch (error) {
-    console.error("Failed to load initial directory data:", error);
-    console.log("Server will continue, but attester states may be incomplete");
-  }
+  initLog("Initializing state from scraper config...");
+  initAttesterStatesFromScraperConfig(scraperConfig);
+  updateScraperConfigState(scraperConfig);
 
   initLog("Initializing scrapers...");
   const scraperManager = new ScraperManager();
@@ -105,12 +96,15 @@ export const startServer = async () => {
 
   // Register staking provider scraper (30 second interval)
   // This scraper now handles both staking provider data AND attester state management
-  const stakingProviderScraper = new StakingProviderScraper(config);
+  const stakingProviderScraper = new StakingProviderScraper(
+    config,
+    scraperConfig,
+  );
   scraperManager.register(stakingProviderScraper, 30_000);
 
   // Register publisher scraper (30 second interval)
   // Tracks publisher ETH balances and required top-ups
-  const publisherScraper = new PublisherScraper(config);
+  const publisherScraper = new PublisherScraper(config, scraperConfig);
   scraperManager.register(publisherScraper, 30_000);
 
   // Register staking rewards scraper (default hourly interval)
@@ -146,72 +140,46 @@ export const startServer = async () => {
   initLog("Initializing staking rewards metrics...");
   initStakingRewardsMetrics();
 
-  initLog("Initializing watchers...");
-  await initWatchers({
-    dataDirPath: config.AZTEC_DOCKER_DIR,
-  });
+  // File watchers not used in scraper mode
+  // Scraper uses static configuration from scraper config file
+  // Config updates require server restart
 
   let safeClient: SafeGlobalClient | null = null;
   initLog("Initializing handlers...");
-  if (config.PROVIDER_ADMIN_ADDRESS) {
-    // Get staking provider data from scraper to initialize handler
-    const stakingProviderData = stakingProviderScraper.getData();
-    if (stakingProviderData) {
-      // Initialize Aztec client to get node info for Ethereum client
-      const aztecClient = new AztecClient({
-        nodeUrl: config.AZTEC_NODE_URL,
-      });
-      const nodeInfo = await aztecClient.getNodeInfo();
 
-      // Create Ethereum client for handler
-      const ethClient = new EthereumClient({
-        rpcUrl: config.ETHEREUM_NODE_URL,
-        ...(config.ETHEREUM_ARCHIVE_NODE_URL
-          ? { archiveRpcUrl: config.ETHEREUM_ARCHIVE_NODE_URL }
-          : {}),
-        chainId: nodeInfo.l1ChainId,
-        rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
-      });
-
-      // Create SafeGlobal client if configured
-
-      if (config.SAFE_ADDRESS) {
-        // Validate that required Safe credentials are present
-        if (!config.MULTISIG_PROPOSER_PRIVATE_KEY || !config.SAFE_API_KEY) {
-          throw new Error(
-            "SAFE_ADDRESS is configured but MULTISIG_PROPOSER_PRIVATE_KEY or SAFE_API_KEY is missing. " +
-            "Both are required for Safe multisig functionality.",
-          );
-        }
-
-        safeClient = new SafeGlobalClient({
-          safeAddress: config.SAFE_ADDRESS,
-          chainId: nodeInfo.l1ChainId,
-          rpcUrl: config.ETHEREUM_NODE_URL,
-          proposerPrivateKey: config.MULTISIG_PROPOSER_PRIVATE_KEY,
-          safeApiKey: config.SAFE_API_KEY,
-        });
-        console.log(
-          `SafeGlobal client initialized for Safe at ${config.SAFE_ADDRESS}`,
-        );
-        safeClient.startPendingTransactionsPoll()
-      }
-
-      await initHandlers({
-        ethClient,
-        providerId: stakingProviderData.providerId,
-        safeClient,
-      });
-    } else {
-      console.log(
-        "Staking provider not yet scraped, handlers will be initialized after first scrape completes",
+  // Create SafeGlobal client if configured
+  if (config.SAFE_ADDRESS) {
+    // Validate that required Safe credentials are present
+    if (!config.MULTISIG_PROPOSER_PRIVATE_KEY || !config.SAFE_API_KEY) {
+      throw new Error(
+        "SAFE_ADDRESS is configured but MULTISIG_PROPOSER_PRIVATE_KEY or SAFE_API_KEY is missing. " +
+          "Both are required for Safe multisig functionality.",
       );
     }
-  } else {
+
+    // Initialize Aztec client to get node info
+    const aztecClient = new AztecClient({
+      nodeUrl: config.AZTEC_NODE_URL,
+    });
+    const nodeInfo = await aztecClient.getNodeInfo();
+
+    safeClient = new SafeGlobalClient({
+      safeAddress: config.SAFE_ADDRESS,
+      chainId: nodeInfo.l1ChainId,
+      rpcUrl: config.ETHEREUM_NODE_URL,
+      proposerPrivateKey: config.MULTISIG_PROPOSER_PRIVATE_KEY,
+      safeApiKey: config.SAFE_API_KEY,
+    });
     console.log(
-      "Staking provider admin address not configured, skipping handler initialization",
+      `SafeGlobal client initialized for Safe at ${config.SAFE_ADDRESS}`,
     );
+    safeClient.startPendingTransactionsPoll();
   }
+
+  // Initialize handlers (currently only publisher top-up)
+  await initHandlers({
+    safeClient,
+  });
 
   // Setup graceful shutdown
   let isShuttingDown = false;
@@ -229,11 +197,6 @@ export const startServer = async () => {
       await shutdownHandlers();
       console.log("Handlers shut down");
 
-      // Shutdown watchers
-      console.log("Shutting down watchers...");
-      await shutdownWatchers();
-      console.log("Watchers shut down");
-
       // Shutdown scrapers
       console.log("Shutting down scrapers...");
       await scraperManager.shutdown();
@@ -242,7 +205,7 @@ export const startServer = async () => {
       // Shutdown scrapers
       if (safeClient) {
         console.log("Shutting down Safe client poller...");
-        safeClient.cancelPendingTransactionsPoll()
+        safeClient.cancelPendingTransactionsPoll();
         console.log("Safe client shut down");
       }
 

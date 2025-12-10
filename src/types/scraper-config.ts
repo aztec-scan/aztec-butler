@@ -4,7 +4,8 @@ import { z } from "zod";
 
 export const ScraperAttesterSchema = z.object({
   address: z.string().startsWith("0x").length(42),
-  coinbase: z.string().startsWith("0x").length(42),
+  coinbase: z.string().startsWith("0x").length(42), // Required - use 0x0000000000000000000000000000000000000000 if not yet set
+  publisher: z.string().startsWith("0x").length(42),
 });
 
 export const ScraperPublisherSchema = z.object({

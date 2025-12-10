@@ -105,6 +105,8 @@ function deepFreeze<T>(obj: T): Readonly<T> {
  * Global application state
  */
 let appState: AppState = {
+  dirData: null,
+  previousDirData: null,
   stakingProviderData: null,
   scraperConfig: null,
   attesterStates: new Map(),
@@ -116,6 +118,9 @@ let appState: AppState = {
 /**
  * Callbacks to notify when state changes
  */
+type StateChangeCallback = (change: CoinbaseChange) => void;
+const coinbaseChangeCallbacks: StateChangeCallback[] = [];
+
 type AttesterStateChangeCallback = (
   attesterAddress: string,
   newState: AttesterState,
@@ -456,6 +461,92 @@ export const getState = (): Readonly<AppState> => {
 };
 
 /**
+ * Update directory data and detect coinbase changes
+ */
+export const updateDirData = (newDirData: unknown): CoinbaseChange[] => {
+  // Validate input
+  let validated: DirData;
+  try {
+    validated = DirDataSchema.parse(newDirData);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      console.error("[State] Invalid DirData:", error.errors);
+      // Log detailed validation errors
+      for (const err of error.errors) {
+        console.error(`  - ${err.path.join(".")}: ${err.message}`);
+      }
+    }
+    throw new Error("Failed to update directory data: invalid format");
+  }
+
+  // Freeze for immutability
+  const frozenData = deepFreeze(validated);
+
+  const changes: CoinbaseChange[] = [];
+  const prevDirData = appState.dirData;
+
+  // Compare keystores to detect coinbase changes
+  if (prevDirData) {
+    for (const newKeystore of frozenData.keystores) {
+      const prevKeystore = prevDirData.keystores.find(
+        (k) => k.id === newKeystore.id,
+      );
+
+      // Check each validator for coinbase changes
+      for (const validator of newKeystore.data.validators) {
+        // Derive address from private key
+        const attesterAddress = getAddressFromPrivateKey(
+          validator.attester.eth as `0x${string}`,
+        );
+
+        const prevValidator = prevKeystore?.data.validators.find((v) => {
+          const prevAddress = getAddressFromPrivateKey(
+            v.attester.eth as `0x${string}`,
+          );
+          return prevAddress === attesterAddress;
+        });
+
+        // Detect when coinbase is added or changed
+        const prevCoinbase = prevValidator?.coinbase;
+        const newCoinbase = validator.coinbase;
+
+        if (newCoinbase && prevCoinbase !== newCoinbase) {
+          const change: CoinbaseChange = {
+            keystoreId: newKeystore.id,
+            keystorePath: newKeystore.path,
+            attesterEth: attesterAddress,
+            attesterBls: validator.attester.bls,
+            coinbaseAddress: newCoinbase,
+            previousCoinbase: prevCoinbase,
+          };
+          changes.push(change);
+          console.log(
+            `[State] Coinbase change detected for attester ${attesterAddress}: ${prevCoinbase || "none"} -> ${newCoinbase}`,
+          );
+        }
+      }
+    }
+  }
+
+  // Update state
+  appState.previousDirData = appState.dirData;
+  appState.dirData = frozenData;
+
+  // Notify callbacks of changes
+  for (const change of changes) {
+    for (const callback of coinbaseChangeCallbacks) {
+      try {
+        callback(change);
+      } catch (error) {
+        console.error("[State] Error in coinbase change callback:", error);
+      }
+    }
+  }
+
+  return changes;
+};
+
+/**
  * Update staking provider data from scraper
  */
 export const updateStakingProviderData = (newStakingProviderData: unknown) => {
@@ -483,6 +574,13 @@ export const updateStakingProviderData = (newStakingProviderData: unknown) => {
   // Freeze for immutability
   const frozenData = deepFreeze(validated);
   appState.stakingProviderData = frozenData;
+};
+
+/**
+ * Register a callback for coinbase changes
+ */
+export const onCoinbaseChange = (callback: StateChangeCallback): void => {
+  coinbaseChangeCallbacks.push(callback);
 };
 
 /**
@@ -645,23 +743,77 @@ export const getAttestersByState = (
 };
 
 /**
- * Get all attester coinbase information from scraper config
- * Returns map of attester address -> coinbase address
+ * Initialize attester states from directory data
+ * This should be called on server startup
  */
-export const getAttesterCoinbaseInfo = (): Map<string, string> => {
-  const coinbaseMap = new Map<string, string>();
+export const initAttesterStates = (dirData: DirData): void => {
+  console.log("[State] Initializing attester states from directory data...");
 
-  if (!appState.scraperConfig) {
-    return coinbaseMap;
-  }
+  const attesterAddresses = new Set<string>();
 
-  for (const attester of appState.scraperConfig.attesters) {
-    if (attester.coinbase) {
-      coinbaseMap.set(attester.address, attester.coinbase);
+  // Collect all attester addresses from keystores
+  for (const keystore of dirData.keystores) {
+    for (const validator of keystore.data.validators) {
+      // Derive address from private key
+      const attesterAddress = getAddressFromPrivateKey(
+        validator.attester.eth as `0x${string}`,
+      );
+      attesterAddresses.add(attesterAddress);
     }
   }
 
+  console.log(`[State] Found ${attesterAddresses.size} attesters in keystores`);
+
+  // Initialize or update each attester's state
+  for (const attesterAddress of attesterAddresses) {
+    const existing = appState.attesterStates.get(attesterAddress);
+    if (!existing) {
+      // New attester, set to NEW state
+      updateAttesterState(attesterAddress, AttesterState.NEW);
+    }
+  }
+
+  console.log(
+    `[State] Attester states initialized: ${appState.attesterStates.size} attesters`,
+  );
+};
+
+/**
+ * Get all attester coinbase information from directory data or scraper config
+ * Returns map of attester address -> coinbase address (or undefined if missing)
+ */
+export const getAttesterCoinbaseInfo = (): Map<string, string | undefined> => {
+  const coinbaseMap = new Map<string, string | undefined>();
+
+  // Prefer scraper config if available (new scraper mode)
+  if (appState.scraperConfig) {
+    for (const attester of appState.scraperConfig.attesters) {
+      coinbaseMap.set(attester.address, attester.coinbase);
+    }
+    return coinbaseMap;
+  }
+
+  // Fall back to directory data (legacy mode)
+  if (!appState.dirData) {
+    return coinbaseMap;
+  }
+
+  for (const keystore of appState.dirData.keystores) {
+    for (const validator of keystore.data.validators) {
+      const attesterAddress = getAddressFromPrivateKey(
+        validator.attester.eth as `0x${string}`,
+      );
+      coinbaseMap.set(attesterAddress, validator.coinbase);
+    }
+  }
   return coinbaseMap;
+};
+
+/**
+ * Get directory data
+ */
+export const getDirData = (): DirData | null => {
+  return appState.dirData;
 };
 
 /**

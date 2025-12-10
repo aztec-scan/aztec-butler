@@ -182,3 +182,56 @@ export function extractAttesterCoinbasePairs(keystores: Keystore[]): Array<{
 
   return pairs;
 }
+
+/**
+ * Extract attester data with publisher mappings from keystores
+ * Returns complete attester info for scraper config generation
+ */
+export function extractAttesterDataWithPublisher(keystores: Keystore[]): Array<{
+  address: string;
+  coinbase: string | undefined;
+  publisher: string;
+}> {
+  const attesterData: Array<{
+    address: string;
+    coinbase: string | undefined;
+    publisher: string;
+  }> = [];
+
+  for (const keystore of keystores) {
+    for (const validator of keystore.data.validators) {
+      const attesterAddress = getAddressFromPrivateKey(
+        validator.attester.eth as HexString,
+      );
+
+      // Extract publisher (handle both single and array cases)
+      let publisherAddress: string;
+      if (typeof validator.publisher === "string") {
+        publisherAddress = getAddressFromPrivateKey(
+          validator.publisher as HexString,
+        );
+      } else {
+        // For array, use first publisher
+        publisherAddress = getAddressFromPrivateKey(
+          validator.publisher[0] as HexString,
+        );
+      }
+
+      // Get coinbase, only set if not zero address
+      const coinbaseRaw = validator.coinbase;
+      const coinbase =
+        coinbaseRaw &&
+        coinbaseRaw !== "0x0000000000000000000000000000000000000000"
+          ? coinbaseRaw
+          : undefined;
+
+      attesterData.push({
+        address: attesterAddress,
+        coinbase,
+        publisher: publisherAddress,
+      });
+    }
+  }
+
+  return attesterData;
+}
