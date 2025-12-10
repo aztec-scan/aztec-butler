@@ -23,8 +23,9 @@ async function main() {
     console.log(
       "  generate-scraper-config              Generate scraper configuration from keystores",
     );
+    console.log("  scrape-coinbases [--full] [--from-block <block>]");
     console.log(
-      "  scrape-coinbases                     Scrape coinbase addresses from chain",
+      "                                       Scrape coinbase addresses from chain",
     );
     console.log(
       "  add-keys <keystore> [--update-config] Generate calldata to add keys",
@@ -35,6 +36,9 @@ async function main() {
     console.log("");
     console.log("Examples:");
     console.log("  npm run cli -- generate-scraper-config");
+    console.log("  npm run cli -- scrape-coinbases");
+    console.log("  npm run cli -- scrape-coinbases --full");
+    console.log("  npm run cli -- scrape-coinbases --from-block 12345678");
     console.log(
       "  npm run cli -- add-keys keystores/examples/key1.json --update-config",
     );
@@ -42,7 +46,7 @@ async function main() {
     process.exit(0);
   }
 
-  // Initialize config
+  // Initialize config only after help check
   const config = await initConfig();
 
   // Initialize Aztec client
@@ -95,9 +99,19 @@ async function main() {
         process.exit(1);
       }
 
+      // Parse flags
+      const fullRescrape = args.includes("--full");
+      const fromBlockIndex = args.indexOf("--from-block");
+      const fromBlock =
+        fromBlockIndex !== -1 && args[fromBlockIndex + 1]
+          ? BigInt(args[fromBlockIndex + 1])
+          : undefined;
+
       await command.scrapeCoinbases(ethClient, config, {
         network: config.NETWORK,
         keystorePaths,
+        fullRescrape,
+        fromBlock,
       });
       break;
     }
@@ -154,9 +168,13 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("❌ Error:", error.message);
-  if (error.stack) {
-    console.error(error.stack);
+  if (error instanceof Error) {
+    console.error("❌ Error:", error.message);
+    if (error.stack) {
+      console.error(error.stack);
+    }
+  } else {
+    console.error("❌ Error:", error);
   }
   process.exit(1);
 });

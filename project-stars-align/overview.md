@@ -37,19 +37,23 @@
 
 **Result**: No more Docker directory dependencies anywhere in codebase
 
+### Phase 4: Incremental Coinbase Scraping
+
+- ✅ Created shared `CoinbaseScraper` component in `src/core/components/`
+- ✅ Implemented incremental scraping from `lastScrapedBlock` to current
+- ✅ Added `--full` flag to force full rescrape
+- ✅ Added `--from-block <block>` flag for manual block range control
+- ✅ Smart merge logic with conflict detection
+- ✅ Zero address (`0x0000...`) can always be overridden
+- ✅ Non-zero coinbase conflicts throw errors with block number
+- ✅ Updated bash script to support new flags
+- ✅ Updated documentation in `scripts/README.md`
+
+**Result**: Incremental scrapes take seconds instead of minutes, with safe merge and validation
+
 ---
 
 ## What Needs to Be Done
-
-### Incremental Coinbase Scraping
-
-- Store `lastScrapedBlock` in coinbase cache (`{network}-mapped-coinbases.json`)
-- Update `scrape-coinbases.ts` to query events from last block to current
-- Add `--from-block <block>` CLI flag for manual control
-- Add `--full` flag to force full rescrape
-- Merge incremental results with existing cache
-
-**Benefits**: Seconds instead of minutes, less RPC load
 
 ### CLI Argument Improvements
 

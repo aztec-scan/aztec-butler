@@ -33,8 +33,21 @@ Collection of bash scripts for common Aztec Butler operations.
 ### 2. Scrape Coinbase Addresses
 
 ```bash
+# Incremental scrape (default - fast, uses cache)
 ./scripts/scrape-coinbases.sh
+
+# Full rescrape from deployment block
+./scripts/scrape-coinbases.sh --full
+
+# Custom start block
+./scripts/scrape-coinbases.sh --from-block 12345678
 ```
+
+**Modes:**
+
+- **Default (incremental)**: Scrapes only new blocks since last run (seconds, recommended)
+- **`--full`**: Full rescrape from deployment block (minutes, useful for validation)
+- **`--from-block N`**: Start from specific block number (useful for recovery)
 
 **What it does:**
 
@@ -42,12 +55,18 @@ Collection of bash scripts for common Aztec Butler operations.
 - Extracts attester addresses
 - Scrapes `StakedWithProvider` events from StakingRegistry contract
 - Maps each attester to their coinbase split contract address
+- Merges with existing cache if available
+- Validates for coinbase conflicts
 
 **Output:** `~/.local/share/aztec-butler/{network}-mapped-coinbases.json`
 
 **Use case:** Discover coinbase addresses for attesters (required for accurate scraper config)
 
-**Note:** This can take several minutes as it scrapes historical blockchain events.
+**Performance:**
+
+- First run: Several minutes (scrapes all historical events)
+- Subsequent runs: Seconds (only scrapes new blocks)
+- Use `--full` to force complete rescrape if needed
 
 ---
 
@@ -208,8 +227,14 @@ npm run cli -- add-keys keystores/examples/key1.json --update-config
 # Check balances
 npm run cli -- check-publisher-eth
 
-# Scrape coinbases
+# Scrape coinbases (incremental)
 npm run cli -- scrape-coinbases
+
+# Scrape coinbases (full rescrape)
+npm run cli -- scrape-coinbases --full
+
+# Scrape from specific block
+npm run cli -- scrape-coinbases --from-block 12345678
 ```
 
 ---
