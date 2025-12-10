@@ -166,6 +166,11 @@ The codebase is well-structured for this split:
 2. Update daemon/install scripts if needed
 3. Document prerequisites (generating keys etc.)
 
+## Guidlines
+
+- There is no need for backwards compability for any functionality
+- There is no need to consider migration of existing systems
+
 ## External Repository Changes Required
 
 As noted in goal.md, changes needed in other repos:
