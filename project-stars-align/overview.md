@@ -54,47 +54,6 @@
 - Add `--output <format>` flag for output format (json, text)
 - Consider using `yargs` or similar for better arg parsing
 
-### External Changes Needed
-
-#### Ansible Updates
-
-- Remove AZTEC_DOCKER_DIR from all playbooks
-- Update scraper config distribution (copy from operator machine to monitoring server)
-- Update environment templates to not include AZTEC_DOCKER_DIR
-- Add restart procedure for config updates
-
-#### GCP Secrets
-
-- Store: `SAFE_API_KEY`, `METRICS_BEARER_TOKEN`
-- NOT needed on server: Keystore private keys, Publisher private keys
-
-#### Documentation
-
-- Migration guide from old system
-- Operator runbook (adding validators workflow)
-- Server administration guide (config updates, restarts)
-
-#### Monitoring & Alerting
-
-```yaml
-- alert: AttesterMissingCoinbaseUrgent
-  expr: attesters_missing_coinbase_urgent > 0
-  for: 5m
-
-- alert: PublisherLowBalance
-  expr: publisher_required_topup > 0
-  for: 10m
-```
-
-#### Grafana Dashboards
-
-- Scraper config visualization
-- Publisher balance trends
-- Attester state transitions
-- Coinbase coverage metrics
-
----
-
 ## Current Architecture
 
 **CLI Mode** (operator machine with keystores):
@@ -114,5 +73,5 @@
 **Deployment Flow**:
 
 1. Operator generates scraper config via CLI
-2. SCP config to monitoring server
+2. (ansible) config to monitoring server
 3. Restart server to load new config
