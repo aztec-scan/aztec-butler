@@ -52,7 +52,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 **What it does:**
 
 - Finds all keystores in `./keystores/`
-- Extracts attester and publisher addresses
+- Extracts attester addresses (publishers derived from attesters)
 - Queries staking provider from chain (or uses provided ID)
 - Checks for cached coinbase mappings
 - Generates scraper configuration
@@ -204,7 +204,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 - Checks for duplicate attesters in provider queue (prevents failures)
 - Generates BLS registration data using GSE contract
 - Creates `addKeysToProvider` calldata
-- Optionally updates scraper config with new attesters/publishers
+- Optionally updates scraper config with new attesters
 
 **Output:** Calldata JSON printed to console + attester addresses
 
@@ -223,7 +223,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 **What it does:**
 
 - Finds all keystores in `./keystores/`
-- Extracts publisher addresses and calculates load per publisher
+- Derives unique publisher addresses from attesters
 - Checks on-chain ETH balances
 - Calculates required top-ups (0.1 ETH per attester load)
 - Generates funding calldata for publishers needing ETH

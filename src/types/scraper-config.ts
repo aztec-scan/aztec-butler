@@ -8,24 +8,18 @@ export const ScraperAttesterSchema = z.object({
   publisher: z.string().startsWith("0x").length(42),
 });
 
-export const ScraperPublisherSchema = z.object({
-  address: z.string().startsWith("0x").length(42),
-});
-
 export const ScraperConfigSchema = z.object({
   network: z.string(),
   l1ChainId: z.union([z.literal(1), z.literal(11155111)]), // TODO: use named constants from somehwere (mainnet and sepolia)
   stakingProviderId: z.coerce.bigint(),
   stakingProviderAdmin: z.string().startsWith("0x").length(42),
   attesters: z.array(ScraperAttesterSchema),
-  publishers: z.array(ScraperPublisherSchema),
   lastUpdated: z.string().datetime(),
   version: z.literal("1.0"),
 });
 
 export type ScraperConfig = z.infer<typeof ScraperConfigSchema>;
 export type ScraperAttester = z.infer<typeof ScraperAttesterSchema>;
-export type ScraperPublisher = z.infer<typeof ScraperPublisherSchema>;
 
 // Coinbase Mapping Cache Schemas
 

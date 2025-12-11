@@ -12,10 +12,7 @@ import {
   loadScraperConfig,
   saveScraperConfig,
 } from "../../core/utils/scraperConfigOperations.js";
-import {
-  extractPublisherAddresses,
-  extractAttesterCoinbasePairs,
-} from "../../core/utils/keystoreOperations.js";
+import { extractAttesterCoinbasePairs } from "../../core/utils/keystoreOperations.js";
 
 interface AddKeysOptions {
   keystorePath: string;
@@ -169,12 +166,11 @@ const command = async (
       const scraperConfig = await loadScraperConfig(options.network);
       console.log("✅ Loaded existing scraper config");
 
-      // Extract new attesters and publishers from keystore
+      // Extract new attesters from keystore
       const { extractAttesterDataWithPublisher } = await import(
         "../../core/utils/keystoreOperations.js"
       );
       const attesterData = extractAttesterDataWithPublisher([keystore]);
-      const publisherAddresses = extractPublisherAddresses([keystore]);
 
       // Add new attesters (avoid duplicates)
       const existingAttesterAddrs = new Set(
@@ -191,25 +187,21 @@ const command = async (
           publisher: data.publisher,
         }));
 
-      // Add new publishers (avoid duplicates)
-      const existingPublisherAddrs = new Set(
-        scraperConfig.publishers.map((p) => p.address.toLowerCase()),
-      );
-      const newPublishers = publisherAddresses
-        .filter((addr) => !existingPublisherAddrs.has(addr.toLowerCase()))
-        .map((addr) => ({ address: addr }));
-
-      if (newAttesters.length === 0 && newPublishers.length === 0) {
-        console.log("⚠️  All attesters and publishers already in config");
+      if (newAttesters.length === 0) {
+        console.log("⚠️  All attesters already in config");
       } else {
         scraperConfig.attesters.push(...newAttesters);
-        scraperConfig.publishers.push(...newPublishers);
         scraperConfig.lastUpdated = new Date().toISOString();
 
         await saveScraperConfig(scraperConfig);
         console.log(`✅ Updated scraper config:`);
         console.log(`   Added ${newAttesters.length} new attester(s)`);
-        console.log(`   Added ${newPublishers.length} new publisher(s)`);
+
+        // Count unique publishers
+        const uniquePublishers = new Set(
+          scraperConfig.attesters.map((a) => a.publisher),
+        ).size;
+        console.log(`   Total unique publishers: ${uniquePublishers}`);
       }
     } catch (error) {
       console.warn(

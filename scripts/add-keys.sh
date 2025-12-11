@@ -7,7 +7,7 @@
 # - Check for duplicate attesters in provider queue
 # - Generate BLS registration data
 # - Generate addKeysToProvider calldata
-# - Optionally update scraper config with new attesters/publishers
+# - Optionally update scraper config with new attesters
 #
 # Arguments:
 #   keystore-file: Path to keystore JSON file (required)

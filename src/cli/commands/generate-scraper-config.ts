@@ -1,9 +1,6 @@
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-import {
-  extractPublisherAddresses,
-  extractAttesterDataWithPublisher,
-} from "../../core/utils/keystoreOperations.js";
+import { extractAttesterDataWithPublisher } from "../../core/utils/keystoreOperations.js";
 import {
   saveScraperConfig,
   getCachedCoinbase,
@@ -11,7 +8,6 @@ import {
 import type {
   ScraperConfig,
   ScraperAttester,
-  ScraperPublisher,
 } from "../../types/scraper-config.js";
 
 interface GenerateScraperConfigOptions {
@@ -77,15 +73,7 @@ const command = async (
 
   console.log(`\n✅ Including ${attesters.length} attester(s) in config`);
 
-  // 4. Extract publisher addresses
-  console.log("\nExtracting publisher addresses...");
-  const publisherAddresses = extractPublisherAddresses(keystores);
-  const publishers: ScraperPublisher[] = publisherAddresses.map((addr) => ({
-    address: addr,
-  }));
-  console.log(`✅ Found ${publishers.length} unique publisher(s)`);
-
-  // 5. Query staking provider ID from chain (or use provided ID)
+  // 4. Query staking provider ID from chain (or use provided ID)
   let providerData;
   let stakingProviderAdmin: string | undefined;
 
@@ -125,28 +113,30 @@ const command = async (
     console.log(`   Take Rate: ${providerData.takeRate}`);
   }
 
-  // 6. Generate config
+  // 5. Generate config
   const scraperConfig: ScraperConfig = {
     network: options.network,
     l1ChainId: options.l1ChainId as 1 | 11155111,
     stakingProviderId: providerData.providerId,
     stakingProviderAdmin: stakingProviderAdmin || "unknown",
     attesters,
-    publishers,
     lastUpdated: new Date().toISOString(),
     version: "1.0",
   };
 
-  // 7. Validate and save
+  // 6. Validate and save
   console.log("\nSaving scraper configuration...");
   const outputPath = await saveScraperConfig(scraperConfig, options.outputPath);
+
+  // Calculate unique publishers for summary
+  const uniquePublishers = new Set(attesters.map((a) => a.publisher)).size;
 
   console.log(`\n✅ Scraper config generated: ${outputPath}`);
   console.log(`\nSummary:`);
   console.log(`  Network: ${options.network}`);
   console.log(`  Staking Provider ID: ${providerData.providerId}`);
   console.log(`  Attesters: ${attesters.length}`);
-  console.log(`  Publishers: ${publishers.length}`);
+  console.log(`  Publishers: ${uniquePublishers}`);
   console.log(`\nYou can now copy this file to your monitoring server.`);
 };
 

@@ -6,7 +6,7 @@
 #
 # This will:
 # - Find all keystores in ./keystores/
-# - Extract attesters and publishers
+# - Extract attesters (publishers are derived from attesters)
 # - Query staking provider from chain (or use provided ID)
 # - Generate scraper config with coinbase mappings
 #

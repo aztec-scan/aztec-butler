@@ -13,7 +13,7 @@
 # - Load scraper config (public keys only)
 # - Start Prometheus metrics exporter on port 9464
 # - Run periodic scrapers for on-chain data
-# - Track attester states and publisher balances
+# - Track attester states and publisher balances (publishers derived from attesters)
 
 set -e
 
