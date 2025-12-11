@@ -48,16 +48,9 @@ export class CoinbaseScraperError extends Error {
  *
  * This uses event-based scraping (StakedWithProvider events) which requires an
  * archive node for historical data.
- *
- * NOTE: For an alternative approach that queries on-chain state directly
- * (staking provider queue + active validators on AztecRollup), see:
- * plan-scrape-staking-queue-and-active-validators.md
- *
- * The state-based approach can work without archive nodes and validates
- * against current on-chain truth.
  */
 export class CoinbaseScraper {
-  constructor(private options: CoinbaseScraperOptions) {}
+  constructor(private options: CoinbaseScraperOptions) { }
 
   /**
    * Scrape coinbase addresses incrementally from last scraped block to current.
@@ -331,12 +324,12 @@ export class CoinbaseScraper {
       conflictBlock = newMapping.blockNumber;
       throw new CoinbaseScraperError(
         `\n❌ FATAL: Coinbase conflict detected for ${newMapping.attesterAddress}!\n` +
-          `  Cached:  ${existing.coinbaseAddress} (block ${existing.blockNumber})\n` +
-          `  Scraped: ${newMapping.coinbaseAddress} (block ${newMapping.blockNumber})\n` +
-          `  Conflict detected at block: ${conflictBlock}\n` +
-          `\n` +
-          `This indicates a serious problem. Coinbase addresses should not change.\n` +
-          `Please investigate manually before proceeding.`,
+        `  Cached:  ${existing.coinbaseAddress} (block ${existing.blockNumber})\n` +
+        `  Scraped: ${newMapping.coinbaseAddress} (block ${newMapping.blockNumber})\n` +
+        `  Conflict detected at block: ${conflictBlock}\n` +
+        `\n` +
+        `This indicates a serious problem. Coinbase addresses should not change.\n` +
+        `Please investigate manually before proceeding.`,
         conflictBlock,
       );
     }
@@ -362,7 +355,7 @@ export class CoinbaseScraper {
     if (!archiveClient) {
       throw new Error(
         "Archive node is required for coinbase scraping.\n" +
-          "Please configure ETHEREUM_ARCHIVE_NODE_URL in your config file.",
+        "Please configure ETHEREUM_ARCHIVE_NODE_URL in your config file.",
       );
     }
     return archiveClient;

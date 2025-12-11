@@ -47,6 +47,7 @@ export enum AttesterState {
   COINBASE_NEEDED = "COINBASE_NEEDED",
   IN_STAKING_QUEUE = "IN_STAKING_QUEUE",
   ACTIVE = "ACTIVE",
+  NO_LONGER_ACTIVE = "NO_LONGER_ACTIVE"
 }
 
 // Schema for attester state entry
@@ -539,7 +540,7 @@ export const updateAttesterState = (
   ) {
     console.error(
       `ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
-        `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
+      `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
   }

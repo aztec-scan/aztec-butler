@@ -16,6 +16,7 @@ To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/
 
 ### Roadmap
 
+1. TODO: !!!! coinbase 0x00..00 must not be allowed, it is invalid for when proposing blocks in Aztec !!!!!
 1. replace need for aztecmonitor
    - P2P connection status
    - chain tips
