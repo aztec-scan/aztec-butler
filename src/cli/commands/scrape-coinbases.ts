@@ -6,14 +6,12 @@ import {
 } from "../../core/components/CoinbaseScraper.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import { extractAttesterAddresses } from "../../core/utils/keystoreOperations.js";
-import { loadScraperConfig } from "../../core/utils/scraperConfigOperations.js";
 
 interface ScrapeCoinbasesOptions {
   network: string;
   fromBlock?: bigint;
   fullRescrape?: boolean;
   keystorePaths?: string[];
-  configPath?: string;
   outputPath?: string;
   providerId?: bigint;
 }
@@ -40,25 +38,16 @@ const command = async (
   console.log("Loading attester addresses...");
   let attesterAddresses: string[];
 
-  if (options.keystorePaths) {
-    console.log(`Loading ${options.keystorePaths.length} keystore file(s)...`);
-    const { loadKeystoresFromPaths } = await import(
-      "../../core/utils/keystoreOperations.js"
-    );
-    const keystores = await loadKeystoresFromPaths(options.keystorePaths);
-    attesterAddresses = extractAttesterAddresses(keystores);
-  } else if (options.configPath) {
-    console.log(`Loading from scraper config: ${options.configPath}`);
-    const scraperConfig = await loadScraperConfig(
-      options.network,
-      options.configPath,
-    );
-    attesterAddresses = scraperConfig.attesters.map((a) => a.address);
-  } else {
-    throw new Error(
-      "Must provide either keystore paths or config path to get attester addresses",
-    );
+  if (!options.keystorePaths) {
+    throw new Error("Keystore paths are required");
   }
+
+  console.log(`Loading ${options.keystorePaths.length} keystore file(s)...`);
+  const { loadKeystoresFromPaths } = await import(
+    "../../core/utils/keystoreOperations.js"
+  );
+  const keystores = await loadKeystoresFromPaths(options.keystorePaths);
+  attesterAddresses = extractAttesterAddresses(keystores);
 
   console.log(`✅ Found ${attesterAddresses.length} attester(s) to check`);
 

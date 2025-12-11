@@ -45,7 +45,16 @@ export class CoinbaseScraperError extends Error {
 
 /**
  * Shared component for scraping coinbase addresses from StakingRegistry events.
- * Used by CLI commands and potentially server scrapers.
+ *
+ * This uses event-based scraping (StakedWithProvider events) which requires an
+ * archive node for historical data.
+ *
+ * NOTE: For an alternative approach that queries on-chain state directly
+ * (staking provider queue + active validators on AztecRollup), see:
+ * plan-scrape-staking-queue-and-active-validators.md
+ *
+ * The state-based approach can work without archive nodes and validates
+ * against current on-chain truth.
  */
 export class CoinbaseScraper {
   constructor(private options: CoinbaseScraperOptions) {}
