@@ -9,9 +9,41 @@ import { AztecClient } from "./src/core/components/AztecClient.js";
 import { EthereumClient } from "./src/core/components/EthereumClient.js";
 import * as command from "./src/cli/commands/index.js";
 import { glob } from "glob";
+import { inspect } from "util";
 
 const args = process.argv.slice(2);
 const commandName = args[0];
+
+/**
+ * Format any error type into a readable string with stack trace
+ */
+function formatError(error: unknown): string {
+  // Handle standard Error instances
+  if (error instanceof Error) {
+    return error.stack || error.message;
+  }
+
+  // Handle objects with error-like properties
+  if (error && typeof error === "object") {
+    const err = error as any;
+    // Try common error properties
+    if (err.message) return String(err.message);
+    if (err.reason) return String(err.reason);
+    if (err.shortMessage) return String(err.shortMessage);
+
+    // Try JSON.stringify
+    try {
+      const json = JSON.stringify(error, null, 2);
+      if (json && json !== "{}") return json;
+    } catch {}
+
+    // Fallback to util.inspect for objects that can't be stringified
+    return inspect(error, { depth: 3, colors: false });
+  }
+
+  // Primitive types
+  return String(error);
+}
 
 async function main() {
   if (!commandName || commandName === "help" || commandName === "--help") {
@@ -92,9 +124,10 @@ async function main() {
 
       // Parse --provider-id flag
       const providerIdIndex = args.indexOf("--provider-id");
+      const providerIdArg = args[providerIdIndex + 1];
       const providerId =
-        providerIdIndex !== -1 && args[providerIdIndex + 1]
-          ? BigInt(args[providerIdIndex + 1])
+        providerIdIndex !== -1 && providerIdArg
+          ? BigInt(providerIdArg)
           : undefined;
 
       await command.generateScraperConfig(ethClient, config, {
@@ -121,21 +154,23 @@ async function main() {
       // Parse flags
       const fullRescrape = args.includes("--full");
       const fromBlockIndex = args.indexOf("--from-block");
+      const fromBlockArg = args[fromBlockIndex + 1];
       const fromBlock =
-        fromBlockIndex !== -1 && args[fromBlockIndex + 1]
-          ? BigInt(args[fromBlockIndex + 1])
+        fromBlockIndex !== -1 && fromBlockArg
+          ? BigInt(fromBlockArg)
           : undefined;
       const providerIdIndex = args.indexOf("--provider-id");
+      const providerIdArg = args[providerIdIndex + 1];
       const providerId =
-        providerIdIndex !== -1 && args[providerIdIndex + 1]
-          ? BigInt(args[providerIdIndex + 1])
+        providerIdIndex !== -1 && providerIdArg
+          ? BigInt(providerIdArg)
           : undefined;
 
       await command.scrapeCoinbases(ethClient, config, {
         network: config.NETWORK,
         keystorePaths,
         fullRescrape,
-        fromBlock,
+        ...(fromBlock !== undefined ? { fromBlock } : {}),
         ...(providerId !== undefined ? { providerId } : {}),
       });
       break;
@@ -212,13 +247,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  if (error instanceof Error) {
-    console.error("❌ Error:", error.message);
-    if (error.stack) {
-      console.error(error.stack);
-    }
-  } else {
-    console.error("❌ Error:", error);
-  }
+  console.error("❌ Error:\n");
+  console.error(formatError(error));
   process.exit(1);
 });
