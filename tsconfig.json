@@ -28,5 +28,5 @@
   "ts-node": {
     "esm": true
   },
-  "exclude": ["test-cli-commands.ts", "cli.ts"]
+  "exclude": ["test-cli-commands.ts", "cli.ts", "dist", "node_modules"]
 }

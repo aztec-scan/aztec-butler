@@ -38,7 +38,13 @@ function formatError(error: unknown): string {
     } catch {}
 
     // Fallback to util.inspect for objects that can't be stringified
-    return inspect(error, { depth: 3, colors: false });
+    // Use showHidden: false to avoid issues with internal symbols
+    try {
+      return inspect(error, { depth: 3, colors: false, showHidden: false });
+    } catch {
+      // If inspect fails, return a basic string representation
+      return `[Object: ${Object.prototype.toString.call(error)}]`;
+    }
   }
 
   // Primitive types
@@ -63,6 +69,12 @@ async function main() {
       "                                       Scrape coinbase addresses from chain",
     );
     console.log(
+      "  scrape-attester-status [--active] [--queued] [--all-active] [--all-queued] [--address <addr>]",
+    );
+    console.log(
+      "                                       Scrape attester on-chain status (defaults to config attesters)",
+    );
+    console.log(
       "  add-keys <keystore> [--update-config] Generate calldata to add keys",
     );
     console.log(
@@ -79,6 +91,13 @@ async function main() {
     console.log("  npm run cli -- scrape-coinbases --full");
     console.log("  npm run cli -- scrape-coinbases --from-block 12345678");
     console.log("  npm run cli -- scrape-coinbases --provider-id 123");
+    console.log("  npm run cli -- scrape-attester-status");
+    console.log("  npm run cli -- scrape-attester-status --active");
+    console.log("  npm run cli -- scrape-attester-status --queued");
+    console.log("  npm run cli -- scrape-attester-status --active --queued");
+    console.log("  npm run cli -- scrape-attester-status --all-active");
+    console.log("  npm run cli -- scrape-attester-status --all-queued");
+    console.log("  npm run cli -- scrape-attester-status --address 0x123...");
     console.log(
       "  npm run cli -- add-keys keystores/examples/key1.json --update-config",
     );
@@ -172,6 +191,32 @@ async function main() {
         fullRescrape,
         ...(fromBlock !== undefined ? { fromBlock } : {}),
         ...(providerId !== undefined ? { providerId } : {}),
+      });
+      break;
+    }
+
+    case "scrape-attester-status": {
+      // Parse flags
+      const allActive = args.includes("--all-active");
+      const allQueued = args.includes("--all-queued");
+      const active = args.includes("--active");
+      const queued = args.includes("--queued");
+
+      // Parse --address flags (can be multiple)
+      const addresses: string[] = [];
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === "--address" && args[i + 1]) {
+          addresses.push(args[i + 1]!);
+        }
+      }
+
+      await command.scrapeAttesterStatus(ethClient, {
+        allActive,
+        allQueued,
+        active,
+        queued,
+        network: config.NETWORK,
+        ...(addresses.length > 0 ? { addresses } : {}),
       });
       break;
     }

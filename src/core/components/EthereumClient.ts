@@ -11,6 +11,7 @@ import {
   getAddress,
   getContract,
   http,
+  HttpTransportConfig,
   parseAbiItem,
   type Address,
   type GetContractReturnType,
@@ -69,8 +70,16 @@ export class EthereumClient {
       throw new Error(`Unsupported chain ID: ${config.chainId}`);
     }
 
+    const httpConf: HttpTransportConfig = {
+      onFetchRequest: async (request) => {
+        // TODO: make this available through debug-flag
+        // const clonedRequest = request.clone();
+        // const body = await clonedRequest.text();
+        // console.log(body);
+      },
+    };
     this.client = createPublicClient({
-      transport: http(config.rpcUrl),
+      transport: http(config.rpcUrl, httpConf),
       chain,
     });
 
@@ -176,8 +185,7 @@ export class EthereumClient {
    * Get Etherscan address URL for the current chain
    */
   private getEtherscanAddressUrl(address: Address): string {
-    const etherscanBaseUrl =
-      this.client.chain?.blockExplorers?.default.url!;
+    const etherscanBaseUrl = this.client.chain?.blockExplorers?.default.url!;
     return `${etherscanBaseUrl}/address/${address}`;
   }
 
@@ -362,9 +370,7 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     let windowEnd = latestBlock;
     while (windowEnd >= lowerBound) {
       const windowStart =
-        windowEnd > LOG_RANGE_LIMIT
-          ? windowEnd - LOG_RANGE_LIMIT + 1n
-          : 0n;
+        windowEnd > LOG_RANGE_LIMIT ? windowEnd - LOG_RANGE_LIMIT + 1n : 0n;
       const rangeFrom = windowStart < lowerBound ? lowerBound : windowStart;
       logs = await fetchLogs(rangeFrom, windowEnd);
       if (logs.length > 0) {
@@ -631,6 +637,115 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     }
   }
 
+  /**
+   * Get the number of active attesters
+   * @returns Number of currently active attesters
+   */
+  async getActiveAttesterCount(): Promise<bigint> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getActiveAttesterCount();
+  }
+
+  /**
+   * Get attester address at given index in active attesters array
+   * @param index - Index in the active attesters array (0-based)
+   * @returns Attester address at the given index
+   */
+  async getAttesterAtIndex(index: bigint): Promise<string> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getAttesterAtIndex([index]);
+  }
+
+  /**
+   * Get all active attester addresses
+   * Iterates through all active attesters using getActiveAttesterCount and getAttesterAtIndex
+   * @returns Array of active attester addresses
+   */
+  async getAllActiveAttesters(): Promise<string[]> {
+    const count = await this.getActiveAttesterCount();
+    const attesters: string[] = [];
+
+    console.log(`Fetching ${count} attesters...`);
+    for (let i = 0n; i < count; i++) {
+      try {
+        const attester = await this.getAttesterAtIndex(i);
+        attesters.push(attester);
+      } catch (error) {
+        console.warn(`Failed to fetch attester at index ${i}:`, error);
+      }
+    }
+
+    return attesters;
+  }
+
+  /**
+   * Get the length of the entry queue (attesters waiting to become active)
+   * @returns Number of attesters in the entry queue
+   */
+  async getEntryQueueLength(): Promise<bigint> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getEntryQueueLength();
+  }
+
+  /**
+   * Get entry queue data at given index
+   * @param index - Index in the entry queue (0-based)
+   * @returns DepositArgs containing attester address and registration data
+   */
+  async getEntryQueueAt(index: bigint): Promise<{
+    attester: string;
+    withdrawer: string;
+    publicKeyInG1: { x: bigint; y: bigint };
+    publicKeyInG2: { x0: bigint; x1: bigint; y0: bigint; y1: bigint };
+    proofOfPossession: { x: bigint; y: bigint };
+    moveWithLatestRollup: boolean;
+  }> {
+    const rollupContract = this.getRollupContract();
+    const result = await rollupContract.read.getEntryQueueAt([index]);
+
+    return {
+      attester: result.attester,
+      withdrawer: result.withdrawer,
+      publicKeyInG1: {
+        x: result.publicKeyInG1.x,
+        y: result.publicKeyInG1.y,
+      },
+      publicKeyInG2: {
+        x0: result.publicKeyInG2.x0,
+        x1: result.publicKeyInG2.x1,
+        y0: result.publicKeyInG2.y0,
+        y1: result.publicKeyInG2.y1,
+      },
+      proofOfPossession: {
+        x: result.proofOfPossession.x,
+        y: result.proofOfPossession.y,
+      },
+      moveWithLatestRollup: result.moveWithLatestRollup,
+    };
+  }
+
+  /**
+   * Get all queued attester addresses
+   * Iterates through entry queue to get all attesters waiting to become active
+   * @returns Array of queued attester addresses
+   */
+  async getAllQueuedAttesters(): Promise<string[]> {
+    const queueLength = await this.getEntryQueueLength();
+    const attesters: string[] = [];
+
+    console.log(`Fetching ${queueLength} queued attesters...`);
+    for (let i = 0n; i < queueLength; i++) {
+      try {
+        const entry = await this.getEntryQueueAt(i);
+        attesters.push(entry.attester);
+      } catch (error) {
+        console.warn(`Failed to fetch queue entry at index ${i}:`, error);
+      }
+    }
+
+    return attesters;
+  }
+
   private decodeSplitUpdatedData(data: Hex): {
     recipients: string[];
     allocations: bigint[];
@@ -660,8 +775,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     const allocationsOffsetBytes = words[tupleBaseIndex + 1] ?? 0n;
     const totalAllocation = words[tupleBaseIndex + 2] ?? 0n;
 
-    const addressesIndex =
-      tupleBaseIndex + Number(addressesOffsetBytes / 32n);
+    const addressesIndex = tupleBaseIndex + Number(addressesOffsetBytes / 32n);
     const allocationsIndex =
       tupleBaseIndex + Number(allocationsOffsetBytes / 32n);
 

@@ -5,3 +5,4 @@ export { default as getCreateStakingProviderCallData } from "./get-create-stakin
 export { default as getAddKeysToStakingProviderCalldata } from "./get-add-keys-to-staking-provider-calldata.js";
 export { default as generateScraperConfig } from "./generate-scraper-config.js";
 export { default as scrapeCoinbases } from "./scrape-coinbases.js";
+export { default as scrapeAttesterStatus } from "./scrape-attester-status.js";

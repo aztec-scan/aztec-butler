@@ -113,7 +113,77 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 4. Add Keys to Staking Provider
+### 4. Scrape Attester Status
+
+```bash
+# Show all attesters from scraper config (default)
+./scripts/scrape-attester-status.sh
+
+# Show only active attesters from scraper config
+./scripts/scrape-attester-status.sh --active
+
+# Show only queued attesters from scraper config
+./scripts/scrape-attester-status.sh --queued
+
+# Show both active and queued from scraper config (same as default)
+./scripts/scrape-attester-status.sh --active --queued
+
+# Show ALL active attesters on-chain (not limited to config)
+./scripts/scrape-attester-status.sh --all-active
+
+# Show ALL queued attesters on-chain (not limited to config)
+./scripts/scrape-attester-status.sh --all-queued
+
+# Show ALL attesters on-chain
+./scripts/scrape-attester-status.sh --all-active --all-queued
+
+# Check specific attester(s)
+./scripts/scrape-attester-status.sh --address 0x123...
+./scripts/scrape-attester-status.sh --address 0x123... --address 0x456...
+```
+
+**Flags:**
+
+- `--active` - Show only active attesters from scraper config
+- `--queued` - Show only queued attesters from scraper config
+- `--all-active` - Show ALL active attesters on-chain (ignores config)
+- `--all-queued` - Show ALL queued attesters on-chain (ignores config)
+- `--address` - Check specific attester address(es)
+
+**What it does:**
+
+- Queries the Rollup contract for attester on-chain status
+- Shows attester state: NONE, VALIDATING, ZOMBIE, or EXITING
+- Displays effective balance for each attester
+- Shows exit information (if attester is exiting)
+- Default behavior: shows attesters from scraper-config
+- With `--all-*` flags: shows all on-chain attesters regardless of config
+
+**Output:**
+
+- Active attesters: address, status, balance, exit info
+- Queued attesters: position in queue and address
+- Config attesters: includes coinbase and publisher from config
+- Specific attesters: full details including withdrawer and exit status
+
+**Use cases:**
+
+- Monitor your attesters' state transitions (default mode)
+- Check if your attesters are active vs queued
+- See all active/queued attesters on the network
+- Debug attester issues
+- Validate attester is in expected state before operations
+
+**On-Chain States:**
+
+- **NONE**: Not registered or funds withdrawn
+- **VALIDATING**: Actively participating as validator
+- **ZOMBIE**: Not validating but has funds (e.g., slashed below minimum)
+- **EXITING**: In process of withdrawing funds
+
+---
+
+### 5. Add Keys to Staking Provider
 
 ```bash
 # Without updating scraper config
@@ -144,7 +214,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 5. Check Publisher ETH Balances
+### 6. Check Publisher ETH Balances
 
 ```bash
 ./scripts/check-publisher-eth.sh
@@ -167,7 +237,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 6. Start Server
+### 7. Start Server
 
 ```bash
 ./scripts/start-server.sh
@@ -191,7 +261,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 7. Get Metrics
+### 8. Get Metrics
 
 ```bash
 # Using default token and URL
@@ -267,6 +337,31 @@ PROVIDER_ID=123  # Your provider ID
 ./scripts/generate-scraper-config.sh --provider-id $PROVIDER_ID
 ```
 
+### Monitoring Attester Status
+
+```bash
+# Check your attesters from config (default)
+./scripts/scrape-attester-status.sh
+
+# Check only your active attesters
+./scripts/scrape-attester-status.sh --active
+
+# Check only your queued attesters
+./scripts/scrape-attester-status.sh --queued
+
+# Check all active attesters on the network
+./scripts/scrape-attester-status.sh --all-active
+
+# Check if attesters are stuck in queue
+./scripts/scrape-attester-status.sh --all-queued
+
+# Check specific attester after adding keys
+./scripts/scrape-attester-status.sh --address 0x1234567890abcdef1234567890abcdef12345678
+
+# Full overview of all on-chain attesters
+./scripts/scrape-attester-status.sh --all-active --all-queued
+```
+
 ---
 
 ## Direct CLI Usage
@@ -299,6 +394,25 @@ npm run cli -- scrape-coinbases --full
 
 # Scrape from specific block
 npm run cli -- scrape-coinbases --from-block 12345678
+
+# Scrape attester status (default - shows your config attesters)
+npm run cli -- scrape-attester-status
+
+# Scrape attester status (only active from config)
+npm run cli -- scrape-attester-status --active
+
+# Scrape attester status (only queued from config)
+npm run cli -- scrape-attester-status --queued
+
+# Scrape attester status (all active on-chain)
+npm run cli -- scrape-attester-status --all-active
+
+# Scrape attester status (all queued on-chain)
+npm run cli -- scrape-attester-status --all-queued
+
+# Scrape attester status (specific addresses)
+npm run cli -- scrape-attester-status --address 0x123...
+npm run cli -- scrape-attester-status --address 0x123... --address 0x456...
 ```
 
 ---
