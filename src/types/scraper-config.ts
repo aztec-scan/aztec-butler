@@ -6,6 +6,16 @@ export const ScraperAttesterSchema = z.object({
   address: z.string().startsWith("0x").length(42),
   coinbase: z.string().startsWith("0x").length(42), // Required - use 0x0000000000000000000000000000000000000000 if not yet set
   publisher: z.string().startsWith("0x").length(42),
+  lastSeenState: z
+    .enum([
+      "NEW",
+      "IN_STAKING_PROVIDER_QUEUE",
+      "COINBASE_NEEDED",
+      "IN_STAKING_QUEUE",
+      "ACTIVE",
+      "NO_LONGER_ACTIVE",
+    ])
+    .optional(),
 });
 
 export const ScraperConfigSchema = z.object({

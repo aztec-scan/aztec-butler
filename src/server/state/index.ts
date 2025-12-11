@@ -47,7 +47,7 @@ export enum AttesterState {
   COINBASE_NEEDED = "COINBASE_NEEDED",
   IN_STAKING_QUEUE = "IN_STAKING_QUEUE",
   ACTIVE = "ACTIVE",
-  NO_LONGER_ACTIVE = "NO_LONGER_ACTIVE"
+  NO_LONGER_ACTIVE = "NO_LONGER_ACTIVE",
 }
 
 // Schema for attester state entry
@@ -540,7 +540,7 @@ export const updateAttesterState = (
   ) {
     console.error(
       `ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
-      `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
+        `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
   }
@@ -828,6 +828,22 @@ export const getStakingRewardsDailyAggregates =
   };
 
 /**
+ * Get numeric priority of a state for comparison
+ * Higher number = more advanced state
+ */
+function getStatePriority(state: AttesterState): number {
+  const priorities: Record<AttesterState, number> = {
+    [AttesterState.NEW]: 1,
+    [AttesterState.IN_STAKING_PROVIDER_QUEUE]: 2,
+    [AttesterState.COINBASE_NEEDED]: 3,
+    [AttesterState.IN_STAKING_QUEUE]: 4,
+    [AttesterState.ACTIVE]: 5,
+    [AttesterState.NO_LONGER_ACTIVE]: 6,
+  };
+  return priorities[state];
+}
+
+/**
  * Initialize attester states from scraper config
  * Called on server startup (alternative to initAttesterStates for scraper mode)
  */
@@ -838,11 +854,37 @@ export const initAttesterStatesFromScraperConfig = (
 
   // Initialize each attester's state
   for (const attester of scraperConfig.attesters) {
-    const existing = appState.attesterStates.get(attester.address);
-    if (!existing) {
-      // New attester, set to NEW state
+    const dbStateEntry = appState.attesterStates.get(attester.address);
+    const configState = attester.lastSeenState as AttesterState | undefined;
+
+    if (dbStateEntry && configState) {
+      // Both DB and config have state - use whichever is higher priority
+      const dbPriority = getStatePriority(dbStateEntry.state);
+      const configPriority = getStatePriority(configState);
+
+      if (configPriority > dbPriority) {
+        console.log(
+          `[State] Attester ${attester.address}: Using config state "${configState}" ` +
+            `(priority ${configPriority}) over DB state "${dbStateEntry.state}" (priority ${dbPriority})`,
+        );
+        updateAttesterState(attester.address, configState);
+      } else {
+        console.log(
+          `[State] Attester ${attester.address}: Keeping DB state "${dbStateEntry.state}" ` +
+            `(priority ${dbPriority}) over config state "${configState}" (priority ${configPriority})`,
+        );
+      }
+    } else if (configState) {
+      // Only config has state - use it
+      console.log(
+        `[State] Attester ${attester.address}: Initializing from config state "${configState}"`,
+      );
+      updateAttesterState(attester.address, configState);
+    } else if (!dbStateEntry) {
+      // No DB state and no config state - initialize to NEW
       updateAttesterState(attester.address, AttesterState.NEW);
     }
+    // else: DB state exists and no config state - do nothing (keep existing DB state)
   }
 
   console.log(
