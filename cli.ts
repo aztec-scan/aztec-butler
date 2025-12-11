@@ -58,12 +58,14 @@ async function main() {
     console.log("Usage: npm run cli -- <command> [options]");
     console.log("");
     console.log("Commands:");
-    console.log("  generate-scraper-config [--provider-id <id>]");
+    console.log(
+      "  generate-scraper-config [--input <path>] [--output <path>] [--provider-id <id>]",
+    );
     console.log(
       "                                       Generate scraper configuration from keystores",
     );
     console.log(
-      "  scrape-coinbases [--full] [--from-block <block>] [--provider-id <id>]",
+      "  scrape-coinbases [--input <path>] [--output <path>] [--full] [--from-block <block>] [--provider-id <id>]",
     );
     console.log(
       "                                       Scrape coinbase addresses from chain",
@@ -86,11 +88,22 @@ async function main() {
     console.log("");
     console.log("Examples:");
     console.log("  npm run cli -- generate-scraper-config");
-    console.log("  npm run cli -- generate-scraper-config --provider-id 123");
+    console.log(
+      "  npm run cli -- generate-scraper-config --input ./keystores/production/testnet/key1.json",
+    );
+    console.log(
+      "  npm run cli -- generate-scraper-config --input ./keystores/production/testnet/key1.json --output ./output-keystores/testnet/live-keys.json",
+    );
+    console.log(
+      "  npm run cli -- generate-scraper-config --provider-id 123 --output ./configs/testnet.json",
+    );
     console.log("  npm run cli -- scrape-coinbases");
     console.log("  npm run cli -- scrape-coinbases --full");
     console.log("  npm run cli -- scrape-coinbases --from-block 12345678");
     console.log("  npm run cli -- scrape-coinbases --provider-id 123");
+    console.log(
+      '  npm run cli -- scrape-coinbases --input "keystores/testnet/*.json" --output ./cache/testnet-coinbases.json',
+    );
     console.log("  npm run cli -- scrape-attester-status");
     console.log("  npm run cli -- scrape-attester-status --active");
     console.log("  npm run cli -- scrape-attester-status --queued");
@@ -131,15 +144,45 @@ async function main() {
 
   switch (commandName) {
     case "generate-scraper-config": {
-      const keystorePaths = await glob("keystores/**/*.json", {
-        cwd: process.cwd(),
-        absolute: true,
-      });
+      // Parse --input flag (single file or glob pattern)
+      const inputIndex = args.indexOf("--input");
+      const inputArg =
+        inputIndex !== -1 && args[inputIndex + 1]
+          ? args[inputIndex + 1]
+          : undefined;
+
+      // If --input is provided, use it; otherwise use default glob
+      let keystorePaths: string[];
+      if (inputArg) {
+        // Check if it's a glob pattern or single file
+        if (inputArg.includes("*")) {
+          keystorePaths = await glob(inputArg, {
+            cwd: process.cwd(),
+            absolute: true,
+          });
+        } else {
+          // Treat as single file path
+          keystorePaths = [inputArg];
+        }
+      } else {
+        // Default behavior
+        keystorePaths = await glob("keystores/**/*.json", {
+          cwd: process.cwd(),
+          absolute: true,
+        });
+      }
 
       if (keystorePaths.length === 0) {
-        console.error("❌ No keystore files found in ./keystores/");
+        console.error("❌ No keystore files found");
         process.exit(1);
       }
+
+      // Parse --output flag
+      const outputIndex = args.indexOf("--output");
+      const outputPath =
+        outputIndex !== -1 && args[outputIndex + 1]
+          ? args[outputIndex + 1]
+          : undefined;
 
       // Parse --provider-id flag
       const providerIdIndex = args.indexOf("--provider-id");
@@ -154,23 +197,50 @@ async function main() {
         l1ChainId: config.ETHEREUM_CHAIN_ID,
         keystorePaths,
         includeZeroCoinbases: true,
+        ...(outputPath ? { outputPath } : {}),
         ...(providerId !== undefined ? { providerId } : {}),
       });
       break;
     }
 
     case "scrape-coinbases": {
-      const keystorePaths = await glob("keystores/**/*.json", {
-        cwd: process.cwd(),
-        absolute: true,
-      });
+      // Parse --input flag
+      const inputIndex = args.indexOf("--input");
+      const inputArg =
+        inputIndex !== -1 && args[inputIndex + 1]
+          ? args[inputIndex + 1]
+          : undefined;
+
+      let keystorePaths: string[];
+      if (inputArg) {
+        if (inputArg.includes("*")) {
+          keystorePaths = await glob(inputArg, {
+            cwd: process.cwd(),
+            absolute: true,
+          });
+        } else {
+          keystorePaths = [inputArg];
+        }
+      } else {
+        keystorePaths = await glob("keystores/**/*.json", {
+          cwd: process.cwd(),
+          absolute: true,
+        });
+      }
 
       if (keystorePaths.length === 0) {
-        console.error("❌ No keystore files found in ./keystores/");
+        console.error("❌ No keystore files found");
         process.exit(1);
       }
 
-      // Parse flags
+      // Parse --output flag
+      const outputIndex = args.indexOf("--output");
+      const outputPath =
+        outputIndex !== -1 && args[outputIndex + 1]
+          ? args[outputIndex + 1]
+          : undefined;
+
+      // Parse other flags
       const fullRescrape = args.includes("--full");
       const fromBlockIndex = args.indexOf("--from-block");
       const fromBlockArg = args[fromBlockIndex + 1];
@@ -189,6 +259,7 @@ async function main() {
         network: config.NETWORK,
         keystorePaths,
         fullRescrape,
+        ...(outputPath ? { outputPath } : {}),
         ...(fromBlock !== undefined ? { fromBlock } : {}),
         ...(providerId !== undefined ? { providerId } : {}),
       });

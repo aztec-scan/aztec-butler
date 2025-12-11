@@ -1,20 +1,22 @@
 #!/bin/bash
 # Scrape coinbase addresses from StakingRegistry events
 # Usage: 
-#   ./scripts/scrape-coinbases.sh                           # Incremental scrape (default)
-#   ./scripts/scrape-coinbases.sh --full                    # Full rescrape from deployment block
-#   ./scripts/scrape-coinbases.sh --from-block 12345678     # Custom start block
-#   ./scripts/scrape-coinbases.sh --provider-id 123         # Use provider ID directly (faster)
-#   ./scripts/scrape-coinbases.sh --full --provider-id 123  # Combine flags
+#   ./scripts/scrape-coinbases.sh                                  # Incremental scrape (default)
+#   ./scripts/scrape-coinbases.sh --full                           # Full rescrape from deployment block
+#   ./scripts/scrape-coinbases.sh --from-block 12345678            # Custom start block
+#   ./scripts/scrape-coinbases.sh --provider-id 123                # Use provider ID directly (faster)
+#   ./scripts/scrape-coinbases.sh --input ./keystores/key1.json    # Use specific keystore file
+#   ./scripts/scrape-coinbases.sh --output ./cache/coinbases.json  # Custom output path
+#   ./scripts/scrape-coinbases.sh --full --provider-id 123         # Combine flags
 #
 # This will:
-# - Find all keystores in ./keystores/
+# - Find all keystores in ./keystores/ (or use --input for custom path)
 # - Extract attester addresses
 # - Query staking provider ID (or use provided ID)
 # - Scrape StakedWithProvider events from chain
 # - Map attesters to their coinbase addresses
 #
-# Output: ~/.local/share/aztec-butler/{network}-mapped-coinbases.json
+# Output: ~/.local/share/aztec-butler/{network}-mapped-coinbases.json (or custom path with --output)
 
 set -e
 
@@ -27,7 +29,7 @@ echo "==================================="
 echo "Scrape Coinbase Addresses"
 echo "==================================="
 echo ""
-echo "Using keystores from: ./keystores/"
+echo "Using keystores from: ./keystores/ (or custom with --input)"
 echo ""
 
 # Check flags
