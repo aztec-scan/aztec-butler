@@ -1,3 +1,5 @@
+import { Command } from "commander";
+
 /**
  * Check Node.js version meets minimum requirements
  */
@@ -17,27 +19,24 @@ const checkNodeVersion = () => {
   }
 };
 
-const mode = process.argv[2] || "serve";
+const program = new Command();
 
-const main = async () => {
-  checkNodeVersion();
-  switch (mode) {
-    case "serve":
-      const { startServer } = await import("./server/index.js");
-      await startServer();
-      break;
+program
+  .name("aztec-butler")
+  .description("Aztec staking provider management tool")
+  .version("2.0.0");
 
-    default:
-      console.error(`Unknown mode: ${mode}`);
-      console.error("Available modes: serve");
-      console.error("");
-      console.error("For CLI commands, use: npm run cli -- <command>");
-      process.exit(1);
-  }
-};
+program
+  .command("serve")
+  .description("Start the metrics server and scrapers")
+  .action(async () => {
+    checkNodeVersion();
+    const { startServer } = await import("./server/index.js");
+    await startServer();
+  });
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
+  program.parseAsync(process.argv).catch((error) => {
     console.error("Fatal error:", error);
     process.exit(1);
   });
