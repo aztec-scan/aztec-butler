@@ -1,5 +1,6 @@
 export { default as depositCalldata } from "./deposit-calldata.js";
 export { default as getPublisherEth } from "./get-publisher-eth.js";
+export { default as getProviderId } from "./get-provider-id.js";
 export { default as getCreateStakingProviderCallData } from "./get-create-staking-provider-calldata.js";
 export { default as getAddKeysToStakingProviderCalldata } from "./get-add-keys-to-staking-provider-calldata.js";
 export { default as generateScraperConfig } from "./generate-scraper-config.js";

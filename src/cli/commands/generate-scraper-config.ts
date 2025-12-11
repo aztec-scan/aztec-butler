@@ -1,4 +1,3 @@
-import assert from "assert";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import {
@@ -21,6 +20,7 @@ interface GenerateScraperConfigOptions {
   keystorePaths: string[];
   outputPath?: string;
   includeZeroCoinbases?: boolean;
+  providerId?: bigint;
 }
 
 const command = async (
@@ -29,11 +29,6 @@ const command = async (
   options: GenerateScraperConfigOptions,
 ) => {
   console.log("\n=== Generating Scraper Configuration ===\n");
-
-  assert(
-    config.PROVIDER_ADMIN_ADDRESS,
-    "PROVIDER_ADMIN_ADDRESS must be configured",
-  );
 
   // 1. Load keystores from provided paths
   console.log(`Loading ${options.keystorePaths.length} keystore file(s)...`);
@@ -90,29 +85,52 @@ const command = async (
   }));
   console.log(`✅ Found ${publishers.length} unique publisher(s)`);
 
-  // 5. Query staking provider ID from chain
-  console.log("\nQuerying staking provider from chain...");
-  const providerData = await ethClient.getStakingProvider(
-    config.PROVIDER_ADMIN_ADDRESS,
-  );
+  // 5. Query staking provider ID from chain (or use provided ID)
+  let providerData;
+  let stakingProviderAdmin: string | undefined;
 
-  if (!providerData) {
-    throw new Error(
-      `Staking provider not found for admin address: ${config.PROVIDER_ADMIN_ADDRESS}\n` +
-        `Please ensure the staking provider is registered on-chain.`,
+  if (options.providerId !== undefined) {
+    console.log(`\n✅ Using Provider ID: ${options.providerId}`);
+    providerData = {
+      providerId: options.providerId,
+      admin: config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS || "unknown",
+      takeRate: 0,
+      rewardsRecipient: "0x0000000000000000000000000000000000000000",
+    };
+    stakingProviderAdmin = config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
+  } else {
+    // Fall back to querying from AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+    if (!config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS) {
+      throw new Error(
+        "Either --provider-id flag or AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS config must be set",
+      );
+    }
+
+    console.log("\nQuerying staking provider from chain...");
+    const queriedData = await ethClient.getStakingProvider(
+      config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
     );
-  }
 
-  console.log(`✅ Staking provider ID: ${providerData.providerId}`);
-  console.log(`   Admin: ${providerData.admin}`);
-  console.log(`   Take Rate: ${providerData.takeRate}`);
+    if (!queriedData) {
+      throw new Error(
+        `Staking provider not found for admin address: ${config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS}\n` +
+          `Please ensure the staking provider is registered on-chain.`,
+      );
+    }
+
+    providerData = queriedData;
+    stakingProviderAdmin = config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
+    console.log(`✅ Staking provider ID: ${providerData.providerId}`);
+    console.log(`   Admin: ${providerData.admin}`);
+    console.log(`   Take Rate: ${providerData.takeRate}`);
+  }
 
   // 6. Generate config
   const scraperConfig: ScraperConfig = {
     network: options.network,
     l1ChainId: options.l1ChainId as 1 | 11155111,
     stakingProviderId: providerData.providerId,
-    stakingProviderAdmin: config.PROVIDER_ADMIN_ADDRESS,
+    stakingProviderAdmin: stakingProviderAdmin || "unknown",
     attesters,
     publishers,
     lastUpdated: new Date().toISOString(),

@@ -33,7 +33,7 @@ const command = async (
   options: AddKeysOptions,
 ) => {
   assert(
-    config.PROVIDER_ADMIN_ADDRESS,
+    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
     "Staking provider admin address must be provided.",
   );
 
@@ -52,7 +52,7 @@ const command = async (
 
   // 2. Get staking provider info
   const stakingProviderData = await ethClient.getStakingProvider(
-    config.PROVIDER_ADMIN_ADDRESS,
+    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
   );
 
   if (!stakingProviderData) {

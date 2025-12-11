@@ -81,18 +81,21 @@ function buildConfig(network: string) {
       .string()
       .url()
       .parse(process.env.AZTEC_NODE_URL || "http://localhost:8080"),
-    PROVIDER_ADMIN_ADDRESS: z
+    AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS: z
       .string()
       .startsWith("0x")
       .length(42)
       .optional()
-      .parse(process.env.PROVIDER_ADMIN_ADDRESS),
+      .parse(process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS),
     SAFE_ADDRESS: z
       .string()
       .startsWith("0x")
       .length(42)
       .optional()
-      .parse(process.env.SAFE_ADDRESS || process.env.PROVIDER_ADMIN_ADDRESS),
+      .parse(
+        process.env.SAFE_ADDRESS ||
+          process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+      ),
     MULTISIG_PROPOSER_PRIVATE_KEY: z
       .string()
       .startsWith("0x")

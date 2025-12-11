@@ -10,17 +10,50 @@ Collection of bash scripts for common Aztec Butler operations.
 
 ## Available Scripts
 
-### 1. Generate Scraper Configuration
+### 1. Get Provider ID
 
 ```bash
+./scripts/get-provider-id.sh <admin-address>
+```
+
+**What it does:**
+
+- Queries the staking registry contract for provider info
+- Returns provider ID, admin address, take rate, and rewards recipient
+- Useful for getting your provider ID to use in other commands
+
+**Output:** Provider details printed to console
+
+**Use case:** Get your staking provider ID once and use it in subsequent commands to skip RPC calls
+
+**Example:**
+
+```bash
+# Query provider ID for your admin address
+./scripts/get-provider-id.sh 0x1234567890abcdef1234567890abcdef12345678
+
+# Use the returned provider ID in other commands:
+npm run cli -- scrape-coinbases --provider-id 123
+npm run cli -- generate-scraper-config --provider-id 123
+```
+
+---
+
+### 2. Generate Scraper Configuration
+
+```bash
+# Using admin address from config (queries chain)
 ./scripts/generate-scraper-config.sh
+
+# Using provider ID directly (faster, skips query)
+./scripts/generate-scraper-config.sh --provider-id 123
 ```
 
 **What it does:**
 
 - Finds all keystores in `./keystores/`
 - Extracts attester and publisher addresses
-- Queries staking provider from chain
+- Queries staking provider from chain (or uses provided ID)
 - Checks for cached coinbase mappings
 - Generates scraper configuration
 
@@ -28,9 +61,11 @@ Collection of bash scripts for common Aztec Butler operations.
 
 **Use case:** Create initial scraper config or regenerate after adding new keystores
 
+**Pro tip:** Use `--provider-id` to skip the RPC query for faster execution
+
 ---
 
-### 2. Scrape Coinbase Addresses
+### 3. Scrape Coinbase Addresses
 
 ```bash
 # Incremental scrape (default - fast, uses cache)
@@ -41,6 +76,12 @@ Collection of bash scripts for common Aztec Butler operations.
 
 # Custom start block
 ./scripts/scrape-coinbases.sh --from-block 12345678
+
+# Using provider ID directly (faster, skips query)
+./scripts/scrape-coinbases.sh --provider-id 123
+
+# Combine flags for full rescrape with provider ID
+./scripts/scrape-coinbases.sh --full --provider-id 123
 ```
 
 **Modes:**
@@ -48,6 +89,7 @@ Collection of bash scripts for common Aztec Butler operations.
 - **Default (incremental)**: Scrapes only new blocks since last run (seconds, recommended)
 - **`--full`**: Full rescrape from deployment block (minutes, useful for validation)
 - **`--from-block N`**: Start from specific block number (useful for recovery)
+- **`--provider-id N`**: Use provider ID directly instead of querying from admin address
 
 **What it does:**
 
@@ -67,10 +109,11 @@ Collection of bash scripts for common Aztec Butler operations.
 - First run: Several minutes (scrapes all historical events)
 - Subsequent runs: Seconds (only scrapes new blocks)
 - Use `--full` to force complete rescrape if needed
+- Use `--provider-id` to skip RPC query for faster execution
 
 ---
 
-### 3. Add Keys to Staking Provider
+### 4. Add Keys to Staking Provider
 
 ```bash
 # Without updating scraper config
@@ -101,7 +144,7 @@ Collection of bash scripts for common Aztec Butler operations.
 
 ---
 
-### 4. Check Publisher ETH Balances
+### 5. Check Publisher ETH Balances
 
 ```bash
 ./scripts/check-publisher-eth.sh
@@ -124,7 +167,7 @@ Collection of bash scripts for common Aztec Butler operations.
 
 ---
 
-### 5. Start Server
+### 6. Start Server
 
 ```bash
 ./scripts/start-server.sh
@@ -148,7 +191,7 @@ Collection of bash scripts for common Aztec Butler operations.
 
 ---
 
-### 6. Get Metrics
+### 7. Get Metrics
 
 ```bash
 # Using default token and URL
@@ -185,6 +228,21 @@ Collection of bash scripts for common Aztec Butler operations.
 ./scripts/start-server.sh
 ```
 
+### Optimized Workflow (Using Provider ID)
+
+```bash
+# 1. Query your provider ID once and save it
+./scripts/get-provider-id.sh 0x1234567890abcdef1234567890abcdef12345678
+# Output: Provider ID: 123
+
+# 2. Use provider ID in all subsequent commands (faster!)
+./scripts/scrape-coinbases.sh --provider-id 123
+./scripts/generate-scraper-config.sh --provider-id 123
+
+# 3. For full rescrapes with provider ID
+./scripts/scrape-coinbases.sh --full --provider-id 123
+```
+
 ### Adding New Validators
 
 ```bash
@@ -203,9 +261,10 @@ Collection of bash scripts for common Aztec Butler operations.
 # Check publisher balances weekly
 ./scripts/check-publisher-eth.sh
 
-# Re-scrape coinbases if attesters changed
-./scripts/scrape-coinbases.sh
-./scripts/generate-scraper-config.sh
+# Re-scrape coinbases if attesters changed (use provider ID for speed)
+PROVIDER_ID=123  # Your provider ID
+./scripts/scrape-coinbases.sh --provider-id $PROVIDER_ID
+./scripts/generate-scraper-config.sh --provider-id $PROVIDER_ID
 ```
 
 ---
@@ -218,8 +277,12 @@ All scripts use `npm run cli` under the hood. You can also call commands directl
 # Show help
 npm run cli -- help
 
+# Get provider ID
+npm run cli -- get-provider-id 0x1234567890abcdef1234567890abcdef12345678
+
 # Generate scraper config
 npm run cli -- generate-scraper-config
+npm run cli -- generate-scraper-config --provider-id 123
 
 # Add keys with update
 npm run cli -- add-keys keystores/examples/key1.json --update-config
@@ -229,6 +292,7 @@ npm run cli -- check-publisher-eth
 
 # Scrape coinbases (incremental)
 npm run cli -- scrape-coinbases
+npm run cli -- scrape-coinbases --provider-id 123
 
 # Scrape coinbases (full rescrape)
 npm run cli -- scrape-coinbases --full
@@ -255,7 +319,7 @@ Required env variables:
 - `ETHEREUM_NODE_URL` - Ethereum RPC URL
 - `ETHEREUM_ARCHIVE_NODE_URL` - Archive node (required for scraping)
 - `AZTEC_NODE_URL` - Aztec node URL
-- `PROVIDER_ADMIN_ADDRESS` - Your staking provider admin address
+- `AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` - Your staking provider admin address (optional if using --provider-id)
 
 ---
 
@@ -277,8 +341,9 @@ All generated files are saved to `~/.local/share/aztec-butler/`:
 
 **"Staking provider not found"**
 
-- Verify `PROVIDER_ADMIN_ADDRESS` is correct
+- Verify `AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` is correct
 - Ensure provider is registered on-chain
+- Or use `--provider-id` flag if you know your provider ID
 
 **"Attester already in queue"**
 

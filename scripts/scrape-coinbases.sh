@@ -1,14 +1,16 @@
 #!/bin/bash
 # Scrape coinbase addresses from StakingRegistry events
 # Usage: 
-#   ./scripts/scrape-coinbases.sh              # Incremental scrape (default)
-#   ./scripts/scrape-coinbases.sh --full       # Full rescrape from deployment block
-#   ./scripts/scrape-coinbases.sh --from-block 12345678  # Custom start block
+#   ./scripts/scrape-coinbases.sh                           # Incremental scrape (default)
+#   ./scripts/scrape-coinbases.sh --full                    # Full rescrape from deployment block
+#   ./scripts/scrape-coinbases.sh --from-block 12345678     # Custom start block
+#   ./scripts/scrape-coinbases.sh --provider-id 123         # Use provider ID directly (faster)
+#   ./scripts/scrape-coinbases.sh --full --provider-id 123  # Combine flags
 #
 # This will:
 # - Find all keystores in ./keystores/
 # - Extract attester addresses
-# - Query staking provider ID
+# - Query staking provider ID (or use provided ID)
 # - Scrape StakedWithProvider events from chain
 # - Map attesters to their coinbase addresses
 #
@@ -28,7 +30,12 @@ echo ""
 echo "Using keystores from: ./keystores/"
 echo ""
 
-# Check if --full flag is provided
+# Check flags
+if [[ "$*" == *"--provider-id"* ]]; then
+  echo "🚀 Using provided provider ID (skipping chain query)"
+  echo ""
+fi
+
 if [[ "$*" == *"--full"* ]]; then
   echo "⚠️  Full rescrape mode - will scrape all historical events"
   echo ""

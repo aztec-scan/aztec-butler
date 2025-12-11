@@ -8,11 +8,13 @@ const DEFAULT_COMISSION_RATE_PERCENTAGE = 10;
 
 const command = async (ethClient: EthereumClient, config: ButlerConfig) => {
   assert(
-    config.PROVIDER_ADMIN_ADDRESS,
+    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
     "Staking provider admin address must be provided.",
   );
   const stakingRegistryAddress = ethClient.getStakingRegistryAddress();
-  const stakingProviderAdminAddress = getAddress(config.PROVIDER_ADMIN_ADDRESS);
+  const stakingProviderAdminAddress = getAddress(
+    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+  );
   const rewardsRecipientAddress = stakingProviderAdminAddress; // For simplicity, using the same address
   const comissionBasisPoints = DEFAULT_COMISSION_RATE_PERCENTAGE * 100; // Convert percentage to basis points
   const callData = {

@@ -17,7 +17,8 @@ export const initConfigMetrics = (config: ButlerConfig) => {
     if (currentConfig) {
       observableResult.observe(1, {
         provider_admin_address:
-          currentConfig.PROVIDER_ADMIN_ADDRESS || "not_configured",
+          currentConfig.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS ||
+          "not_configured",
         ethereum_node_url: currentConfig.ETHEREUM_NODE_URL,
         aztec_node_url: currentConfig.AZTEC_NODE_URL,
         // Add more config attributes here as needed

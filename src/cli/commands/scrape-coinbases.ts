@@ -1,4 +1,3 @@
-import assert from "assert";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import {
   CoinbaseScraper,
@@ -29,11 +28,6 @@ const command = async (
 ) => {
   console.log("\n=== Scraping Coinbase Addresses ===\n");
 
-  assert(
-    config.PROVIDER_ADMIN_ADDRESS,
-    "PROVIDER_ADMIN_ADDRESS must be configured",
-  );
-
   // 1. Get attester addresses
   console.log("Loading attester addresses...");
   let attesterAddresses: string[];
@@ -54,17 +48,26 @@ const command = async (
   // 2. Get provider ID
   let providerId = options.providerId;
   if (!providerId) {
-    console.log("\nQuerying staking provider from chain...");
-    const providerData = await ethClient.getStakingProvider(
-      config.PROVIDER_ADMIN_ADDRESS,
-    );
-    if (!providerData) {
+    // Fall back to AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS if provided
+    if (config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS) {
+      console.log("\nQuerying staking provider from chain...");
+      const providerData = await ethClient.getStakingProvider(
+        config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+      );
+      if (!providerData) {
+        throw new Error(
+          `Staking provider not found for admin address: ${config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS}`,
+        );
+      }
+      providerId = providerData.providerId;
+      console.log(`✅ Provider ID: ${providerId}`);
+    } else {
       throw new Error(
-        `Staking provider not found for admin address: ${config.PROVIDER_ADMIN_ADDRESS}`,
+        "Either --provider-id flag or AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS config must be set",
       );
     }
-    providerId = providerData.providerId;
-    console.log(`✅ Provider ID: ${providerId}`);
+  } else {
+    console.log(`\n✅ Using Provider ID: ${providerId}`);
   }
 
   // 3. Determine scrape mode and start block

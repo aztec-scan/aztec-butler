@@ -20,10 +20,13 @@ async function main() {
     console.log("Usage: npm run cli -- <command> [options]");
     console.log("");
     console.log("Commands:");
+    console.log("  generate-scraper-config [--provider-id <id>]");
     console.log(
-      "  generate-scraper-config              Generate scraper configuration from keystores",
+      "                                       Generate scraper configuration from keystores",
     );
-    console.log("  scrape-coinbases [--full] [--from-block <block>]");
+    console.log(
+      "  scrape-coinbases [--full] [--from-block <block>] [--provider-id <id>]",
+    );
     console.log(
       "                                       Scrape coinbase addresses from chain",
     );
@@ -33,16 +36,24 @@ async function main() {
     console.log(
       "  check-publisher-eth                  Check publisher ETH balances",
     );
+    console.log(
+      "  get-provider-id <admin-address>      Get staking provider ID for an admin address",
+    );
     console.log("");
     console.log("Examples:");
     console.log("  npm run cli -- generate-scraper-config");
+    console.log("  npm run cli -- generate-scraper-config --provider-id 123");
     console.log("  npm run cli -- scrape-coinbases");
     console.log("  npm run cli -- scrape-coinbases --full");
     console.log("  npm run cli -- scrape-coinbases --from-block 12345678");
+    console.log("  npm run cli -- scrape-coinbases --provider-id 123");
     console.log(
       "  npm run cli -- add-keys keystores/examples/key1.json --update-config",
     );
     console.log("  npm run cli -- check-publisher-eth");
+    console.log(
+      "  npm run cli -- get-provider-id 0x1234567890abcdef1234567890abcdef12345678",
+    );
     process.exit(0);
   }
 
@@ -79,11 +90,19 @@ async function main() {
         process.exit(1);
       }
 
+      // Parse --provider-id flag
+      const providerIdIndex = args.indexOf("--provider-id");
+      const providerId =
+        providerIdIndex !== -1 && args[providerIdIndex + 1]
+          ? BigInt(args[providerIdIndex + 1])
+          : undefined;
+
       await command.generateScraperConfig(ethClient, config, {
         network: config.NETWORK,
         l1ChainId: config.ETHEREUM_CHAIN_ID,
         keystorePaths,
         includeZeroCoinbases: true,
+        ...(providerId !== undefined ? { providerId } : {}),
       });
       break;
     }
@@ -106,13 +125,38 @@ async function main() {
         fromBlockIndex !== -1 && args[fromBlockIndex + 1]
           ? BigInt(args[fromBlockIndex + 1])
           : undefined;
+      const providerIdIndex = args.indexOf("--provider-id");
+      const providerId =
+        providerIdIndex !== -1 && args[providerIdIndex + 1]
+          ? BigInt(args[providerIdIndex + 1])
+          : undefined;
 
       await command.scrapeCoinbases(ethClient, config, {
         network: config.NETWORK,
         keystorePaths,
         fullRescrape,
         fromBlock,
+        ...(providerId !== undefined ? { providerId } : {}),
       });
+      break;
+    }
+
+    case "get-provider-id": {
+      const adminAddress = args[1];
+
+      if (!adminAddress) {
+        console.error("❌ Error: Admin address required");
+        console.error("");
+        console.error("Usage: npm run cli -- get-provider-id <admin-address>");
+        console.error("");
+        console.error("Example:");
+        console.error(
+          "  npm run cli -- get-provider-id 0x1234567890abcdef1234567890abcdef12345678",
+        );
+        process.exit(1);
+      }
+
+      await command.getProviderId(ethClient, { adminAddress });
       break;
     }
 
