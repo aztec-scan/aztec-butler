@@ -5,7 +5,7 @@
  */
 
 import { Command } from "commander";
-import { initConfig, type ButlerConfig } from "./src/core/config/index.js";
+import { initConfig, PACKAGE_VERSION, type ButlerConfig } from "./src/core/config/index.js";
 import { AztecClient } from "./src/core/components/AztecClient.js";
 import { EthereumClient } from "./src/core/components/EthereumClient.js";
 import * as command from "./src/cli/commands/index.js";
@@ -33,7 +33,7 @@ function formatError(error: unknown): string {
     try {
       const json = JSON.stringify(error, null, 2);
       if (json && json !== "{}") return json;
-    } catch {}
+    } catch { }
 
     // Fallback to util.inspect for objects that can't be stringified
     // Use showHidden: false to avoid issues with internal symbols
@@ -93,14 +93,16 @@ const program = new Command();
 program
   .name("aztec-butler-cli")
   .description("Aztec Butler CLI - Individual command execution")
-  .version("2.0.0");
+  .version(PACKAGE_VERSION)
+  .option("--network <network>", "Network to use (mainnet, testnet, etc.)");
 
 // Command: get-provider-id
 program
   .command("get-provider-id <admin-address>")
   .description("Get staking provider ID for an admin address")
   .action(async (adminAddress: string) => {
-    const config = await initConfig();
+    const globalOpts = program.opts();
+    const config = await initConfig({ network: globalOpts.network });
     const ethClient = await initEthClient(config);
     await command.getProviderId(ethClient, { adminAddress });
   });
@@ -110,7 +112,8 @@ program
   .command("check-publisher-eth")
   .description("Check publisher ETH balances")
   .action(async () => {
-    const config = await initConfig();
+    const globalOpts = program.opts();
+    const config = await initConfig({ network: globalOpts.network });
     const ethClient = await initEthClient(config);
 
     const keystorePaths = await glob("keystores/**/*.json", {
@@ -132,7 +135,8 @@ program
   .description("Generate calldata to add keys to staking provider")
   .option("--update-config", "Update scraper config with new keys", false)
   .action(async (keystorePath: string, options: { updateConfig: boolean }) => {
-    const config = await initConfig();
+    const globalOpts = program.opts();
+    const config = await initConfig({ network: globalOpts.network });
     const ethClient = await initEthClient(config);
 
     await command.getAddKeysToStakingProviderCalldata(ethClient, config, {
@@ -155,7 +159,8 @@ program
       output?: string;
       providerId?: bigint;
     }) => {
-      const config = await initConfig();
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
       const ethClient = await initEthClient(config);
 
       // Handle input keystore paths
@@ -218,7 +223,8 @@ program
       fromBlock?: bigint;
       providerId?: bigint;
     }) => {
-      const config = await initConfig();
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
       const ethClient = await initEthClient(config);
 
       // Handle input keystore paths
@@ -281,7 +287,8 @@ program
       allQueued: boolean;
       address: string[];
     }) => {
-      const config = await initConfig();
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
       const ethClient = await initEthClient(config);
 
       await command.scrapeAttesterStatus(ethClient, {
@@ -306,7 +313,8 @@ program
     "Output file path (default: public-[input-file].json)",
   )
   .action(async (privateKeyFile: string, options: { output?: string }) => {
-    const config = await initConfig();
+    const globalOpts = program.opts();
+    const config = await initConfig({ network: globalOpts.network });
     const ethClient = await initEthClient(config);
 
     await command.processPrivateKeys(ethClient, config, {
@@ -350,7 +358,8 @@ program
       highAvailabilityCount?: number;
       output?: string;
     }) => {
-      const config = await initConfig();
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
       const ethClient = await initEthClient(config);
 
       await command.prepareDeployment(ethClient, config, {

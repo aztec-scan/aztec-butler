@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { PACKAGE_VERSION } from "./core/config/index.js";
 
 /**
  * Check Node.js version meets minimum requirements
@@ -24,7 +25,7 @@ const program = new Command();
 program
   .name("aztec-butler")
   .description("Aztec staking provider management tool")
-  .version("2.0.0");
+  .version(PACKAGE_VERSION);
 
 program
   .command("serve")
