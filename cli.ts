@@ -225,6 +225,11 @@ program
   .description("Scrape attester on-chain status (defaults to config attesters)")
   .option("--active", "Check active attesters from config", false)
   .option("--queued", "Check queued attesters from config", false)
+  .option(
+    "--provider-queue",
+    "Check provider queue attesters from config",
+    false,
+  )
   .option("--all-active", "Check all active attesters on-chain", false)
   .option("--all-queued", "Check all queued attesters on-chain", false)
   .option(
@@ -238,6 +243,7 @@ program
     async (options: {
       active: boolean;
       queued: boolean;
+      providerQueue: boolean;
       allActive: boolean;
       allQueued: boolean;
       address: string[];
@@ -252,6 +258,7 @@ program
         allQueued: options.allQueued,
         active: options.active,
         queued: options.queued,
+        providerQueue: options.providerQueue,
         network: config.NETWORK,
         updateConfig: options.updateConfig,
         ...(options.address.length > 0 ? { addresses: options.address } : {}),

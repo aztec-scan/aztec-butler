@@ -4,6 +4,7 @@
 #   ./scripts/scrape-attester-status.sh                           # Show all attesters from scraper-config (default)
 #   ./scripts/scrape-attester-status.sh --active                  # Show active attesters from scraper-config
 #   ./scripts/scrape-attester-status.sh --queued                  # Show queued attesters from scraper-config
+#   ./scripts/scrape-attester-status.sh --provider-queue          # Show provider queue attesters from scraper-config
 #   ./scripts/scrape-attester-status.sh --active --queued         # Show all attesters from scraper-config (same as default)
 #   ./scripts/scrape-attester-status.sh --all-active              # Show ALL active attesters on-chain
 #   ./scripts/scrape-attester-status.sh --all-queued              # Show ALL queued attesters on-chain
@@ -16,11 +17,13 @@
 # - Show on-chain state (NONE, VALIDATING, ZOMBIE, EXITING)
 # - Display effective balance and exit information
 # - List active and/or queued attesters
+# - List provider queue attesters (requires stakingProviderAdmin in config)
 # - Update scraper config lastSeenState field (with --update-config)
 #
 # Flags:
 # --active      : Filter to active attesters from scraper-config
 # --queued      : Filter to queued attesters from scraper-config
+# --provider-queue : Filter to provider queue attesters from scraper-config (requires stakingProviderAdmin)
 # --all-active  : Show ALL active attesters on-chain (not limited to config)
 # --all-queued  : Show ALL queued attesters on-chain (not limited to config)
 # --address     : Check specific attester address(es)
@@ -29,6 +32,7 @@
 # Use cases:
 # - Monitor attester state transitions
 # - Check if attesters are active vs queued
+# - Check if attesters are in provider queue waiting to be added
 # - Debug attester issues
 # - Validate attester configuration
 # - Automatically update scraper config with current states
@@ -64,6 +68,11 @@ if [[ "$*" == *"--all-queued"* ]]; then
   echo ""
 elif [[ "$*" == *"--queued"* ]]; then
   echo "⏳ Querying queued attesters from scraper-config"
+  echo ""
+fi
+
+if [[ "$*" == *"--provider-queue"* ]]; then
+  echo "📦 Querying provider queue attesters from scraper-config"
   echo ""
 fi
 
