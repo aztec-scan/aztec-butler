@@ -27,4 +27,3 @@ To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/
 1. replace need for aztecmonitor
    - P2P connection status
    - chain tips
-1. scrape Aztec's OTEL-instance
