@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "validators": [
+    {
+      "attester": {
+        "eth": "0x5FAC75C9bD29CDf5599C74e31A8a88850a573748",
+        "bls": "0x93b08f1aa2fa961575b4ed2b6222dc7576b5f8bf6b7cb93d6ddb6824bad0e7ca"
+      },
+      "feeRecipient": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "attester": {
+        "eth": "0x829B7234A1544C755a9F31Fa4812675F8E8A0BF3",
+        "bls": "0x9b03e1ad3e6a9d04dd1f720d742b801091ac435deffcf8f259eaa0924669c7a1"
+      },
+      "feeRecipient": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}
