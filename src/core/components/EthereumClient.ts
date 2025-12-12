@@ -33,6 +33,27 @@ import {
 const SUPPORTED_CHAINS = [sepolia, mainnet];
 
 type RollupContract = GetContractReturnType<typeof RollupAbi, PublicClient>;
+type GovernanceContract = GetContractReturnType<
+  typeof GovernanceAbi,
+  PublicClient
+>;
+type GSEContractType = GetContractReturnType<typeof GSEAbi, PublicClient>;
+type ERC20Contract = GetContractReturnType<typeof erc20Abi, PublicClient>;
+
+type EntryQueueData = {
+  attester: string;
+  withdrawer: string;
+  publicKeyInG1: { x: bigint; y: bigint };
+  publicKeyInG2: { x0: bigint; x1: bigint; y0: bigint; y1: bigint };
+  proofOfPossession: { x: bigint; y: bigint };
+  moveWithLatestRollup: boolean;
+};
+
+type SplitAllocationData = {
+  recipients: string[];
+  allocations: bigint[];
+  totalAllocation: bigint;
+};
 
 const SPLIT_UPDATED_EVENT = parseAbiItem(
   "event SplitUpdated((address[] recipients,uint256[] allocations,uint256 totalAllocation,uint16 distributorFee) split)",
@@ -329,11 +350,7 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     splitAddress: string,
     fromBlock?: bigint,
     toBlock?: bigint,
-  ): Promise<{
-    recipients: string[];
-    allocations: bigint[];
-    totalAllocation: bigint;
-  } | null> {
+  ): Promise<SplitAllocationData | null> {
     const address = getAddress(splitAddress);
     const latestBlock = toBlock ?? (await this.client.getBlockNumber());
     const lowerBound = fromBlock ?? 0n;
@@ -459,9 +476,10 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
   ): Promise<CalldataExport> {
     const rollupContract = this.getRollupContract();
 
+    const gseAddress = getAddress(await rollupContract.read.getGSE());
     const gse = new GSEContract(
       this.client as ViemPublicClient,
-      getAddress(await rollupContract.read.getGSE()) as any,
+      gseAddress as any,
     );
     const registrationTuple = await gse.makeRegistrationTuple(
       BigInt(blsSecretKey),
@@ -527,9 +545,10 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     blsSecretKey: string,
   ): Promise<AttesterRegistration> {
     const rollupContract = this.getRollupContract();
+    const gseAddress = getAddress(await rollupContract.read.getGSE());
     const gse = new GSEContract(
       this.client as ViemPublicClient,
-      getAddress(await rollupContract.read.getGSE()) as any,
+      gseAddress as any,
     );
 
     const registrationTuple = await gse.makeRegistrationTuple(
@@ -692,14 +711,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
    * @param index - Index in the entry queue (0-based)
    * @returns DepositArgs containing attester address and registration data
    */
-  async getEntryQueueAt(index: bigint): Promise<{
-    attester: string;
-    withdrawer: string;
-    publicKeyInG1: { x: bigint; y: bigint };
-    publicKeyInG2: { x0: bigint; x1: bigint; y0: bigint; y1: bigint };
-    proofOfPossession: { x: bigint; y: bigint };
-    moveWithLatestRollup: boolean;
-  }> {
+  async getEntryQueueAt(index: bigint): Promise<EntryQueueData> {
     const rollupContract = this.getRollupContract();
     const result = await rollupContract.read.getEntryQueueAt([index]);
 
@@ -746,11 +758,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     return attesters;
   }
 
-  private decodeSplitUpdatedData(data: Hex): {
-    recipients: string[];
-    allocations: bigint[];
-    totalAllocation: bigint;
-  } {
+  private decodeSplitUpdatedData(data: Hex): SplitAllocationData {
     const payload = data.startsWith("0x") ? data.slice(2) : data;
     if (!payload || payload.length % 64 !== 0) {
       throw new Error("Invalid SplitUpdated payload");
