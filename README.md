@@ -12,11 +12,16 @@ To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/
 
 ## TODO
 
-[Currently the plan is documented in "Stars Align"](./project-stars-align/overview.md).
+1. scraperConfig should have publishers in a separate list
+   - because with HA one attester can have multiple publishers (depending on which server)
+1. available_publisher_addresses.json should already have separated on which servers they are used. To prevent deploying same address to two different servers.
+1. there should be one command checking no duplicates of attester addresses across all positions on-chain
+   - stakingProviderRegistryQueue
+   - rollup entryQueue
+   - rollup active validators
 
 ### Roadmap
 
-1. TODO: !!!! coinbase 0x00..00 must not be allowed, it is invalid for when proposing blocks in Aztec !!!!!
 1. replace need for aztecmonitor
    - P2P connection status
    - chain tips

@@ -6,3 +6,4 @@ export { default as getAddKeysToStakingProviderCalldata } from "./get-add-keys-t
 export { default as generateScraperConfig } from "./generate-scraper-config.js";
 export { default as scrapeCoinbases } from "./scrape-coinbases.js";
 export { default as scrapeAttesterStatus } from "./scrape-attester-status.js";
+export { default as processPrivateKeys } from "./process-private-keys.js";

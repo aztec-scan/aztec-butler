@@ -295,6 +295,26 @@ program
     },
   );
 
+// Command: process-private-keys
+program
+  .command("process-private-keys <private-key-file>")
+  .description(
+    "Process private keys to generate public keys and check provider queue",
+  )
+  .option(
+    "-o, --output <file>",
+    "Output file path (default: public-[input-file].json)",
+  )
+  .action(async (privateKeyFile: string, options: { output?: string }) => {
+    const config = await initConfig();
+    const ethClient = await initEthClient(config);
+
+    await command.processPrivateKeys(ethClient, config, {
+      privateKeyFile,
+      ...(options.output ? { outputFile: options.output } : {}),
+    });
+  });
+
 // Parse and handle errors
 program.parseAsync(process.argv).catch((error) => {
   console.error("❌ Error:\n");

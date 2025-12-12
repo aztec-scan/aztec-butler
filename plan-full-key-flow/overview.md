@@ -81,22 +81,26 @@ operator uses aztec-butler to, with a single command...
      - this includes preserving the web3signer-url
    - append the newly created public keys to the validators array
      - if duplicates are discovered => command fails
-     - note that the new attesters do not have a coinbase-field. This is correct.
+     - note that the new attesters do not have a coinbase- nor a publisher-key. This is correct.
      - feeRecipient should still be there, even if it's zero-address
    - overwrites publisher-addresses with the available publisher-addresses
      - the available publisher addresses json-file is provided as an argument
-     - publisher-addresses should be spread as evenly as possible (round-robin is fine)
+     - publisher-addresses should be spread as evenly as possible
      - multiple attesters can share the same publisher _within the same file_ (see note below)
    - if file exist create "[oldProductionFilename].new2"
    - JSON object should still follow the same structure/schema
-1. double-check all validators that there are no zero-address coinbase if there are any => command fails
+1. double-check all validators, old and newly-added, that there are no zero-address coinbase if there are any => command fails
 1. checks if the all publisher-addresses are funded.
    - if they have low ETH (using MIN_ETH_PER_ATTESTER) => console.warn
    - if they have _no_ ETH => throw and abort
 1. updates the scrape-config with the latest state
+   - if no config exists - create a new one
+   - the attesters publisher addresses should be overwritten with their new publisher addresses
    - keys should be in the state NEW, `/home/filip/c/aztec-butler/src/types/scraper-config.ts`
    - ref: `/home/filip/c/aztec-butler/src/core/utils/scraperConfigOperations.ts`
-   - there should not be any changes in config, but to clarify: the new config should be a merge of all attesters. Duplicates should be merged, prefering non-zero-address-values.
+   - there should not be any changes in config, but to clarify:
+     - the new config should be a merge of all attesters
+     - duplicates should be merged, coinbase should be either non-zero-address or not exist as key
 
 #### High Availability option
 
@@ -107,6 +111,7 @@ Then the command should create `nbr` files `A_[oldProductionFilename].new`, `B_[
   - This also means that if `publishers.length<nbr` it should THROW an error.
 - The publishers do not have to be evenly distributed
 - It is fine if the normal command produces a single file with prefix `A_`.
+- scraper-config should use the publisher keys from file A.
 
 For clarity, with --high-availability-count 3 and 10 publishers and 15 validators:
 File A, B and C all have the 15 validators.
