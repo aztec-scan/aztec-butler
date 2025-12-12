@@ -12,9 +12,9 @@ To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/
 
 ## TODO
 
-1. scraperConfig should have publishers in a separate list
-   - because with HA one attester can have multiple publishers (depending on which server)
 1. available_publisher_addresses.json should already have separated on which servers they are used. To prevent deploying same address to two different servers.
+1. scraperConfig should have publishers in a separate array
+   - because with HA one attester has different publishers for each server
 1. there should be one command checking no duplicates of attester addresses across all positions on-chain
    - stakingProviderRegistryQueue
    - rollup entryQueue
