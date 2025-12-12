@@ -37,13 +37,19 @@ interface CoinbaseEntry {
  */
 export class StakingRewardsScraper extends AbstractScraper {
   readonly name = "staking-rewards";
+  readonly network: string;
 
   private ethClient: EthereumClient | null = null;
   private safeAddress: string;
   private startBlock: bigint;
+  private backfillDisabled: boolean = false;
 
-  constructor(private config: ButlerConfig) {
+  constructor(
+    network: string,
+    private config: ButlerConfig,
+  ) {
     super();
+    this.network = network;
 
     if (!config.SAFE_ADDRESS) {
       throw new Error(
@@ -88,7 +94,7 @@ export class StakingRewardsScraper extends AbstractScraper {
       console.warn(
         "[staking-rewards] No coinbase data available in state, skipping scrape",
       );
-      updateStakingRewardsData(null);
+      updateStakingRewardsData(this.network, null);
       return;
     }
 
@@ -105,8 +111,8 @@ export class StakingRewardsScraper extends AbstractScraper {
         false,
       );
 
-    updateStakingRewardsData(rewardsMap);
-    recordStakingRewardsSnapshots(snapshots);
+    updateStakingRewardsData(this.network, rewardsMap);
+    recordStakingRewardsSnapshots(this.network, snapshots);
 
     console.log(
       `[staking-rewards] Scraped ${rewardsMap.size} coinbases at block ${blockNumber}. Estimated Safe share: ${totalOurShare.toString()} units`,
@@ -159,7 +165,10 @@ export class StakingRewardsScraper extends AbstractScraper {
             ? splitData.totalAllocation
             : 10_000n;
 
-        const ourAllocation = this.getOurAllocation(recipients, totalAllocation);
+        const ourAllocation = this.getOurAllocation(
+          recipients,
+          totalAllocation,
+        );
 
         const ourShare =
           totalAllocation > 0n
@@ -179,11 +188,11 @@ export class StakingRewardsScraper extends AbstractScraper {
             recipients.length > 0
               ? recipients
               : [
-                {
-                  address: this.safeAddress,
-                  allocation: totalAllocation,
-                },
-              ],
+                  {
+                    address: this.safeAddress,
+                    allocation: totalAllocation,
+                  },
+                ],
           lastUpdated: timestamp,
         });
 
@@ -195,6 +204,12 @@ export class StakingRewardsScraper extends AbstractScraper {
         });
         totalOurShare += ourShare;
       } catch (error) {
+        // Check if this is a historical state unavailability error
+        if (this.isHistoricalStateError(error)) {
+          // Throw the error to propagate it up - we want to stop processing this block
+          throw error;
+        }
+        // For other errors, just log and continue with next coinbase
         console.error(
           `[staking-rewards] Failed to process coinbase ${entry.coinbase} at block ${blockNumber}:`,
           error,
@@ -207,6 +222,14 @@ export class StakingRewardsScraper extends AbstractScraper {
 
   private async backfillHistory(): Promise<void> {
     if (!this.ethClient) {
+      return;
+    }
+
+    if (this.backfillDisabled) {
+      console.log(
+        "[staking-rewards] Backfill is disabled due to historical state unavailability. " +
+          "Configure ETHEREUM_ARCHIVE_NODE_URL with a proper archive node or adjust STAKING_REWARDS_SPLIT_FROM_BLOCK to enable backfill.",
+      );
       return;
     }
 
@@ -232,7 +255,7 @@ export class StakingRewardsScraper extends AbstractScraper {
     const startTimestampMs = Number(startBlockData.timestamp) * 1000;
 
     const lastSnapshotTimestamp =
-      getLatestStakingRewardsSnapshotTimestamp()?.getTime() ?? null;
+      getLatestStakingRewardsSnapshotTimestamp(this.network)?.getTime() ?? null;
 
     const effectiveStartMs = lastSnapshotTimestamp
       ? lastSnapshotTimestamp + ONE_HOUR_MS
@@ -248,21 +271,54 @@ export class StakingRewardsScraper extends AbstractScraper {
       `[staking-rewards] Backfilling hourly snapshots from ${new Date(backfillStartMs).toISOString()} (start block ${this.startBlock})`,
     );
 
+    let consecutiveHistoricalStateErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 3; // Disable after 3 consecutive errors
+
     for (let ts = backfillStartMs; ts <= now; ts += ONE_HOUR_MS) {
-      const { blockNumber, blockTimestampMs } =
-        await this.findBlockAtOrBeforeTimestamp(
-          ts,
-          this.startBlock,
-          latestBlock,
+      try {
+        const { blockNumber, blockTimestampMs } =
+          await this.findBlockAtOrBeforeTimestamp(
+            ts,
+            this.startBlock,
+            latestBlock,
+          );
+
+        const { snapshots } = await this.collectRewardsForBlock(
+          blockNumber,
+          new Date(blockTimestampMs),
+          coinbases,
+          true,
         );
 
-      const { snapshots } = await this.collectRewardsForBlock(
-        blockNumber,
-        new Date(blockTimestampMs),
-        coinbases,
-        true,
-      );
-      recordStakingRewardsSnapshots(snapshots);
+        recordStakingRewardsSnapshots(this.network, snapshots);
+        consecutiveHistoricalStateErrors = 0; // Reset counter on success
+      } catch (error) {
+        if (this.isHistoricalStateError(error)) {
+          consecutiveHistoricalStateErrors++;
+
+          if (consecutiveHistoricalStateErrors >= MAX_CONSECUTIVE_ERRORS) {
+            console.warn(
+              `[staking-rewards] Historical state unavailable for ${MAX_CONSECUTIVE_ERRORS} consecutive snapshots. ` +
+                `Disabling backfill to avoid spamming the RPC node. ` +
+                `Configure ETHEREUM_ARCHIVE_NODE_URL with a proper archive node or adjust STAKING_REWARDS_SPLIT_FROM_BLOCK to enable backfill.`,
+            );
+            this.backfillDisabled = true;
+            return; // Exit backfill early
+          }
+
+          console.warn(
+            `[staking-rewards] Historical state not available at ${new Date(ts).toISOString()} ` +
+              `(${consecutiveHistoricalStateErrors}/${MAX_CONSECUTIVE_ERRORS} consecutive errors before disabling backfill)`,
+          );
+        } else {
+          // For other errors, log and continue
+          console.error(
+            `[staking-rewards] Error during backfill at ${new Date(ts).toISOString()}:`,
+            error,
+          );
+          consecutiveHistoricalStateErrors = 0; // Reset on non-historical errors
+        }
+      }
     }
 
     await this.exportAggregatesAndCoinbases();
@@ -310,15 +366,15 @@ export class StakingRewardsScraper extends AbstractScraper {
 
   private async exportAggregatesAndCoinbases(): Promise<void> {
     try {
-      await exportStakingRewardsDailyToSheets(this.config);
-      await exportStakingRewardsDailyPerCoinbaseToSheets(this.config);
-      await exportStakingRewardsDailyEarnedToSheets(this.config);
-      await exportCoinbasesToSheets(this.config);
-    } catch (err) {
-      console.warn(
-        "[staking-rewards] Failed to export to Google Sheets:",
-        err,
+      await exportStakingRewardsDailyToSheets(this.network, this.config);
+      await exportStakingRewardsDailyPerCoinbaseToSheets(
+        this.network,
+        this.config,
       );
+      await exportStakingRewardsDailyEarnedToSheets(this.network, this.config);
+      await exportCoinbasesToSheets(this.network, this.config);
+    } catch (err) {
+      console.warn("[staking-rewards] Failed to export to Google Sheets:", err);
     }
   }
 
@@ -347,11 +403,11 @@ export class StakingRewardsScraper extends AbstractScraper {
   async shutdown(): Promise<void> {
     console.log("[staking-rewards] Shutting down...");
     this.ethClient = null;
-    updateStakingRewardsData(null);
+    updateStakingRewardsData(this.network, null);
   }
 
   private getCoinbaseEntries(): CoinbaseEntry[] {
-    const coinbaseInfo = getAttesterCoinbaseInfo();
+    const coinbaseInfo = getAttesterCoinbaseInfo(this.network);
     if (!coinbaseInfo.size) {
       return [];
     }
@@ -373,6 +429,14 @@ export class StakingRewardsScraper extends AbstractScraper {
       coinbase,
       attesters: Array.from(attesters),
     }));
+  }
+
+  private isHistoricalStateError(error: unknown): boolean {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return (
+      errorMsg.includes("historical state") &&
+      errorMsg.includes("is not available")
+    );
   }
 
   private getOurAllocation(

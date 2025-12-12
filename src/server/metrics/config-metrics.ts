@@ -4,37 +4,38 @@ import type { ButlerConfig } from "../../core/config/index.js";
 import { getScraperConfig } from "../state/index.js";
 
 let configInfoGauge: ObservableGauge | null = null;
-let currentConfig: ButlerConfig | null = null;
+const networkConfigs = new Map<string, ButlerConfig>();
 
-export const initConfigMetrics = (config: ButlerConfig) => {
-  currentConfig = config;
+export const initConfigMetrics = (network: string, config: ButlerConfig) => {
+  networkConfigs.set(network, config);
 
-  // Config metric: All configuration information as attributes
-  configInfoGauge = createObservableGauge("config_info", {
-    description: "Aztec Butler configuration information",
-  });
+  // Create the gauge on first initialization only
+  if (!configInfoGauge) {
+    configInfoGauge = createObservableGauge("config_info", {
+      description: "Aztec Butler configuration information",
+    });
 
-  configInfoGauge.addCallback((observableResult) => {
-    if (currentConfig) {
-      const scraperConfig = getScraperConfig();
+    configInfoGauge.addCallback((observableResult) => {
+      for (const [net, cfg] of networkConfigs.entries()) {
+        const scraperConfig = getScraperConfig(net);
 
-      observableResult.observe(1, {
-        provider_admin_address:
-          currentConfig.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS ||
-          "not_configured",
-        staking_provider_id:
-          scraperConfig?.stakingProviderId.toString() || "unknown",
-        network: currentConfig.NETWORK,
-        ethereum_node_url: currentConfig.ETHEREUM_NODE_URL,
-        aztec_node_url: currentConfig.AZTEC_NODE_URL,
-        // Add more config attributes here as needed
-      });
-    }
-  });
+        observableResult.observe(1, {
+          network: net,
+          provider_admin_address:
+            cfg.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS || "not_configured",
+          staking_provider_id:
+            scraperConfig?.stakingProviderId.toString() || "unknown",
+          ethereum_node_url: cfg.ETHEREUM_NODE_URL,
+          aztec_node_url: cfg.AZTEC_NODE_URL,
+          // Add more config attributes here as needed
+        });
+      }
+    });
+  }
 };
 
-export const updateConfigMetric = (config: ButlerConfig) => {
+export const updateConfigMetric = (network: string, config: ButlerConfig) => {
   // With OpenTelemetry's observable gauges, we just update the reference
   // and the callback will use the latest value
-  currentConfig = config;
+  networkConfigs.set(network, config);
 };

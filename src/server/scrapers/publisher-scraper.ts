@@ -4,11 +4,7 @@ import { AztecClient } from "../../core/components/AztecClient.js";
 import { EthereumClient } from "../../core/components/EthereumClient.js";
 import { updatePublisherData } from "../state/index.js";
 import { parseEther } from "viem";
-import type {
-  HexString,
-  PublisherData,
-  PublisherDataMap,
-} from "../../types/index.js";
+import type { HexString, PublisherDataMap } from "../../types/index.js";
 import type { ScraperConfig } from "../../types/scraper-config.js";
 
 /**
@@ -17,16 +13,19 @@ import type { ScraperConfig } from "../../types/scraper-config.js";
  */
 export class PublisherScraper extends AbstractScraper {
   readonly name = "publisher";
+  readonly network: string;
 
   private ethClient: EthereumClient | null = null;
   private lastScrapedData: PublisherDataMap | null = null;
   private recommendedEthPerAttester: bigint = 0n;
 
   constructor(
+    network: string,
     private config: ButlerConfig,
     private scraperConfig: ScraperConfig,
   ) {
     super();
+    this.network = network;
     this.recommendedEthPerAttester = parseEther(config.MIN_ETH_PER_ATTESTER);
   }
 
@@ -101,7 +100,7 @@ export class PublisherScraper extends AbstractScraper {
       console.log(
         `[${this.name}] Scraped: ${publisherDataMap.size} publishers`,
       );
-      updatePublisherData(this.lastScrapedData);
+      updatePublisherData(this.network, this.lastScrapedData);
     } catch (error) {
       console.error(`[${this.name}] Error during scrape:`, error);
       throw error;
@@ -112,7 +111,7 @@ export class PublisherScraper extends AbstractScraper {
     console.log(`[${this.name}] Shutting down...`);
     this.ethClient = null;
     this.lastScrapedData = null;
-    updatePublisherData(null);
+    updatePublisherData(this.network, null);
   }
 
   /**

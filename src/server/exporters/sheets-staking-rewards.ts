@@ -21,10 +21,7 @@ const base64Url = (input: Buffer | string) =>
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
 
-const createJwt = (
-  serviceAccount: ServiceAccount,
-  scope: string,
-): string => {
+const createJwt = (serviceAccount: ServiceAccount, scope: string): string => {
   const iat = Math.floor(Date.now() / 1000);
   const exp = iat + 3600;
 
@@ -75,9 +72,9 @@ const getAccessToken = async (serviceAccount: ServiceAccount) => {
   return data.access_token;
 };
 
-const formatDailyRows = () => {
+const formatDailyRows = (network: string) => {
   // One end-of-day row per date (latest snapshot per coinbase per day, summed)
-  const snapshots = getStakingRewardsHistory().slice();
+  const snapshots = getStakingRewardsHistory(network).slice();
   snapshots.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
   const header = [
@@ -91,7 +88,10 @@ const formatDailyRows = () => {
     return [header];
   }
 
-  const latestPerDateCoinbase = new Map<string, Map<string, typeof snapshots[0]>>();
+  const latestPerDateCoinbase = new Map<
+    string,
+    Map<string, (typeof snapshots)[0]>
+  >();
 
   for (const snap of snapshots) {
     const date = snap.timestamp.toISOString().slice(0, 10);
@@ -132,8 +132,8 @@ const formatDailyRows = () => {
   return [header, ...rows];
 };
 
-const formatDailyPerCoinbaseRows = () => {
-  const snapshots = getStakingRewardsHistory().slice();
+const formatDailyPerCoinbaseRows = (network: string) => {
+  const snapshots = getStakingRewardsHistory(network).slice();
   snapshots.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
   const header = [
@@ -148,7 +148,10 @@ const formatDailyPerCoinbaseRows = () => {
     return [header];
   }
 
-  const latestPerDateCoinbase = new Map<string, Map<string, typeof snapshots[0]>>();
+  const latestPerDateCoinbase = new Map<
+    string,
+    Map<string, (typeof snapshots)[0]>
+  >();
 
   for (const snap of snapshots) {
     const date = snap.timestamp.toISOString().slice(0, 10);
@@ -189,8 +192,8 @@ const formatDailyPerCoinbaseRows = () => {
   return [header, ...rows];
 };
 
-const formatDailyEarnedRows = () => {
-  const snapshots = getStakingRewardsHistory().slice();
+const formatDailyEarnedRows = (network: string) => {
+  const snapshots = getStakingRewardsHistory(network).slice();
   snapshots.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
   const perCoinbase = new Map<
@@ -274,19 +277,18 @@ const formatDailyEarnedRows = () => {
       const netOur = accruedOur - withdrawalOur;
       const netOther = accruedOther - withdrawalOther;
 
-      const agg =
-        perDateTotals.get(date) ?? {
-          accruedPending: 0n,
-          accruedOur: 0n,
-          accruedOther: 0n,
-          withdrawalPending: 0n,
-          withdrawalOur: 0n,
-          withdrawalOther: 0n,
-          netPending: 0n,
-          netOur: 0n,
-          netOther: 0n,
-          sampleCount: 0,
-        };
+      const agg = perDateTotals.get(date) ?? {
+        accruedPending: 0n,
+        accruedOur: 0n,
+        accruedOther: 0n,
+        withdrawalPending: 0n,
+        withdrawalOur: 0n,
+        withdrawalOther: 0n,
+        netPending: 0n,
+        netOur: 0n,
+        netOther: 0n,
+        sampleCount: 0,
+      };
       perDateTotals.set(date, {
         accruedPending: agg.accruedPending + accruedPending,
         accruedOur: agg.accruedOur + accruedOur,
@@ -351,8 +353,8 @@ const formatDailyEarnedRows = () => {
   return [header, ...rows];
 };
 
-const formatCoinbaseRows = () => {
-  const coinbaseInfo = getAttesterCoinbaseInfo();
+const formatCoinbaseRows = (network: string) => {
+  const coinbaseInfo = getAttesterCoinbaseInfo(network);
   const header = ["coinbase", "attesterCount", "attesters"];
 
   const rows = Array.from(coinbaseInfo.entries())
@@ -379,6 +381,7 @@ const formatCoinbaseRows = () => {
 };
 
 export const exportStakingRewardsDailyToSheets = async (
+  network: string,
   config: ButlerConfig,
 ): Promise<void> => {
   if (
@@ -403,7 +406,7 @@ export const exportStakingRewardsDailyToSheets = async (
   }
 
   const token = await getAccessToken(keyJson);
-  const rows = formatDailyRows();
+  const rows = formatDailyRows(network);
 
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.GOOGLE_SHEETS_SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
@@ -423,9 +426,7 @@ export const exportStakingRewardsDailyToSheets = async (
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(
-      `Failed to update Google Sheet (${res.status}): ${text}`,
-    );
+    throw new Error(`Failed to update Google Sheet (${res.status}): ${text}`);
   }
 
   console.log(
@@ -434,6 +435,7 @@ export const exportStakingRewardsDailyToSheets = async (
 };
 
 export const exportStakingRewardsDailyPerCoinbaseToSheets = async (
+  network: string,
   config: ButlerConfig,
 ): Promise<void> => {
   if (
@@ -459,7 +461,7 @@ export const exportStakingRewardsDailyPerCoinbaseToSheets = async (
   }
 
   const token = await getAccessToken(keyJson);
-  const rows = formatDailyPerCoinbaseRows();
+  const rows = formatDailyPerCoinbaseRows(network);
 
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.GOOGLE_SHEETS_SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
@@ -490,6 +492,7 @@ export const exportStakingRewardsDailyPerCoinbaseToSheets = async (
 };
 
 export const exportStakingRewardsDailyEarnedToSheets = async (
+  network: string,
   config: ButlerConfig,
 ): Promise<void> => {
   if (
@@ -499,8 +502,7 @@ export const exportStakingRewardsDailyEarnedToSheets = async (
     return;
   }
 
-  const range =
-    config.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1";
+  const range = config.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1";
 
   const keyRaw = await fs.readFile(
     config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
@@ -515,7 +517,7 @@ export const exportStakingRewardsDailyEarnedToSheets = async (
   }
 
   const token = await getAccessToken(keyJson);
-  const rows = formatDailyEarnedRows();
+  const rows = formatDailyEarnedRows(network);
 
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.GOOGLE_SHEETS_SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
@@ -546,6 +548,7 @@ export const exportStakingRewardsDailyEarnedToSheets = async (
 };
 
 export const exportCoinbasesToSheets = async (
+  network: string,
   config: ButlerConfig,
 ): Promise<void> => {
   if (
@@ -570,7 +573,7 @@ export const exportCoinbasesToSheets = async (
   }
 
   const token = await getAccessToken(keyJson);
-  const rows = formatCoinbaseRows();
+  const rows = formatCoinbaseRows(network);
 
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.GOOGLE_SHEETS_SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,

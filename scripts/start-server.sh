@@ -3,7 +3,9 @@
 # Start Aztec Butler in server (scraper) mode
 # Requires scraper config to be generated first via generate-scraper-config.sh
 #
-# Usage: ./scripts/start-server.sh
+# Usage: 
+#   ./scripts/start-server.sh                    # Run all networks
+#   ./scripts/start-server.sh --network mainnet  # Run specific network
 #
 # Prerequisites:
 # - Scraper config exists: ~/.local/share/aztec-butler/{network}-scrape-config.json
@@ -23,4 +25,4 @@ echo "Starting Aztec Butler server..."
 echo "Press Ctrl+C to stop"
 echo ""
 
-npm start -- serve
+npm start -- serve "$@"

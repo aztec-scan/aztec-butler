@@ -29,11 +29,13 @@ export class ScraperManager {
 
     for (const { scraper } of this.scraperConfigs) {
       try {
-        console.log(`  - Initializing ${scraper.name} scraper...`);
+        console.log(
+          `  - Initializing ${scraper.name} scraper [${scraper.network}]...`,
+        );
         await scraper.init();
       } catch (error) {
         console.error(
-          `  ✗ Failed to initialize ${scraper.name} scraper:`,
+          `  ✗ Failed to initialize ${scraper.name} scraper [${scraper.network}]:`,
           error,
         );
         throw error;
@@ -58,10 +60,15 @@ export class ScraperManager {
     for (const { scraper, intervalMs } of this.scraperConfigs) {
       // Run immediately on start
       try {
-        console.log(`  - Running initial scrape for ${scraper.name}...`);
+        console.log(
+          `  - Running initial scrape for ${scraper.name} [${scraper.network}]...`,
+        );
         await scraper.scrape();
       } catch (error) {
-        console.error(`  ✗ Initial scrape failed for ${scraper.name}:`, error);
+        console.error(
+          `  ✗ Initial scrape failed for ${scraper.name} [${scraper.network}]:`,
+          error,
+        );
         // Continue with other scrapers
       }
 
@@ -71,7 +78,10 @@ export class ScraperManager {
           try {
             await scraper.scrape();
           } catch (error) {
-            console.error(`Error in ${scraper.name} scraper:`, error);
+            console.error(
+              `Error in ${scraper.name} scraper [${scraper.network}]:`,
+              error,
+            );
             // Continue scraping on next interval
           }
         })();
@@ -80,7 +90,7 @@ export class ScraperManager {
       this.intervalHandles.push(handle);
 
       console.log(
-        `  ✓ ${scraper.name} scraper scheduled (interval: ${intervalMs / 1000}s)`,
+        `  ✓ ${scraper.name} scraper [${scraper.network}] scheduled (interval: ${intervalMs / 1000}s)`,
       );
     }
 
@@ -109,7 +119,10 @@ export class ScraperManager {
       try {
         await scraper.shutdown();
       } catch (error) {
-        console.error(`Error shutting down ${scraper.name} scraper:`, error);
+        console.error(
+          `Error shutting down ${scraper.name} scraper [${scraper.network}]:`,
+          error,
+        );
       }
     }
 

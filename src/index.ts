@@ -30,10 +30,14 @@ program
 program
   .command("serve")
   .description("Start the metrics server and scrapers")
-  .action(async () => {
+  .option(
+    "--network <network>",
+    "Run server for a specific network only (e.g., mainnet, testnet)",
+  )
+  .action(async (options: { network?: string }) => {
     checkNodeVersion();
     const { startServer } = await import("./server/index.js");
-    await startServer();
+    await startServer(options.network);
   });
 
 if (import.meta.url === `file://${process.argv[1]}`) {

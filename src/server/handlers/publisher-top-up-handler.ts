@@ -1,8 +1,6 @@
 import type { SafeGlobalClient } from "../../core/components/SafeGlobalClient.js";
 import { parseEther } from "viem";
-import {
-  onPublisherBalanceUpdate,
-} from "../state/index.js";
+import { onPublisherBalanceUpdate } from "../state/index.js";
 
 const TOP_UP_THRESHOLD = parseEther("0.05");
 
@@ -12,31 +10,43 @@ const TOP_UP_THRESHOLD = parseEther("0.05");
  */
 export class PublisherTopUpHandler {
   private safeClient: SafeGlobalClient | null;
+  private network: string;
 
-  constructor(
-    safeClient: SafeGlobalClient | null,
-  ) {
+  constructor(network: string, safeClient: SafeGlobalClient | null) {
+    this.network = network;
     this.safeClient = safeClient;
 
-    // Subscribe to attester state changes
-    onPublisherBalanceUpdate((publisherAddress, _currentBalance, requiredTopup) => {
-      if (requiredTopup >= TOP_UP_THRESHOLD) {
-        void this.handleBalanceTopUp(publisherAddress, requiredTopup).catch((error) => {
-          console.error(
-            `[PublisherTopUpHandler] Error handling balance update ${publisherAddress}:`,
-            error,
+    // Subscribe to publisher balance updates for this network
+    onPublisherBalanceUpdate(
+      (callbackNetwork, publisherAddress, _currentBalance, requiredTopup) => {
+        // Only handle updates for this handler's network
+        if (callbackNetwork !== this.network) {
+          return;
+        }
+
+        if (requiredTopup >= TOP_UP_THRESHOLD) {
+          void this.handleBalanceTopUp(publisherAddress, requiredTopup).catch(
+            (error) => {
+              console.error(
+                `[PublisherTopUpHandler] [${this.network}] Error handling balance update ${publisherAddress}:`,
+                error,
+              );
+            },
           );
-        });
-      }
-    });
+        }
+      },
+    );
   }
 
   /**
    * Handle balance needing top up
    */
-  async handleBalanceTopUp(publisherAddress: string, requiredTopup: bigint): Promise<void> {
+  async handleBalanceTopUp(
+    publisherAddress: string,
+    requiredTopup: bigint,
+  ): Promise<void> {
     console.log(
-      `[PublisherTopUpHandler] required top up detected: ${publisherAddress}`,
+      `[PublisherTopUpHandler] [${this.network}] required top up detected: ${publisherAddress}`,
     );
 
     if (this.safeClient) {
@@ -46,6 +56,5 @@ export class PublisherTopUpHandler {
         data: "0x",
       });
     }
-
   }
 }

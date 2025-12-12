@@ -210,6 +210,60 @@ export const initConfig = async (options?: {
   );
 };
 
+/**
+ * Load all available network configurations
+ * Used by server mode to support multi-network operation
+ */
+export const loadAllAvailableNetworkConfigs = async (options?: {
+  suppressLog?: boolean;
+  specificNetwork?: string;
+}): Promise<Map<string, ButlerConfig>> => {
+  const configs = new Map<string, ButlerConfig>();
+
+  if (options?.specificNetwork) {
+    // Load only the specified network
+    console.log(
+      `[Config] Loading specific network: ${options.specificNetwork}`,
+    );
+    const config = await loadNetworkConfig(
+      options.specificNetwork,
+      options?.suppressLog,
+    );
+    configs.set(options.specificNetwork, config);
+    console.log(`[Config] Loaded only: ${options.specificNetwork}`);
+    return configs;
+  }
+
+  // Find all available network configs
+  const availableNetworks = await findNetworkConfigs();
+
+  if (availableNetworks.length === 0) {
+    console.warn(
+      "No network configurations found. Please create network configs.",
+    );
+    return configs;
+  }
+
+  console.log(
+    `[Config] Loading all available networks: ${availableNetworks.join(", ")}`,
+  );
+
+  // Load all available networks
+  for (const network of availableNetworks) {
+    try {
+      const config = await loadNetworkConfig(network, options?.suppressLog);
+      configs.set(network, config);
+      console.log(`✓ Loaded config for network: ${network}`);
+    } catch (error) {
+      console.error(`✗ Failed to load config for network ${network}:`, error);
+      // Continue loading other networks
+    }
+  }
+
+  console.log(`[Config] Total configs loaded: ${configs.size}`);
+  return configs;
+};
+
 const ensureConfigFile = async (
   configFilePath: string,
   isUserDefined: boolean,

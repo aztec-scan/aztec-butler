@@ -12,11 +12,16 @@ import { AttesterOnChainStatus } from "../../types/index.js";
  */
 export class RollupScraper extends AbstractScraper {
   readonly name = "rollup";
+  readonly network: string;
 
   private ethClient: EthereumClient | null = null;
 
-  constructor(private config: ButlerConfig) {
+  constructor(
+    network: string,
+    private config: ButlerConfig,
+  ) {
     super();
+    this.network = network;
   }
 
   async init(): Promise<void> {
@@ -49,7 +54,7 @@ export class RollupScraper extends AbstractScraper {
 
     try {
       // Get attesters from scraper config in state
-      const scraperConfig = getScraperConfig();
+      const scraperConfig = getScraperConfig(this.network);
       if (!scraperConfig) {
         console.warn("[rollup] Scraper config not loaded, skipping scrape");
         return;
@@ -77,7 +82,11 @@ export class RollupScraper extends AbstractScraper {
 
         if (attesterView) {
           // Update state with on-chain view
-          updateAttesterOnChainView(attester.address, attesterView);
+          updateAttesterOnChainView(
+            this.network,
+            attester.address,
+            attesterView,
+          );
 
           // Track statistics
           if (attesterView.status !== AttesterOnChainStatus.NONE) {
@@ -89,7 +98,7 @@ export class RollupScraper extends AbstractScraper {
           );
         } else {
           // No view returned (not on-chain or error)
-          updateAttesterOnChainView(attester.address, null);
+          updateAttesterOnChainView(this.network, attester.address, null);
           statusCounts.set(
             AttesterOnChainStatus.NONE,
             (statusCounts.get(AttesterOnChainStatus.NONE) || 0) + 1,

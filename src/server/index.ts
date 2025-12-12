@@ -1,4 +1,5 @@
-import { initConfig } from "../core/config/index.js";
+import { loadAllAvailableNetworkConfigs } from "../core/config/index.js";
+import type { ButlerConfig } from "../core/config/index.js";
 import {
   initMetricsRegistry,
   initConfigMetrics,
@@ -17,7 +18,7 @@ import {
 } from "./scrapers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
 import {
-  initState,
+  initNetworkState,
   initAttesterStatesFromScraperConfig,
   updateScraperConfigState,
 } from "./state/index.js";
@@ -33,126 +34,78 @@ const initLog = (str: string) => {
 };
 
 /**
- * Combined server mode: Prometheus exporter + Event watcher
- *
- * This server orchestrates:
- * - HTTP server for /metrics (Prometheus exporter)
- * - Periodic scrapers to refresh metrics
- * - Event listeners for on-chain changes
- * - File watchers for local state changes
- * - Action executor with retry logic
+ * Initialize all components for a single network
  */
-export const startServer = async () => {
-  console.log(`
-    ___        __                  __          __  __
-   /   |____  / /____  _____      / /_  __  __/ /_/ /__  _____
-  / /| /_  / / __/ _ \/ ___/_____/ __ \/ / / / __/ / _ \/ ___/
- / ___ |/ /_/ /_/  __/ /__/_____/ /_/ / /_/ / /_/ /  __/ /
-/_/  |_/___/\__/\___/\___/     /_.___/\__,_/\__/_/\___/_/
+async function initializeNetwork(
+  network: string,
+  config: ButlerConfig,
+  scraperManager: ScraperManager,
+): Promise<{
+  safeClient: SafeGlobalClient | null;
+  stakingProviderScraper: StakingProviderScraper;
+}> {
+  console.log(`\n--- Initializing network: ${network} ---`);
 
-`);
+  // Initialize state for this network
+  initNetworkState(network);
 
-  initLog("Initializing configuration...");
-  const config = await initConfig();
-
-  initLog("Initializing Prometheus metrics registry...");
-  const metricsPort = 9464;
-  initMetricsRegistry({
-    port: metricsPort,
-    bearerToken: config.METRICS_BEARER_TOKEN,
-  });
+  // Load scraper configuration
+  console.log(`[${network}] Loading scraper configuration...`);
+  const scraperConfig = await loadScraperConfig(network);
   console.log(
-    `Prometheus metrics available at http://localhost:${metricsPort}/metrics`,
-  );
-  if (config.METRICS_BEARER_TOKEN) {
-    console.log(
-      `  Authentication: Bearer token required (configured: ${config.METRICS_BEARER_TOKEN === "default-api-key" ? "default" : "custom"})`,
-    );
-  }
-
-  initLog("Initializing configuration metrics...");
-  initConfigMetrics(config);
-
-  initLog("Initializing state management...");
-  await initState();
-
-  initLog("Loading scraper configuration...");
-  const scraperConfig = await loadScraperConfig(config.NETWORK);
-  console.log(
-    `Loaded scraper config: ${scraperConfig.attesters.length} attesters, ${scraperConfig.publishers.length} publishers`,
+    `[${network}] Loaded scraper config: ${scraperConfig.attesters.length} attesters, ${scraperConfig.publishers.length} publishers`,
   );
 
-  initLog("Initializing state from scraper config...");
-  initAttesterStatesFromScraperConfig(scraperConfig);
-  updateScraperConfigState(scraperConfig);
-
-  initLog("Initializing scrapers...");
-  const scraperManager = new ScraperManager();
+  // Initialize state from scraper config
+  console.log(`[${network}] Initializing state from scraper config...`);
+  initAttesterStatesFromScraperConfig(network, scraperConfig);
+  updateScraperConfigState(network, scraperConfig);
 
   // Register rollup scraper (60 second interval)
-  // Fetches on-chain attester status from the rollup contract
-  const rollupScraper = new RollupScraper(config);
+  console.log(`[${network}] Registering rollup scraper...`);
+  const rollupScraper = new RollupScraper(network, config);
   scraperManager.register(rollupScraper, 60_000);
 
   // Register staking provider scraper (30 second interval)
-  // This scraper now handles both staking provider data AND attester state management
+  console.log(`[${network}] Registering staking provider scraper...`);
   const stakingProviderScraper = new StakingProviderScraper(
+    network,
     config,
     scraperConfig,
   );
   scraperManager.register(stakingProviderScraper, 30_000);
 
   // Register publisher scraper (30 second interval)
-  // Tracks publisher ETH balances and required top-ups
-  const publisherScraper = new PublisherScraper(config, scraperConfig);
+  console.log(`[${network}] Registering publisher scraper...`);
+  const publisherScraper = new PublisherScraper(network, config, scraperConfig);
   scraperManager.register(publisherScraper, 30_000);
 
   // Register staking rewards scraper (default hourly interval)
   let stakingRewardsScraper: StakingRewardsScraper | null = null;
   if (config.SAFE_ADDRESS) {
-    stakingRewardsScraper = new StakingRewardsScraper(config);
+    console.log(`[${network}] Registering staking rewards scraper...`);
+    stakingRewardsScraper = new StakingRewardsScraper(network, config);
     scraperManager.register(
       stakingRewardsScraper,
       config.STAKING_REWARDS_SCRAPE_INTERVAL_MS,
     );
   } else {
     console.log(
-      "SAFE_ADDRESS not configured, skipping staking rewards scraper",
+      `[${network}] SAFE_ADDRESS not configured, skipping staking rewards scraper`,
     );
   }
 
-  // TODO: Add more scrapers here with their own intervals
-  // scraperManager.register(new NodeScraper(config), 60_000);
-  // scraperManager.register(new L1Scraper(config), 120_000);
-
-  await scraperManager.init();
-  await scraperManager.start();
-
-  initLog("Initializing staking provider metrics...");
-  initStakingProviderMetrics(stakingProviderScraper);
-
-  initLog("Initializing attester metrics...");
-  initAttesterMetrics();
-
-  initLog("Initializing publisher metrics...");
-  initPublisherMetrics();
-
-  initLog("Initializing staking rewards metrics...");
-  initStakingRewardsMetrics();
-
-  // File watchers not used in scraper mode
-  // Scraper uses static configuration from scraper config file
-  // Config updates require server restart
-
-  let safeClient: SafeGlobalClient | null = null;
-  initLog("Initializing handlers...");
+  // Initialize staking provider metrics for this network
+  console.log(`[${network}] Initializing staking provider metrics...`);
+  initStakingProviderMetrics(network, stakingProviderScraper);
 
   // Create SafeGlobal client if configured
+  let safeClient: SafeGlobalClient | null = null;
   if (config.SAFE_ADDRESS) {
     // Validate that required Safe credentials are present
     if (!config.MULTISIG_PROPOSER_PRIVATE_KEY || !config.SAFE_API_KEY) {
       throw new Error(
-        "SAFE_ADDRESS is configured but MULTISIG_PROPOSER_PRIVATE_KEY or SAFE_API_KEY is missing. " +
+        `[${network}] SAFE_ADDRESS is configured but MULTISIG_PROPOSER_PRIVATE_KEY or SAFE_API_KEY is missing. ` +
           "Both are required for Safe multisig functionality.",
       );
     }
@@ -171,15 +124,138 @@ export const startServer = async () => {
       safeApiKey: config.SAFE_API_KEY,
     });
     console.log(
-      `SafeGlobal client initialized for Safe at ${config.SAFE_ADDRESS}`,
+      `[${network}] SafeGlobal client initialized for Safe at ${config.SAFE_ADDRESS}`,
     );
     safeClient.startPendingTransactionsPoll();
   }
 
-  // Initialize handlers (currently only publisher top-up)
-  await initHandlers({
+  // Initialize handlers for this network
+  console.log(`[${network}] Initializing handlers...`);
+  await initHandlers(network, {
     safeClient,
   });
+
+  return { safeClient, stakingProviderScraper };
+}
+
+/**
+ * Combined server mode: Prometheus exporter + Event watcher
+ *
+ * This server orchestrates:
+ * - HTTP server for /metrics (Prometheus exporter with network labels)
+ * - Periodic scrapers to refresh metrics (per network)
+ * - Event listeners for on-chain changes (per network)
+ * - Action executor with retry logic (per network)
+ *
+ * Multi-network support:
+ * - Automatically detects and loads all available network configs
+ * - Creates isolated scraper instances per network
+ * - Shares single Prometheus endpoint with network labels
+ * - Isolates errors: one network failure doesn't affect others
+ *
+ * @param specificNetwork - Optional: run only a specific network (e.g., "mainnet", "testnet")
+ */
+export const startServer = async (specificNetwork?: string) => {
+  console.log(`
+    ___        __                  __          __  __
+   /   |____  / /____  _____      / /_  __  __/ /_/ /__  _____
+  / /| /_  / / __/ _ \\/ ___/_____/ __ \\/ / / / __/ / _ \\/ ___/
+ / ___ |/ /_/ /_/  __/ /__/_____/ /_/ / /_/ / /_/ /  __/ /
+/_/  |_/___/\\__/\\___/\\___/     /_.___/\\__,_/\\__/_/\\___/_/
+
+`);
+
+  initLog("Loading all available network configurations...");
+  const networkConfigs = await loadAllAvailableNetworkConfigs(
+    specificNetwork ? { specificNetwork } : undefined,
+  );
+
+  if (networkConfigs.size === 0) {
+    if (specificNetwork) {
+      throw new Error(
+        `Network configuration not found for "${specificNetwork}". Please ensure ${specificNetwork}.env exists.`,
+      );
+    }
+    throw new Error(
+      "No network configurations found. Please ensure at least one network is configured.",
+    );
+  }
+
+  if (specificNetwork) {
+    console.log(`Running in single-network mode: ${specificNetwork}`);
+  } else {
+    console.log(
+      `Found ${networkConfigs.size} network(s): ${Array.from(networkConfigs.keys()).join(", ")}`,
+    );
+  }
+
+  // Get first config for shared settings (bearer token should be same across networks)
+  const firstConfig = Array.from(networkConfigs.values())[0];
+  if (!firstConfig) {
+    throw new Error("No network configurations available");
+  }
+
+  initLog("Initializing Prometheus metrics registry...");
+  const metricsPort = 9464;
+  initMetricsRegistry({
+    port: metricsPort,
+    bearerToken: firstConfig.METRICS_BEARER_TOKEN,
+  });
+  console.log(
+    `Prometheus metrics available at http://localhost:${metricsPort}/metrics`,
+  );
+  if (firstConfig.METRICS_BEARER_TOKEN) {
+    console.log(
+      `  Authentication: Bearer token required (configured: ${firstConfig.METRICS_BEARER_TOKEN === "default-api-key" ? "default" : "custom"})`,
+    );
+  }
+
+  // Initialize shared metrics (these will aggregate across all networks)
+  initLog("Initializing shared metrics...");
+  initAttesterMetrics();
+  initPublisherMetrics();
+  initStakingRewardsMetrics();
+
+  // Initialize config metrics for all networks
+  initLog("Initializing configuration metrics for all networks...");
+  for (const [network, config] of networkConfigs.entries()) {
+    initConfigMetrics(network, config);
+  }
+
+  // Create a single scraper manager for all networks
+  const scraperManager = new ScraperManager();
+
+  // Track Safe clients per network for cleanup
+  const safeClients = new Map<string, SafeGlobalClient>();
+
+  // Initialize each network
+  initLog("Initializing all networks...");
+  for (const [network, config] of networkConfigs.entries()) {
+    try {
+      const { safeClient } = await initializeNetwork(
+        network,
+        config,
+        scraperManager,
+      );
+
+      if (safeClient) {
+        safeClients.set(network, safeClient);
+      }
+
+      console.log(`[${network}] Network initialization complete`);
+    } catch (error) {
+      console.error(`[${network}] Failed to initialize network:`, error);
+      // Continue with other networks instead of failing completely
+      console.warn(
+        `[${network}] Skipping this network due to initialization error`,
+      );
+    }
+  }
+
+  // Initialize and start all scrapers
+  initLog("Initializing and starting all scrapers...");
+  await scraperManager.init();
+  await scraperManager.start();
 
   // Setup graceful shutdown
   let isShuttingDown = false;
@@ -192,7 +268,7 @@ export const startServer = async () => {
 
     console.log("\n\n=== Shutting down gracefully ===");
     try {
-      // Shutdown handlers
+      // Shutdown handlers for all networks
       console.log("Shutting down handlers...");
       await shutdownHandlers();
       console.log("Handlers shut down");
@@ -202,12 +278,12 @@ export const startServer = async () => {
       await scraperManager.shutdown();
       console.log("Scrapers shut down");
 
-      // Shutdown scrapers
-      if (safeClient) {
-        console.log("Shutting down Safe client poller...");
+      // Shutdown Safe clients
+      for (const [network, safeClient] of safeClients.entries()) {
+        console.log(`[${network}] Shutting down Safe client poller...`);
         safeClient.cancelPendingTransactionsPoll();
-        console.log("Safe client shut down");
       }
+      console.log("All Safe clients shut down");
 
       // Shutdown metrics
       const { exporter, authServer } = getMetricsRegistry();
@@ -244,8 +320,12 @@ export const startServer = async () => {
 
   console.log("\n=== Server is running ===");
   console.log(`
+Active networks: ${Array.from(networkConfigs.keys()).join(", ")}
+
 Endpoints:
   - Metrics: http://localhost:${metricsPort}/metrics
+
+All metrics include 'network' label for filtering.
 
 Press Ctrl+C to stop
 `);

@@ -1,14 +1,12 @@
 /**
- * State module - application state management (Multi-Network Support)
+ * State module - application state management
  *
- * Manages in-memory state for multiple networks:
+ * Manages in-memory state for:
  * - Scraper config (attesters, publishers, staking provider)
  * - Staking provider data (from scrapers)
  * - Attester states and transitions
  * - Publisher data
  * - Staking rewards history
- *
- * Each network has isolated state with separate persistence files.
  */
 
 import { z } from "zod";
@@ -65,9 +63,12 @@ export type AttesterStateEntry = z.infer<typeof AttesterStateEntrySchema>;
 // Type for attester state map (address -> state entry)
 export type AttesterStateMap = Map<string, AttesterStateEntry>;
 
-// Network-specific state
-export type NetworkState = {
-  stakingProviderData: StakingProviderData | null;
+// Schema for app state
+export const AppStateSchema = z.object({
+  stakingProviderData: StakingProviderDataSchema.nullable(),
+});
+
+export type AppState = z.infer<typeof AppStateSchema> & {
   scraperConfig: ScraperConfig | null;
   attesterStates: AttesterStateMap;
   publisherData: PublisherDataMap | null;
@@ -102,41 +103,21 @@ function deepFreeze<T>(obj: T): Readonly<T> {
 }
 
 /**
- * Global network states map
+ * Global application state
  */
-const networkStates = new Map<string, NetworkState>();
-
-/**
- * Get or create network state
- */
-const getNetworkState = (network: string): NetworkState => {
-  let state = networkStates.get(network);
-  if (!state) {
-    state = {
-      stakingProviderData: null,
-      scraperConfig: null,
-      attesterStates: new Map(),
-      publisherData: null,
-      stakingRewardsData: null,
-      stakingRewardsHistory: [],
-    };
-    networkStates.set(network, state);
-  }
-  return state;
+let appState: AppState = {
+  stakingProviderData: null,
+  scraperConfig: null,
+  attesterStates: new Map(),
+  publisherData: null,
+  stakingRewardsData: null,
+  stakingRewardsHistory: [],
 };
 
 /**
- * Get all network states
- */
-export const getAllNetworkStates = (): ReadonlyMap<string, NetworkState> => {
-  return networkStates;
-};
-
-/**
- * Callbacks to notify when state changes (now include network)
+ * Callbacks to notify when state changes
  */
 type AttesterStateChangeCallback = (
-  network: string,
   attesterAddress: string,
   newState: AttesterState,
   oldState: AttesterState | undefined,
@@ -144,7 +125,6 @@ type AttesterStateChangeCallback = (
 const attesterStateChangeCallbacks: AttesterStateChangeCallback[] = [];
 
 type PublisherBalanceUpdateCallback = (
-  network: string,
   publisherAddress: string,
   currentBalance: PublisherData["currentBalance"],
   requiredTopup: PublisherData["requiredTopup"],
@@ -152,18 +132,16 @@ type PublisherBalanceUpdateCallback = (
 const PublisherBalanceUpdateCallbacks: PublisherBalanceUpdateCallback[] = [];
 
 /**
- * Per-network state file paths and debounce timers
+ * State file path (using env-paths data directory)
  */
-const networkStatePaths = new Map<
-  string,
-  {
-    attesterStateFilePath: string;
-    stakingRewardsHistoryFilePath: string;
-    attesterSaveTimer: NodeJS.Timeout | null;
-    rewardsSaveTimer: NodeJS.Timeout | null;
-  }
->();
+let stateFilePath: string | null = null;
+let stakingRewardsHistoryFilePath: string | null = null;
 
+/**
+ * Debounce timer for saving state to file
+ */
+let saveTimer: NodeJS.Timeout | null = null;
+let stakingRewardsSaveTimer: NodeJS.Timeout | null = null;
 const SAVE_DEBOUNCE_MS = 5000; // Save at most once every 5 seconds
 const STAKING_HISTORY_SAVE_DEBOUNCE_MS = 5000;
 
@@ -171,65 +149,39 @@ const STAKING_HISTORY_SAVE_DEBOUNCE_MS = 5000;
  * Initialize state management with persistence
  */
 export const initState = async () => {
-  console.log("State management initialized (multi-network support)");
+  console.log("State management initialized");
 
-  // State files will be created per-network when networks are initialized
+  // Set up state file path using env-paths data directory
   const dataDir = envPath(PACKAGE_NAME, { suffix: "" }).data;
   await fs.mkdir(dataDir, { recursive: true });
-  console.log(`[State] Data directory: ${dataDir}`);
-};
-
-/**
- * Initialize state for a specific network
- */
-export const initNetworkState = async (network: string) => {
-  console.log(`[State] Initializing state for network: ${network}`);
-
-  const dataDir = envPath(PACKAGE_NAME, { suffix: "" }).data;
-  const attesterStateFilePath = path.join(
+  stateFilePath = path.join(dataDir, "attester-state.json");
+  stakingRewardsHistoryFilePath = path.join(
     dataDir,
-    `${network}-attester-state.json`,
+    "staking-rewards-history.json",
   );
-  const stakingRewardsHistoryFilePath = path.join(
-    dataDir,
-    `${network}-staking-rewards-history.json`,
-  );
-
-  networkStatePaths.set(network, {
-    attesterStateFilePath,
-    stakingRewardsHistoryFilePath,
-    attesterSaveTimer: null,
-    rewardsSaveTimer: null,
-  });
-
+  console.log(`[State] State file path: ${stateFilePath}`);
   console.log(
-    `[State/${network}] Attester state file: ${attesterStateFilePath}`,
-  );
-  console.log(
-    `[State/${network}] Staking rewards history file: ${stakingRewardsHistoryFilePath}`,
+    `[State] Staking rewards history file path: ${stakingRewardsHistoryFilePath}`,
   );
 
-  // Load state from files if they exist
-  await loadAttesterStatesFromFile(network);
-  await loadStakingRewardsHistoryFromFile(network);
+  // Load state from file if it exists
+  await loadAttesterStatesFromFile();
+  await loadStakingRewardsHistoryFromFile();
 };
 
 /**
  * Serialize attester state for JSON storage
  */
-const serializeAttesterStates = (
-  network: string,
-): Record<
+const serializeAttesterStates = (): Record<
   string,
   { state: string; lastUpdated: string; onChainView?: any }
 > => {
-  const state = getNetworkState(network);
   const serialized: Record<
     string,
     { state: string; lastUpdated: string; onChainView?: any }
   > = {};
 
-  for (const [address, entry] of state.attesterStates.entries()) {
+  for (const [address, entry] of appState.attesterStates.entries()) {
     serialized[address] = {
       state: entry.state,
       lastUpdated: entry.lastUpdated.toISOString(),
@@ -262,14 +214,11 @@ const serializeAttesterStates = (
  * Deserialize attester state from JSON storage
  */
 const deserializeAttesterStates = (
-  network: string,
   data: Record<
     string,
     { state: string; lastUpdated: string; onChainView?: any }
   >,
 ): void => {
-  const state = getNetworkState(network);
-
   for (const [address, record] of Object.entries(data)) {
     if (Object.values(AttesterState).includes(record.state as AttesterState)) {
       let onChainView: AttesterView | undefined;
@@ -299,13 +248,13 @@ const deserializeAttesterStates = (
           };
         } catch (error) {
           console.warn(
-            `[State/${network}] Failed to deserialize on-chain view for attester ${address}:`,
+            `[State] Failed to deserialize on-chain view for attester ${address}:`,
             error,
           );
         }
       }
 
-      state.attesterStates.set(address, {
+      appState.attesterStates.set(address, {
         attesterAddress: address,
         state: record.state as AttesterState,
         lastUpdated: new Date(record.lastUpdated),
@@ -313,7 +262,7 @@ const deserializeAttesterStates = (
       });
     } else {
       console.warn(
-        `[State/${network}] Invalid state "${record.state}" for attester ${address}`,
+        `[State] Invalid state "${record.state}" for attester ${address}`,
       );
     }
   }
@@ -322,27 +271,23 @@ const deserializeAttesterStates = (
 /**
  * Load attester states from file
  */
-const loadAttesterStatesFromFile = async (network: string): Promise<void> => {
-  const paths = networkStatePaths.get(network);
-  if (!paths) {
+const loadAttesterStatesFromFile = async (): Promise<void> => {
+  if (!stateFilePath) {
     return;
   }
 
   try {
-    const fileContent = await fs.readFile(paths.attesterStateFilePath, "utf-8");
+    const fileContent = await fs.readFile(stateFilePath, "utf-8");
     const data = JSON.parse(fileContent);
-    deserializeAttesterStates(network, data);
-    const state = getNetworkState(network);
+    deserializeAttesterStates(data);
     console.log(
-      `[State/${network}] Loaded ${state.attesterStates.size} attester states from file`,
+      `[State] Loaded ${appState.attesterStates.size} attester states from file`,
     );
   } catch (error: any) {
     if (error.code === "ENOENT") {
-      console.log(
-        `[State/${network}] No existing state file found, starting fresh`,
-      );
+      console.log("[State] No existing state file found, starting fresh");
     } else {
-      console.error(`[State/${network}] Error loading state from file:`, error);
+      console.error("[State] Error loading state from file:", error);
     }
   }
 };
@@ -361,11 +306,8 @@ type SerializedStakingRewardsSnapshot = {
   timestamp: string;
 };
 
-const serializeStakingRewardsHistory = (
-  network: string,
-): SerializedStakingRewardsSnapshot[] => {
-  const state = getNetworkState(network);
-  return state.stakingRewardsHistory.map((snapshot) => ({
+const serializeStakingRewardsHistory = (): SerializedStakingRewardsSnapshot[] =>
+  appState.stakingRewardsHistory.map((snapshot) => ({
     coinbase: snapshot.coinbase,
     attesters: snapshot.attesters,
     pendingRewards: snapshot.pendingRewards.toString(),
@@ -381,14 +323,10 @@ const serializeStakingRewardsHistory = (
     blockNumber: snapshot.blockNumber.toString(),
     timestamp: snapshot.timestamp.toISOString(),
   }));
-};
 
 const deserializeStakingRewardsHistory = (
-  network: string,
   data: SerializedStakingRewardsSnapshot[],
 ) => {
-  const state = getNetworkState(network);
-
   for (const entry of data) {
     try {
       const parsed = StakingRewardsSnapshotSchema.parse({
@@ -406,45 +344,38 @@ const deserializeStakingRewardsHistory = (
         blockNumber: BigInt(entry.blockNumber),
         timestamp: new Date(entry.timestamp),
       });
-      state.stakingRewardsHistory.push(parsed);
+      appState.stakingRewardsHistory.push(parsed);
     } catch (error) {
       console.warn(
-        `[State/${network}] Failed to deserialize staking rewards snapshot at block ${entry.blockNumber}:`,
+        `[State] Failed to deserialize staking rewards snapshot at block ${entry.blockNumber}:`,
         error,
       );
     }
   }
 };
 
-const loadStakingRewardsHistoryFromFile = async (
-  network: string,
-): Promise<void> => {
-  const paths = networkStatePaths.get(network);
-  if (!paths) {
+const loadStakingRewardsHistoryFromFile = async (): Promise<void> => {
+  if (!stakingRewardsHistoryFilePath) {
     return;
   }
 
   try {
     const fileContent = await fs.readFile(
-      paths.stakingRewardsHistoryFilePath,
+      stakingRewardsHistoryFilePath,
       "utf-8",
     );
     const data: SerializedStakingRewardsSnapshot[] = JSON.parse(fileContent);
-    deserializeStakingRewardsHistory(network, data);
-    const state = getNetworkState(network);
+    deserializeStakingRewardsHistory(data);
     console.log(
-      `[State/${network}] Loaded ${state.stakingRewardsHistory.length} staking rewards snapshots from file`,
+      `[State] Loaded ${appState.stakingRewardsHistory.length} staking rewards snapshots from file`,
     );
   } catch (error: any) {
     if (error.code === "ENOENT") {
       console.log(
-        `[State/${network}] No existing staking rewards history file found, starting fresh`,
+        "[State] No existing staking rewards history file found, starting fresh",
       );
     } else {
-      console.error(
-        `[State/${network}] Error loading staking rewards history:`,
-        error,
-      );
+      console.error("[State] Error loading staking rewards history:", error);
     }
   }
 };
@@ -452,50 +383,39 @@ const loadStakingRewardsHistoryFromFile = async (
 /**
  * Save attester states to file
  */
-export const saveAttesterStatesToFile = async (
-  network: string,
-): Promise<void> => {
-  const paths = networkStatePaths.get(network);
-  if (!paths) {
+export const saveAttesterStatesToFile = async (): Promise<void> => {
+  if (!stateFilePath) {
     return;
   }
 
   try {
-    const serialized = serializeAttesterStates(network);
-    await fs.writeFile(
-      paths.attesterStateFilePath,
-      JSON.stringify(serialized, null, 2),
-    );
-    const state = getNetworkState(network);
+    const serialized = serializeAttesterStates();
+    await fs.writeFile(stateFilePath, JSON.stringify(serialized, null, 2));
     console.log(
-      `[State/${network}] Saved ${state.attesterStates.size} attester states to file`,
+      `[State] Saved ${appState.attesterStates.size} attester states to file (${stateFilePath})`,
     );
   } catch (error) {
-    console.error(`[State/${network}] Error saving state to file:`, error);
+    console.error("[State] Error saving state to file:", error);
   }
 };
 
-export const saveStakingRewardsHistoryToFile = async (
-  network: string,
-): Promise<void> => {
-  const paths = networkStatePaths.get(network);
-  if (!paths) {
+export const saveStakingRewardsHistoryToFile = async (): Promise<void> => {
+  if (!stakingRewardsHistoryFilePath) {
     return;
   }
 
   try {
-    const serialized = serializeStakingRewardsHistory(network);
+    const serialized = serializeStakingRewardsHistory();
     await fs.writeFile(
-      paths.stakingRewardsHistoryFilePath,
+      stakingRewardsHistoryFilePath,
       JSON.stringify(serialized, null, 2),
     );
-    const state = getNetworkState(network);
     console.log(
-      `[State/${network}] Saved ${state.stakingRewardsHistory.length} staking rewards snapshots to file`,
+      `[State] Saved ${appState.stakingRewardsHistory.length} staking rewards snapshots to file (${stakingRewardsHistoryFilePath})`,
     );
   } catch (error) {
     console.error(
-      `[State/${network}] Error saving staking rewards history to file:`,
+      "[State] Error saving staking rewards history to file:",
       error,
     );
   }
@@ -505,61 +425,44 @@ export const saveStakingRewardsHistoryToFile = async (
  * Schedule a debounced save to file
  * This prevents excessive file writes when many state updates occur
  */
-const scheduleSaveAttesterStates = (network: string): void => {
-  const paths = networkStatePaths.get(network);
-  if (!paths) {
-    return;
-  }
-
+const scheduleSaveAttesterStates = (): void => {
   // Clear existing timer if any
-  if (paths.attesterSaveTimer) {
-    clearTimeout(paths.attesterSaveTimer);
+  if (saveTimer) {
+    clearTimeout(saveTimer);
   }
 
   // Schedule new save
-  paths.attesterSaveTimer = setTimeout(() => {
-    void saveAttesterStatesToFile(network);
-    paths.attesterSaveTimer = null;
+  saveTimer = setTimeout(() => {
+    void saveAttesterStatesToFile();
+    saveTimer = null;
   }, SAVE_DEBOUNCE_MS);
 };
 
-const scheduleSaveStakingRewardsHistory = (network: string): void => {
-  const paths = networkStatePaths.get(network);
-  if (!paths) {
-    return;
+const scheduleSaveStakingRewardsHistory = (): void => {
+  if (stakingRewardsSaveTimer) {
+    clearTimeout(stakingRewardsSaveTimer);
   }
 
-  if (paths.rewardsSaveTimer) {
-    clearTimeout(paths.rewardsSaveTimer);
-  }
-
-  paths.rewardsSaveTimer = setTimeout(() => {
-    void saveStakingRewardsHistoryToFile(network);
-    paths.rewardsSaveTimer = null;
+  stakingRewardsSaveTimer = setTimeout(() => {
+    void saveStakingRewardsHistoryToFile();
+    stakingRewardsSaveTimer = null;
   }, STAKING_HISTORY_SAVE_DEBOUNCE_MS);
 };
 
 /**
- * Get current network state
+ * Get current application state
  */
-export const getNetworkStateData = (
-  network: string,
-): Readonly<NetworkState> => {
-  return getNetworkState(network);
+export const getState = (): Readonly<AppState> => {
+  return appState;
 };
 
 /**
  * Update staking provider data from scraper
  */
-export const updateStakingProviderData = (
-  network: string,
-  newStakingProviderData: unknown,
-) => {
-  const state = getNetworkState(network);
-
+export const updateStakingProviderData = (newStakingProviderData: unknown) => {
   // Allow null values (when staking provider is not configured)
   if (newStakingProviderData === null) {
-    state.stakingProviderData = null;
+    appState.stakingProviderData = null;
     return;
   }
 
@@ -569,10 +472,7 @@ export const updateStakingProviderData = (
     validated = StakingProviderDataSchema.parse(newStakingProviderData);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error(
-        `[State/${network}] Invalid StakingProviderData:`,
-        error.errors,
-      );
+      console.error("[State] Invalid StakingProviderData:", error.errors);
       // Log detailed validation errors
       for (const err of error.errors) {
         console.error(`  - ${err.path.join(".")}: ${err.message}`);
@@ -583,50 +483,44 @@ export const updateStakingProviderData = (
 
   // Freeze for immutability
   const frozenData = deepFreeze(validated);
-  state.stakingProviderData = frozenData;
+  appState.stakingProviderData = frozenData;
 };
 
 /**
- * Get staking provider data
+ * Check if an attester is in the staking provider's staking registry queue
+ * This requires querying the blockchain, which should be done by the handler
  */
-export const getStakingProviderData = (
-  network: string,
-): StakingProviderData | null => {
-  const state = getNetworkState(network);
-  return state.stakingProviderData;
+export const getStakingProviderData = (): StakingProviderData | null => {
+  return appState.stakingProviderData;
 };
 
 /**
- * Get all attester states for a network
+ * Get all attester states
  */
-export const getAttesterStates = (
-  network: string,
-): ReadonlyMap<string, AttesterStateEntry> => {
-  const state = getNetworkState(network);
-  return state.attesterStates;
+export const getAttesterStates = (): ReadonlyMap<
+  string,
+  AttesterStateEntry
+> => {
+  return appState.attesterStates;
 };
 
 /**
  * Get state for a specific attester
  */
 export const getAttesterState = (
-  network: string,
   attesterAddress: string,
 ): AttesterStateEntry | undefined => {
-  const state = getNetworkState(network);
-  return state.attesterStates.get(attesterAddress);
+  return appState.attesterStates.get(attesterAddress);
 };
 
 /**
  * Update attester state
  */
 export const updateAttesterState = (
-  network: string,
   attesterAddress: string,
   newState: AttesterState,
 ): void => {
-  const state = getNetworkState(network);
-  const oldEntry = state.attesterStates.get(attesterAddress);
+  const oldEntry = appState.attesterStates.get(attesterAddress);
   const oldState = oldEntry?.state;
 
   // Skip if state hasn't changed
@@ -635,7 +529,7 @@ export const updateAttesterState = (
   }
 
   console.log(
-    `[${network}] Trying to update attester ${attesterAddress} state: ${oldState || "none"} -> ${newState}`,
+    `Trying to update attester ${attesterAddress} state: ${oldState || "none"} -> ${newState}`,
   );
 
   // Validate COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE
@@ -645,7 +539,7 @@ export const updateAttesterState = (
     oldState !== undefined
   ) {
     console.error(
-      `[${network}] ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
+      `ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
         `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
     );
     return; // Don't allow the transition
@@ -658,38 +552,33 @@ export const updateAttesterState = (
     onChainView: oldEntry?.onChainView, // Preserve on-chain view data
   };
 
-  state.attesterStates.set(attesterAddress, newEntry);
+  appState.attesterStates.set(attesterAddress, newEntry);
 
   console.log(
-    `[State/${network}] Attester ${attesterAddress} state updated: ${oldState || "none"} -> ${newState}`,
+    `[State] Attester ${attesterAddress} state updated: ${oldState || "none"} -> ${newState}`,
   );
 
   // Notify callbacks
   for (const callback of attesterStateChangeCallbacks) {
     try {
-      callback(network, attesterAddress, newState, oldState);
+      callback(attesterAddress, newState, oldState);
     } catch (error) {
-      console.error(
-        `[State/${network}] Error in attester state change callback:`,
-        error,
-      );
+      console.error("[State] Error in attester state change callback:", error);
     }
   }
 
   // Mark that we have pending changes to save
-  scheduleSaveAttesterStates(network);
+  scheduleSaveAttesterStates();
 };
 
 /**
  * Update attester on-chain view data
  */
 export const updateAttesterOnChainView = (
-  network: string,
   attesterAddress: string,
   onChainView: AttesterView | null,
 ): void => {
-  const state = getNetworkState(network);
-  const existingEntry = state.attesterStates.get(attesterAddress);
+  const existingEntry = appState.attesterStates.get(attesterAddress);
 
   if (!existingEntry) {
     // If attester doesn't exist in state, create it with NEW state
@@ -699,9 +588,9 @@ export const updateAttesterOnChainView = (
       lastUpdated: new Date(),
       onChainView: onChainView || undefined,
     };
-    state.attesterStates.set(attesterAddress, newEntry);
+    appState.attesterStates.set(attesterAddress, newEntry);
     console.log(
-      `[State/${network}] Created new attester ${attesterAddress} with on-chain view`,
+      `[State] Created new attester ${attesterAddress} with on-chain view`,
     );
   } else {
     // Update existing entry with new on-chain view
@@ -710,11 +599,11 @@ export const updateAttesterOnChainView = (
       onChainView: onChainView || undefined,
       lastUpdated: new Date(),
     };
-    state.attesterStates.set(attesterAddress, updatedEntry);
+    appState.attesterStates.set(attesterAddress, updatedEntry);
   }
 
   // Mark that we have pending changes to save
-  scheduleSaveAttesterStates(network);
+  scheduleSaveAttesterStates();
 };
 
 /**
@@ -727,21 +616,18 @@ export const onAttesterStateChange = (
 };
 
 /**
- * Count attesters by state for a network
+ * Count attesters by state
  */
-export const countAttestersByState = (
-  network: string,
-): Map<AttesterState, number> => {
-  const state = getNetworkState(network);
+export const countAttestersByState = (): Map<AttesterState, number> => {
   const counts = new Map<AttesterState, number>();
 
   // Initialize all states to 0
-  for (const stateEnum of Object.values(AttesterState)) {
-    counts.set(stateEnum as AttesterState, 0);
+  for (const state of Object.values(AttesterState)) {
+    counts.set(state as AttesterState, 0);
   }
 
   // Count each attester
-  for (const entry of state.attesterStates.values()) {
+  for (const entry of appState.attesterStates.values()) {
     counts.set(entry.state, (counts.get(entry.state) || 0) + 1);
   }
 
@@ -752,11 +638,9 @@ export const countAttestersByState = (
  * Get attesters in a specific state
  */
 export const getAttestersByState = (
-  network: string,
   state: AttesterState,
 ): AttesterStateEntry[] => {
-  const networkState = getNetworkState(network);
-  return Array.from(networkState.attesterStates.values()).filter(
+  return Array.from(appState.attesterStates.values()).filter(
     (entry) => entry.state === state,
   );
 };
@@ -765,17 +649,14 @@ export const getAttestersByState = (
  * Get all attester coinbase information from scraper config
  * Returns map of attester address -> coinbase address
  */
-export const getAttesterCoinbaseInfo = (
-  network: string,
-): Map<string, string> => {
-  const state = getNetworkState(network);
+export const getAttesterCoinbaseInfo = (): Map<string, string> => {
   const coinbaseMap = new Map<string, string>();
 
-  if (!state.scraperConfig) {
+  if (!appState.scraperConfig) {
     return coinbaseMap;
   }
 
-  for (const attester of state.scraperConfig.attesters) {
+  for (const attester of appState.scraperConfig.attesters) {
     if (attester.coinbase) {
       coinbaseMap.set(attester.address, attester.coinbase);
     }
@@ -788,26 +669,22 @@ export const getAttesterCoinbaseInfo = (
  * Update publisher data from scraper
  */
 export const updatePublisherData = (
-  network: string,
   newPublisherData: PublisherDataMap | null,
 ) => {
-  const state = getNetworkState(network);
-
   if (!newPublisherData) return;
 
   newPublisherData.forEach((data, privKey) => {
-    if (isNewPublisherData(network, privKey, data)) {
+    if (isNewPublisherData(privKey, data)) {
       for (const callback of PublisherBalanceUpdateCallbacks) {
         try {
           callback(
-            network,
             data.publisherAddress,
             data.currentBalance,
             data.requiredTopup,
           );
         } catch (error) {
           console.error(
-            `[State/${network}] Error in publisher data change callback:`,
+            "[State] Error in publisher data change callback:",
             error,
           );
         }
@@ -815,38 +692,30 @@ export const updatePublisherData = (
     }
   });
 
-  state.publisherData = newPublisherData;
+  appState.publisherData = newPublisherData;
 };
 
-const isNewPublisherData = (
-  network: string,
-  address: string,
-  data: PublisherDataEntry,
-) => {
-  const state = getNetworkState(network);
-  if (!state.publisherData) return true;
-  if (state.publisherData.get(address) == data) return false;
+const isNewPublisherData = (address: string, data: PublisherDataEntry) => {
+  if (!appState.publisherData) return true;
+  if (appState.publisherData.get(address) == data) return false;
   return true; // as catch-all just always update
 };
 
 /**
  * Get publisher data
  */
-export const getPublisherData = (network: string): PublisherDataMap | null => {
-  const state = getNetworkState(network);
-  return state.publisherData;
+export const getPublisherData = (): PublisherDataMap | null => {
+  return appState.publisherData;
 };
 
 /**
  * Get data for a specific publisher
  */
 export const getPublisherDataEntry = (
-  network: string,
   publisherAddress: string,
 ): PublisherDataEntry | undefined => {
-  const state = getNetworkState(network);
-  if (!state.publisherData) return undefined;
-  return state.publisherData.get(publisherAddress);
+  if (!appState.publisherData) return undefined;
+  return appState.publisherData.get(publisherAddress);
 };
 
 /**
@@ -862,39 +731,31 @@ export const onPublisherBalanceUpdate = (
  * Update staking rewards data map
  */
 export const updateStakingRewardsData = (
-  network: string,
   rewardsData: StakingRewardsMap | null,
 ) => {
-  const state = getNetworkState(network);
-  state.stakingRewardsData = rewardsData;
+  appState.stakingRewardsData = rewardsData;
 };
 
 /**
  * Get the latest staking rewards data map
  */
-export const getStakingRewardsData = (
-  network: string,
-): StakingRewardsMap | null => {
-  const state = getNetworkState(network);
-  return state.stakingRewardsData;
+export const getStakingRewardsData = (): StakingRewardsMap | null => {
+  return appState.stakingRewardsData;
 };
 
 /**
  * Record staking rewards snapshots and persist to disk
  */
 export const recordStakingRewardsSnapshots = (
-  network: string,
   snapshots: StakingRewardsSnapshot[],
 ): void => {
   if (!snapshots.length) {
     return;
   }
 
-  const state = getNetworkState(network);
   let added = false;
-
   for (const snapshot of snapshots) {
-    const existing = state.stakingRewardsHistory.find(
+    const existing = appState.stakingRewardsHistory.find(
       (entry) =>
         entry.coinbase.toLowerCase() === snapshot.coinbase.toLowerCase() &&
         entry.blockNumber === snapshot.blockNumber,
@@ -904,75 +765,67 @@ export const recordStakingRewardsSnapshots = (
       continue;
     }
 
-    state.stakingRewardsHistory.push(snapshot);
+    appState.stakingRewardsHistory.push(snapshot);
     added = true;
   }
 
   if (added) {
-    state.stakingRewardsHistory.sort(
+    appState.stakingRewardsHistory.sort(
       (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
     );
-    scheduleSaveStakingRewardsHistory(network);
+    scheduleSaveStakingRewardsHistory();
   }
 };
 
 /**
  * Get recorded staking rewards history snapshots
  */
-export const getStakingRewardsHistory = (
-  network: string,
-): StakingRewardsSnapshot[] => {
-  const state = getNetworkState(network);
-  return state.stakingRewardsHistory;
+export const getStakingRewardsHistory = (): StakingRewardsSnapshot[] => {
+  return appState.stakingRewardsHistory;
 };
 
 /**
  * Get timestamp of latest staking rewards snapshot (if any)
  */
-export const getLatestStakingRewardsSnapshotTimestamp = (
-  network: string,
-): Date | null => {
-  const state = getNetworkState(network);
+export const getLatestStakingRewardsSnapshotTimestamp = (): Date | null => {
   const last =
-    state.stakingRewardsHistory[state.stakingRewardsHistory.length - 1];
+    appState.stakingRewardsHistory[appState.stakingRewardsHistory.length - 1];
   return last ? last.timestamp : null;
 };
 
 /**
  * Aggregate staking rewards snapshots into daily buckets for reporting
  */
-export const getStakingRewardsDailyAggregates = (
-  network: string,
-): StakingRewardsDailyAggregate[] => {
-  const state = getNetworkState(network);
-  const aggregates = new Map<string, StakingRewardsDailyAggregate>();
+export const getStakingRewardsDailyAggregates =
+  (): StakingRewardsDailyAggregate[] => {
+    const aggregates = new Map<string, StakingRewardsDailyAggregate>();
 
-  for (const snapshot of state.stakingRewardsHistory) {
-    const dateKey = snapshot.timestamp.toISOString().slice(0, 10);
-    const mapKey = `${dateKey}:${snapshot.coinbase.toLowerCase()}`;
-    const current = aggregates.get(mapKey) ?? {
-      date: dateKey,
-      coinbase: snapshot.coinbase,
-      totalPendingRewards: 0n,
-      totalOurShare: 0n,
-      totalOtherShare: 0n,
-      sampleCount: 0,
-    };
+    for (const snapshot of appState.stakingRewardsHistory) {
+      const dateKey = snapshot.timestamp.toISOString().slice(0, 10);
+      const mapKey = `${dateKey}:${snapshot.coinbase.toLowerCase()}`;
+      const current = aggregates.get(mapKey) ?? {
+        date: dateKey,
+        coinbase: snapshot.coinbase,
+        totalPendingRewards: 0n,
+        totalOurShare: 0n,
+        totalOtherShare: 0n,
+        sampleCount: 0,
+      };
 
-    aggregates.set(mapKey, {
-      ...current,
-      totalPendingRewards:
-        current.totalPendingRewards + snapshot.pendingRewards,
-      totalOurShare: current.totalOurShare + snapshot.ourShare,
-      totalOtherShare: current.totalOtherShare + snapshot.otherShare,
-      sampleCount: current.sampleCount + 1,
-    });
-  }
+      aggregates.set(mapKey, {
+        ...current,
+        totalPendingRewards:
+          current.totalPendingRewards + snapshot.pendingRewards,
+        totalOurShare: current.totalOurShare + snapshot.ourShare,
+        totalOtherShare: current.totalOtherShare + snapshot.otherShare,
+        sampleCount: current.sampleCount + 1,
+      });
+    }
 
-  return Array.from(aggregates.values()).map((entry) =>
-    StakingRewardsDailyAggregateSchema.parse(entry),
-  );
-};
+    return Array.from(aggregates.values()).map((entry) =>
+      StakingRewardsDailyAggregateSchema.parse(entry),
+    );
+  };
 
 /**
  * Get numeric priority of a state for comparison
@@ -995,18 +848,13 @@ function getStatePriority(state: AttesterState): number {
  * Called on server startup (alternative to initAttesterStates for scraper mode)
  */
 export const initAttesterStatesFromScraperConfig = (
-  network: string,
   scraperConfig: ScraperConfig,
 ): void => {
-  console.log(
-    `[State/${network}] Initializing attester states from scraper config...`,
-  );
-
-  const state = getNetworkState(network);
+  console.log("[State] Initializing attester states from scraper config...");
 
   // Initialize each attester's state
   for (const attester of scraperConfig.attesters) {
-    const dbStateEntry = state.attesterStates.get(attester.address);
+    const dbStateEntry = appState.attesterStates.get(attester.address);
     const configState = attester.lastSeenState as AttesterState | undefined;
 
     if (dbStateEntry && configState) {
@@ -1016,31 +864,31 @@ export const initAttesterStatesFromScraperConfig = (
 
       if (configPriority > dbPriority) {
         console.log(
-          `[State/${network}] Attester ${attester.address}: Using config state "${configState}" ` +
+          `[State] Attester ${attester.address}: Using config state "${configState}" ` +
             `(priority ${configPriority}) over DB state "${dbStateEntry.state}" (priority ${dbPriority})`,
         );
-        updateAttesterState(network, attester.address, configState);
+        updateAttesterState(attester.address, configState);
       } else {
         console.log(
-          `[State/${network}] Attester ${attester.address}: Keeping DB state "${dbStateEntry.state}" ` +
+          `[State] Attester ${attester.address}: Keeping DB state "${dbStateEntry.state}" ` +
             `(priority ${dbPriority}) over config state "${configState}" (priority ${configPriority})`,
         );
       }
     } else if (configState) {
       // Only config has state - use it
       console.log(
-        `[State/${network}] Attester ${attester.address}: Initializing from config state "${configState}"`,
+        `[State] Attester ${attester.address}: Initializing from config state "${configState}"`,
       );
-      updateAttesterState(network, attester.address, configState);
+      updateAttesterState(attester.address, configState);
     } else if (!dbStateEntry) {
       // No DB state and no config state - initialize to NEW
-      updateAttesterState(network, attester.address, AttesterState.NEW);
+      updateAttesterState(attester.address, AttesterState.NEW);
     }
     // else: DB state exists and no config state - do nothing (keep existing DB state)
   }
 
   console.log(
-    `[State/${network}] Attester states initialized: ${state.attesterStates.size} attesters`,
+    `[State] Attester states initialized: ${appState.attesterStates.size} attesters`,
   );
 };
 
@@ -1048,18 +896,15 @@ export const initAttesterStatesFromScraperConfig = (
  * Store scraper config in state for use by metrics and other modules
  */
 export const updateScraperConfigState = (
-  network: string,
   scraperConfig: ScraperConfig,
 ): void => {
-  const state = getNetworkState(network);
-  state.scraperConfig = scraperConfig;
-  console.log(`[State/${network}] Scraper config stored in state`);
+  appState.scraperConfig = scraperConfig;
+  console.log("[State] Scraper config stored in state");
 };
 
 /**
  * Get scraper config from state
  */
-export const getScraperConfig = (network: string): ScraperConfig | null => {
-  const state = getNetworkState(network);
-  return state.scraperConfig;
+export const getScraperConfig = (): ScraperConfig | null => {
+  return appState.scraperConfig;
 };

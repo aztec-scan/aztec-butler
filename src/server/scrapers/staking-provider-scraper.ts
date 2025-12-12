@@ -18,16 +18,19 @@ import type { ScraperConfig } from "../../types/scraper-config.js";
  */
 export class StakingProviderScraper extends AbstractScraper {
   readonly name = "staking-provider";
+  readonly network: string;
 
   private ethClient: EthereumClient | null = null;
   private stakingProviderAdmin: string | null = null;
   private lastScrapedData: StakingProviderData | null = null;
 
   constructor(
+    network: string,
     private config: ButlerConfig,
     private scraperConfig: ScraperConfig,
   ) {
     super();
+    this.network = network;
   }
 
   async init(): Promise<void> {
@@ -110,7 +113,7 @@ export class StakingProviderScraper extends AbstractScraper {
       );
 
       // Update shared state (now guaranteed to be valid)
-      updateStakingProviderData(this.lastScrapedData);
+      updateStakingProviderData(this.network, this.lastScrapedData);
 
       // Now handle attester state management
       await this.manageAttesterStates(stakingProviderData.providerId);
@@ -137,12 +140,17 @@ export class StakingProviderScraper extends AbstractScraper {
 
       // Process each attester
       for (const { address, hasCoinbase } of attestersToProcess) {
-        const currentState = getAttesterState(address);
-        await processAttesterState(address, hasCoinbase, currentState?.state);
+        const currentState = getAttesterState(this.network, address);
+        await processAttesterState(
+          this.network,
+          address,
+          hasCoinbase,
+          currentState?.state,
+        );
       }
 
       // Log state counts
-      const stateCounts = countAttestersByState();
+      const stateCounts = countAttestersByState(this.network);
       const stateCountsStr = Array.from(stateCounts.entries())
         .map(([state, count]) => `\n  ${state}: ${count}`)
         .join("");
@@ -159,7 +167,7 @@ export class StakingProviderScraper extends AbstractScraper {
     console.log(`[${this.name}] Shutting down...`);
     this.ethClient = null;
     this.lastScrapedData = null;
-    updateStakingProviderData(null);
+    updateStakingProviderData(this.network, null);
   }
 
   /**

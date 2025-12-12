@@ -6,7 +6,11 @@
 
 import type { ObservableGauge } from "@opentelemetry/api";
 import { createObservableGauge } from "./registry.js";
-import { getPublisherData, getScraperConfig } from "../state/index.js";
+import {
+  getPublisherData,
+  getScraperConfig,
+  getAllNetworkStates,
+} from "../state/index.js";
 import { formatEther } from "viem";
 
 // Metrics instances
@@ -27,30 +31,33 @@ export const initPublisherMetrics = () => {
   });
 
   publisherLoadGauge.addCallback((observableResult) => {
-    const data = getPublisherData();
-    const scraperConfig = getScraperConfig();
+    const networkStates = getAllNetworkStates();
 
-    if (!data) {
-      console.warn("No publisher data available for publisherLoadGauge");
-      return;
-    }
+    for (const [network, _state] of networkStates.entries()) {
+      const data = getPublisherData(network);
+      const scraperConfig = getScraperConfig(network);
 
-    if (!scraperConfig) {
-      console.warn("No scraper config available for publisherLoadGauge");
-      return;
-    }
+      if (!data) {
+        continue;
+      }
 
-    // Calculate load for each publisher
-    // Since we don't know which attester uses which publisher (varies by server in HA mode),
-    // we assume even distribution for monitoring purposes
-    const attesterCount = scraperConfig.attesters.length;
-    const publisherCount = scraperConfig.publishers.length;
-    const attestersPerPublisher = Math.ceil(attesterCount / publisherCount);
+      if (!scraperConfig) {
+        continue;
+      }
 
-    for (const [_privKey, publisherData] of data.entries()) {
-      observableResult.observe(attestersPerPublisher, {
-        publisher_address: publisherData.publisherAddress,
-      });
+      // Calculate load for each publisher
+      // Since we don't know which attester uses which publisher (varies by server in HA mode),
+      // we assume even distribution for monitoring purposes
+      const attesterCount = scraperConfig.attesters.length;
+      const publisherCount = scraperConfig.publishers.length;
+      const attestersPerPublisher = Math.ceil(attesterCount / publisherCount);
+
+      for (const [_privKey, publisherData] of data.entries()) {
+        observableResult.observe(attestersPerPublisher, {
+          network,
+          publisher_address: publisherData.publisherAddress,
+        });
+      }
     }
   });
 
@@ -60,21 +67,25 @@ export const initPublisherMetrics = () => {
   });
 
   publisherEthBalanceGauge.addCallback((observableResult) => {
-    const data = getPublisherData();
+    const networkStates = getAllNetworkStates();
 
-    if (!data) {
-      console.warn("No publisher data available for publisherEthBalanceGauge");
-      return;
-    }
+    for (const [network, _state] of networkStates.entries()) {
+      const data = getPublisherData(network);
 
-    for (const [_privKey, publisherData] of data.entries()) {
-      // Convert wei to ether for human-readable metrics
-      const balanceInEther = parseFloat(
-        formatEther(publisherData.currentBalance),
-      );
-      observableResult.observe(balanceInEther, {
-        publisher_address: publisherData.publisherAddress,
-      });
+      if (!data) {
+        continue;
+      }
+
+      for (const [_privKey, publisherData] of data.entries()) {
+        // Convert wei to ether for human-readable metrics
+        const balanceInEther = parseFloat(
+          formatEther(publisherData.currentBalance),
+        );
+        observableResult.observe(balanceInEther, {
+          network,
+          publisher_address: publisherData.publisherAddress,
+        });
+      }
     }
   });
 
@@ -88,30 +99,32 @@ export const initPublisherMetrics = () => {
   );
 
   publisherCapacityRatioGauge.addCallback((observableResult) => {
-    const data = getPublisherData();
+    const networkStates = getAllNetworkStates();
 
-    if (!data) {
-      console.warn(
-        "No publisher data available for publisherCapacityRatioGauge",
-      );
-      return;
-    }
+    for (const [network, _state] of networkStates.entries()) {
+      const data = getPublisherData(network);
 
-    for (const [_privKey, publisherData] of data.entries()) {
-      // Calculate required full balance
-      const requiredBalance =
-        publisherData.currentBalance + publisherData.requiredTopup;
+      if (!data) {
+        continue;
+      }
 
-      // Calculate ratio (avoid division by zero)
-      const ratio =
-        requiredBalance > 0n
-          ? parseFloat(formatEther(publisherData.currentBalance)) /
-            parseFloat(formatEther(requiredBalance))
-          : 1.0;
+      for (const [_privKey, publisherData] of data.entries()) {
+        // Calculate required full balance
+        const requiredBalance =
+          publisherData.currentBalance + publisherData.requiredTopup;
 
-      observableResult.observe(ratio, {
-        publisher_address: publisherData.publisherAddress,
-      });
+        // Calculate ratio (avoid division by zero)
+        const ratio =
+          requiredBalance > 0n
+            ? parseFloat(formatEther(publisherData.currentBalance)) /
+              parseFloat(formatEther(requiredBalance))
+            : 1.0;
+
+        observableResult.observe(ratio, {
+          network,
+          publisher_address: publisherData.publisherAddress,
+        });
+      }
     }
   });
 
@@ -125,21 +138,25 @@ export const initPublisherMetrics = () => {
   );
 
   publisherRequiredTopupGauge.addCallback((observableResult) => {
-    const data = getPublisherData();
+    const networkStates = getAllNetworkStates();
 
-    if (!data) {
-      console.warn(
-        "No publisher data available for publisherRequiredTopupGauge",
-      );
-      return;
-    }
+    for (const [network, _state] of networkStates.entries()) {
+      const data = getPublisherData(network);
 
-    for (const [_privKey, publisherData] of data.entries()) {
-      // Convert wei to ether for human-readable metrics
-      const topupInEther = parseFloat(formatEther(publisherData.requiredTopup));
-      observableResult.observe(topupInEther, {
-        publisher_address: publisherData.publisherAddress,
-      });
+      if (!data) {
+        continue;
+      }
+
+      for (const [_privKey, publisherData] of data.entries()) {
+        // Convert wei to ether for human-readable metrics
+        const topupInEther = parseFloat(
+          formatEther(publisherData.requiredTopup),
+        );
+        observableResult.observe(topupInEther, {
+          network,
+          publisher_address: publisherData.publisherAddress,
+        });
+      }
     }
   });
 

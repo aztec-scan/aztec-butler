@@ -11,6 +11,7 @@ import {
   getAttestersByState,
   getAttesterStates,
   AttesterState,
+  getAllNetworkStates,
 } from "../state/index.js";
 import { createObservableGauge } from "./registry.js";
 import { AttesterOnChainStatus } from "../../types/index.js";
@@ -48,37 +49,50 @@ export const initAttesterMetrics = () => {
   );
 
   attesterInfoGauge.addCallback((observableResult) => {
-    const coinbaseInfo = getAttesterCoinbaseInfo();
+    const networkStates = getAllNetworkStates();
 
-    let exportedCount = 0;
-    for (const [attester, coinbase] of coinbaseInfo.entries()) {
-      if (coinbase) {
-        observableResult.observe(1, {
-          attester_address: attester,
-          coinbase_address: coinbase,
-        });
-        exportedCount++;
+    for (const [network, _state] of networkStates.entries()) {
+      const coinbaseInfo = getAttesterCoinbaseInfo(network);
+
+      for (const [attester, coinbase] of coinbaseInfo.entries()) {
+        if (coinbase) {
+          observableResult.observe(1, {
+            network,
+            attester_address: attester,
+            coinbase_address: coinbase,
+          });
+        }
       }
     }
   });
 
   attesterCoinbaseNeededGauge.addCallback((observableResult) => {
-    const attestersNeedingCoinbase = getAttestersByState(
-      AttesterState.COINBASE_NEEDED,
-    );
+    const networkStates = getAllNetworkStates();
 
-    for (const entry of attestersNeedingCoinbase) {
-      observableResult.observe(1, {
-        attester_address: entry.attesterAddress,
-      });
+    for (const [network, _state] of networkStates.entries()) {
+      const attestersNeedingCoinbase = getAttestersByState(
+        network,
+        AttesterState.COINBASE_NEEDED,
+      );
+
+      for (const entry of attestersNeedingCoinbase) {
+        observableResult.observe(1, {
+          network,
+          attester_address: entry.attesterAddress,
+        });
+      }
     }
   });
 
   nbrofAttestersInStateGauge.addCallback((observableResult) => {
-    const stateCounts = countAttestersByState();
+    const networkStates = getAllNetworkStates();
 
-    for (const [state, count] of stateCounts.entries()) {
-      observableResult.observe(count, { attester_state: state });
+    for (const [network, _state] of networkStates.entries()) {
+      const stateCounts = countAttestersByState(network);
+
+      for (const [state, count] of stateCounts.entries()) {
+        observableResult.observe(count, { network, attester_state: state });
+      }
     }
   });
 
@@ -91,15 +105,20 @@ export const initAttesterMetrics = () => {
   );
 
   attesterOnChainStatusGauge.addCallback((observableResult) => {
-    const allAttesterStates = getAttesterStates();
+    const networkStates = getAllNetworkStates();
 
-    for (const [address, entry] of allAttesterStates.entries()) {
-      if (entry.onChainView) {
-        // Export the on-chain status as a metric
-        observableResult.observe(entry.onChainView.status, {
-          attester_address: address,
-          status: AttesterOnChainStatus[entry.onChainView.status],
-        });
+    for (const [network, _state] of networkStates.entries()) {
+      const allAttesterStates = getAttesterStates(network);
+
+      for (const [address, entry] of allAttesterStates.entries()) {
+        if (entry.onChainView) {
+          // Export the on-chain status as a metric
+          observableResult.observe(entry.onChainView.status, {
+            network,
+            attester_address: address,
+            status: AttesterOnChainStatus[entry.onChainView.status],
+          });
+        }
       }
     }
   });
@@ -114,13 +133,18 @@ export const initAttesterMetrics = () => {
   );
 
   attestersMissingCoinbaseGauge.addCallback((observableResult) => {
-    const coinbaseInfo = getAttesterCoinbaseInfo();
+    const networkStates = getAllNetworkStates();
 
-    for (const [attester, coinbase] of coinbaseInfo.entries()) {
-      if (!coinbase) {
-        observableResult.observe(1, {
-          attester_address: attester,
-        });
+    for (const [network, _state] of networkStates.entries()) {
+      const coinbaseInfo = getAttesterCoinbaseInfo(network);
+
+      for (const [attester, coinbase] of coinbaseInfo.entries()) {
+        if (!coinbase) {
+          observableResult.observe(1, {
+            network,
+            attester_address: attester,
+          });
+        }
       }
     }
   });
@@ -135,14 +159,20 @@ export const initAttesterMetrics = () => {
   );
 
   attestersMissingCoinbaseUrgentGauge.addCallback((observableResult) => {
-    const attestersNeedingCoinbase = getAttestersByState(
-      AttesterState.COINBASE_NEEDED,
-    );
+    const networkStates = getAllNetworkStates();
 
-    for (const entry of attestersNeedingCoinbase) {
-      observableResult.observe(1, {
-        attester_address: entry.attesterAddress,
-      });
+    for (const [network, _state] of networkStates.entries()) {
+      const attestersNeedingCoinbase = getAttestersByState(
+        network,
+        AttesterState.COINBASE_NEEDED,
+      );
+
+      for (const entry of attestersNeedingCoinbase) {
+        observableResult.observe(1, {
+          network,
+          attester_address: entry.attesterAddress,
+        });
+      }
     }
   });
 

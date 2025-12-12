@@ -10,6 +10,11 @@ export interface BaseScraper {
   readonly name: string;
 
   /**
+   * Network identifier this scraper operates on
+   */
+  readonly network: string;
+
+  /**
    * Initialize the scraper (setup connections, etc.)
    */
   init(): Promise<void>;
@@ -30,6 +35,7 @@ export interface BaseScraper {
  */
 export abstract class AbstractScraper implements BaseScraper {
   abstract readonly name: string;
+  abstract readonly network: string;
 
   async init(): Promise<void> {
     // Default: no-op
