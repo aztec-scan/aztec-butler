@@ -10,7 +10,117 @@ Collection of bash scripts for common Aztec Butler operations.
 
 ## Available Scripts
 
-### 1. Get Provider ID
+### 1. Process Private Keys
+
+```bash
+# Basic usage (default output name)
+./scripts/process-private-keys.sh new-private-keys.json
+
+# Custom output file
+./scripts/process-private-keys.sh new-private-keys.json --output public-keys.json
+```
+
+**What it does:**
+
+- Loads private keys from the specified JSON file
+- Derives public keys:
+  - **ETH Address:** Using `viem/accounts` - `privateKeyToAccount()` + `getAddress()`
+  - **BLS Public Key:** Using `@aztec/foundation/crypto` - `computeBn254G1PublicKeyCompressed()`
+- Validates all private keys (fails on malformed keys)
+- Logs keys for future GCP storage (placeholder with TODO)
+- Checks provider queue for duplicate attesters
+- Generates output file with public keys only (excludes publisher and coinbase)
+
+**Output:** `public-[input-filename].json` (or custom path with `--output`)
+
+**Output contains:**
+
+- ✅ `attester.eth` (derived address)
+- ✅ `attester.bls` (derived public key)
+- ✅ `feeRecipient` (preserved from input)
+- ❌ NO `publisher` (assigned later in prepare-deployment)
+- ❌ NO `coinbase` (not yet known)
+
+**Use case:** Phase 2 of key flow - process newly generated private keys before deployment
+
+**Security Note:** This command handles private keys. Input file should be protected and deleted after successful GCP storage.
+
+---
+
+### 2. Prepare Deployment
+
+```bash
+# Basic usage
+./scripts/prepare-deployment.sh \
+  prod-testnet-keyfile.json \
+  new-public-keys.json \
+  testnet_available_publisher_addresses.json
+
+# High availability mode (3-way split)
+./scripts/prepare-deployment.sh \
+  prod-testnet-keyfile.json \
+  new-public-keys.json \
+  testnet_available_publisher_addresses.json \
+  --high-availability-count 3
+
+# Custom output path
+./scripts/prepare-deployment.sh \
+  prod-testnet-keyfile.json \
+  new-public-keys.json \
+  testnet_available_publisher_addresses.json \
+  --output /path/to/output.json
+```
+
+**Arguments:**
+
+- `production-keys` - Path to existing production keyfile with remoteSigner (required)
+- `new-public-keys` - Path to new public keys from process-private-keys (required)
+- `available-publishers` - Path to JSON array of publisher addresses (required)
+
+**Options:**
+
+- `--high-availability-count <n>` - Create N files with non-overlapping publishers
+- `--output <path>` - Custom output file path (default: `<production-keys>.new`)
+
+**What it does:**
+
+1. **Loads and validates** all input files
+2. **Checks for duplicates** - Fails if any attester address appears in both files
+3. **Validates coinbases** - Fails if any validator has explicit zero-address coinbase (0x0000...0000)
+4. **Checks publisher funding** - Queries ETH balance for each publisher:
+   - Fails if any publisher has 0 ETH
+   - Warns if any publisher has < MIN_ETH_PER_ATTESTER (0.1 ETH default)
+5. **Generates output files:**
+   - Standard mode: Single file `<production-keys>.new` (or `.new2` if exists)
+   - HA mode: Multiple files `A_<production-keys>.new`, `B_<production-keys>.new`, etc.
+   - Merges all validators (existing + new)
+   - Round-robin assigns publishers to ALL validators
+6. **Updates scraper config** with new attesters in "NEW" state
+
+**High Availability Mode:**
+
+When using `--high-availability-count`:
+
+- Creates N files with ALL validators but different publisher sets
+- Publishers are partitioned into non-overlapping sets
+- Requires at least N publishers (fails if not enough)
+- Example with 10 publishers and HA count 3:
+  - File A: publishers 1-3
+  - File B: publishers 4-6
+  - File C: publishers 7-10
+
+**Output:**
+
+- One or more `.new` files with merged validators and assigned publishers
+- Updated scraper config at `~/.local/share/aztec-butler/{network}-scrape-config.json`
+
+**Use case:** Phase 3 of key flow - prepare final deployment files with publisher assignments
+
+**Important:** After this step, manually deploy the `.new` file(s) to your node(s).
+
+---
+
+### 3. Get Provider ID
 
 ```bash
 ./scripts/get-provider-id.sh <admin-address>
@@ -39,7 +149,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 2. Generate Scraper Configuration
+### 4. Generate Scraper Configuration
 
 ```bash
 # Using admin address from config (queries chain)
@@ -65,7 +175,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 3. Scrape Coinbase Addresses
+### 5. Scrape Coinbase Addresses
 
 ```bash
 # Incremental scrape (default - fast, uses cache)
@@ -113,7 +223,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 4. Scrape Attester Status
+### 6. Scrape Attester Status
 
 ```bash
 # Show all attesters from scraper config (default)
@@ -183,7 +293,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 5. Add Keys to Staking Provider
+### 7. Add Keys to Staking Provider
 
 ```bash
 # Without updating scraper config
@@ -214,7 +324,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 6. Check Publisher ETH Balances
+### 8. Check Publisher ETH Balances
 
 ```bash
 ./scripts/check-publisher-eth.sh
@@ -237,7 +347,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 7. Start Server
+### 9. Start Server
 
 ```bash
 ./scripts/start-server.sh
@@ -261,7 +371,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 8. Get Metrics
+### 10. Get Metrics
 
 ```bash
 # Using default token and URL
@@ -280,6 +390,55 @@ npm run cli -- generate-scraper-config --provider-id 123
 ---
 
 ## Workflow Examples
+
+### Full Key Deployment Flow (New Validators)
+
+```bash
+# Phase 1: Generate private keys using aztec CLI (outside butler)
+# aztec validator-keys generate --num 2 --output new-private-keys.json
+
+# Phase 2: Process private keys
+./scripts/process-private-keys.sh new-private-keys.json
+# Output: public-new-private-keys.json
+
+# Phase 3: Prepare deployment files
+./scripts/prepare-deployment.sh \
+  prod-testnet-keyfile.json \
+  public-new-private-keys.json \
+  testnet_available_publisher_addresses.json
+# Output: prod-testnet-keyfile.json.new (ready to deploy)
+
+# Phase 4: Deploy to servers (manual - outside butler)
+# - Copy prod-testnet-keyfile.json.new to servers
+# - Rename to prod-testnet-keyfile.json
+# - Restart nodes
+
+# Phase 5: Register keys to provider
+./scripts/add-keys.sh prod-testnet-keyfile.json --update-config
+# Copy calldata and propose to Safe multisig
+
+# Cleanup: Delete private keys file after successful GCP storage
+# rm new-private-keys.json
+```
+
+**With High Availability:**
+
+```bash
+# Phase 3 with HA mode (3-way split for redundancy)
+./scripts/prepare-deployment.sh \
+  prod-testnet-keyfile.json \
+  public-new-private-keys.json \
+  testnet_available_publisher_addresses.json \
+  --high-availability-count 3
+# Output: A_prod-testnet-keyfile.json.new, B_prod-testnet-keyfile.json.new, C_prod-testnet-keyfile.json.new
+
+# Phase 4: Deploy different files to different servers
+# Server 1: A_prod-testnet-keyfile.json.new
+# Server 2: B_prod-testnet-keyfile.json.new
+# Server 3: C_prod-testnet-keyfile.json.new
+```
+
+---
 
 ### Initial Setup (New Staking Provider)
 
@@ -371,6 +530,23 @@ All scripts use `npm run cli` under the hood. You can also call commands directl
 ```bash
 # Show help
 npm run cli -- help
+
+# Process private keys
+npm run cli -- process-private-keys <private-key-file>
+npm run cli -- process-private-keys new-private-keys.json --output public-keys.json
+
+# Prepare deployment
+npm run cli -- prepare-deployment \
+  --production-keys prod-testnet-keyfile.json \
+  --new-public-keys public-new-private-keys.json \
+  --available-publishers testnet_available_publisher_addresses.json
+
+# Prepare deployment with high availability
+npm run cli -- prepare-deployment \
+  --production-keys prod-testnet-keyfile.json \
+  --new-public-keys public-new-private-keys.json \
+  --available-publishers testnet_available_publisher_addresses.json \
+  --high-availability-count 3
 
 # Get provider ID
 npm run cli -- get-provider-id 0x1234567890abcdef1234567890abcdef12345678

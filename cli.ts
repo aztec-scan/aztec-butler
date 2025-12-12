@@ -315,6 +315,57 @@ program
     });
   });
 
+// Command: prepare-deployment
+program
+  .command("prepare-deployment")
+  .description(
+    "Merge production keys with new public keys and prepare for deployment",
+  )
+  .requiredOption(
+    "--production-keys <path>",
+    "Path to existing production keyfile",
+  )
+  .requiredOption(
+    "--new-public-keys <path>",
+    "Path to new public keys file from process-private-keys",
+  )
+  .requiredOption(
+    "--available-publishers <path>",
+    "Path to JSON array of available publisher addresses",
+  )
+  .option(
+    "--high-availability-count <n>",
+    "Create N files with non-overlapping publishers",
+    (value) => parseInt(value, 10),
+  )
+  .option(
+    "-o, --output <path>",
+    "Output file path (default: [production-keys].new)",
+  )
+  .action(
+    async (options: {
+      productionKeys: string;
+      newPublicKeys: string;
+      availablePublishers: string;
+      highAvailabilityCount?: number;
+      output?: string;
+    }) => {
+      const config = await initConfig();
+      const ethClient = await initEthClient(config);
+
+      await command.prepareDeployment(ethClient, config, {
+        productionKeys: options.productionKeys,
+        newPublicKeys: options.newPublicKeys,
+        availablePublishers: options.availablePublishers,
+        network: config.NETWORK,
+        ...(options.highAvailabilityCount !== undefined
+          ? { highAvailabilityCount: options.highAvailabilityCount }
+          : {}),
+        ...(options.output ? { outputPath: options.output } : {}),
+      });
+    },
+  );
+
 // Parse and handle errors
 program.parseAsync(process.argv).catch((error) => {
   console.error("❌ Error:\n");
