@@ -60,18 +60,23 @@ const command = async (
           `  ✅ Loaded cached coinbase for ${data.address}: ${coinbase}`,
         );
       } else {
-        // Use zero address if no coinbase found
-        coinbase = ZERO_ADDRESS;
+        // Don't set coinbase if not found
         console.log(
-          `  ⚠️  No coinbase found for ${data.address}, using ${ZERO_ADDRESS}`,
+          `  ⚠️  No coinbase found for ${data.address}, omitting from config`,
         );
       }
     }
 
-    attesters.push({
+    const attester: ScraperAttester = {
       address: data.address,
-      coinbase: coinbase,
-    });
+    };
+
+    // Only add coinbase if it exists and is not zero address
+    if (coinbase && coinbase !== ZERO_ADDRESS) {
+      attester.coinbase = coinbase;
+    }
+
+    attesters.push(attester);
   }
 
   console.log(`\n✅ Including ${attesters.length} attester(s) in config`);

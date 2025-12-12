@@ -1,5 +1,8 @@
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
-import { AttesterOnChainStatus } from "../../types/index.js";
+import {
+  AttesterOnChainStatus,
+  type ScraperAttester,
+} from "../../types/index.js";
 import { loadScraperConfig } from "../../core/utils/scraperConfigOperations.js";
 
 interface ScrapeAttesterStatusOptions {
@@ -55,7 +58,7 @@ const command = async (
   const displayAttester = async (
     address: string,
     showConfigInfo: boolean = false,
-    configAttester?: { coinbase: string },
+    configAttester?: ScraperAttester,
   ) => {
     console.log(`\nAttester: ${address}`);
     const view = await ethClient.getAttesterView(address);
@@ -70,7 +73,7 @@ const command = async (
     console.log(`  Withdrawer: ${view.config.withdrawer}`);
 
     if (showConfigInfo && configAttester) {
-      console.log(`  Config Coinbase: ${configAttester.coinbase}`);
+      console.log(`  Config Coinbase: ${configAttester.coinbase || "Not set"}`);
     }
 
     if (view.exit.exists) {
@@ -239,7 +242,9 @@ const command = async (
           );
           queuedAttestersData.forEach((attesterData, index) => {
             console.log(`  [${index}] ${attesterData.address}`);
-            console.log(`    Config Coinbase: ${attesterData.config.coinbase}`);
+            console.log(
+              `    Config Coinbase: ${attesterData.config.coinbase || "Not set"}`,
+            );
           });
           console.log();
         } else {

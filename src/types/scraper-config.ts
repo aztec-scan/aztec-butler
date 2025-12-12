@@ -4,7 +4,14 @@ import { z } from "zod";
 
 export const ScraperAttesterSchema = z.object({
   address: z.string().startsWith("0x").length(42),
-  coinbase: z.string().startsWith("0x").length(42), // Required - use 0x0000000000000000000000000000000000000000 if not yet set
+  coinbase: z
+    .string()
+    .startsWith("0x")
+    .length(42)
+    .refine((val) => val !== "0x0000000000000000000000000000000000000000", {
+      message: "Coinbase cannot be zero address",
+    })
+    .optional(), // Optional - omit if not yet set
   lastSeenState: z
     .enum([
       "NEW",

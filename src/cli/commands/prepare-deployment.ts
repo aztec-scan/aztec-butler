@@ -472,16 +472,14 @@ const command = async (
 
     const newAttester: ScraperAttester = {
       address: validator.attester.eth,
-      coinbase: validator.coinbase || ZERO_ADDRESS,
       lastSeenState: existing?.lastSeenState || "NEW",
     };
 
-    // Prefer non-zero coinbase when merging
-    if (
-      existing &&
-      existing.coinbase !== ZERO_ADDRESS &&
-      newAttester.coinbase === ZERO_ADDRESS
-    ) {
+    // Add coinbase only if it exists and is not zero address
+    if (validator.coinbase && validator.coinbase !== ZERO_ADDRESS) {
+      newAttester.coinbase = validator.coinbase;
+    } else if (existing?.coinbase && existing.coinbase !== ZERO_ADDRESS) {
+      // Preserve existing non-zero coinbase
       newAttester.coinbase = existing.coinbase;
     }
 
