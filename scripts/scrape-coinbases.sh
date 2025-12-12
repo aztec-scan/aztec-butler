@@ -4,15 +4,13 @@
 #   ./scripts/scrape-coinbases.sh                                  # Incremental scrape (default)
 #   ./scripts/scrape-coinbases.sh --full                           # Full rescrape from deployment block
 #   ./scripts/scrape-coinbases.sh --from-block 12345678            # Custom start block
-#   ./scripts/scrape-coinbases.sh --provider-id 123                # Use provider ID directly (faster)
-#   ./scripts/scrape-coinbases.sh --input ./keystores/key1.json    # Use specific keystore file
+#   ./scripts/scrape-coinbases.sh --config ./my-config.json        # Use specific scraper config file
 #   ./scripts/scrape-coinbases.sh --output ./cache/coinbases.json  # Custom output path
-#   ./scripts/scrape-coinbases.sh --full --provider-id 123         # Combine flags
+#   ./scripts/scrape-coinbases.sh --full --network testnet         # Combine flags
 #
 # This will:
-# - Find all keystores in ./keystores/ (or use --input for custom path)
-# - Extract attester addresses
-# - Query staking provider ID (or use provided ID)
+# - Load scraper config from standard path (or use --config for custom path)
+# - Extract attester addresses and provider ID from config
 # - Scrape StakedWithProvider events from chain
 # - Map attesters to their coinbase addresses
 #
@@ -29,15 +27,10 @@ echo "==================================="
 echo "Scrape Coinbase Addresses"
 echo "==================================="
 echo ""
-echo "Using keystores from: ./keystores/ (or custom with --input)"
+echo "Using scraper config from standard path (or custom with --config)"
 echo ""
 
 # Check flags
-if [[ "$*" == *"--provider-id"* ]]; then
-  echo "🚀 Using provided provider ID (skipping chain query)"
-  echo ""
-fi
-
 if [[ "$*" == *"--full"* ]]; then
   echo "⚠️  Full rescrape mode - will scrape all historical events"
   echo ""

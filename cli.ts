@@ -5,7 +5,11 @@
  */
 
 import { Command } from "commander";
-import { initConfig, PACKAGE_VERSION, type ButlerConfig } from "./src/core/config/index.js";
+import {
+  initConfig,
+  PACKAGE_VERSION,
+  type ButlerConfig,
+} from "./src/core/config/index.js";
 import { AztecClient } from "./src/core/components/AztecClient.js";
 import { EthereumClient } from "./src/core/components/EthereumClient.js";
 import * as command from "./src/cli/commands/index.js";
@@ -33,7 +37,7 @@ function formatError(error: unknown): string {
     try {
       const json = JSON.stringify(error, null, 2);
       if (json && json !== "{}") return json;
-    } catch { }
+    } catch {}
 
     // Fallback to util.inspect for objects that can't be stringified
     // Use showHidden: false to avoid issues with internal symbols
@@ -149,13 +153,15 @@ program
 // Command: generate-scraper-config
 program
   .command("generate-scraper-config")
-  .description("Generate scraper configuration from keystores")
-  .option("--input <path>", "Input keystore file path or glob pattern")
+  .description(
+    "Generate or update scraper configuration from production keyfile or existing config",
+  )
+  .option("--prod-keyfile <path>", "Production keyfile (public keys only)")
   .option("--output <path>", "Output file path for scraper config")
   .option("--provider-id <id>", "Staking provider ID", parseBigInt)
   .action(
     async (options: {
-      input?: string;
+      prodKeyfile?: string;
       output?: string;
       providerId?: bigint;
     }) => {
@@ -163,41 +169,14 @@ program
       const config = await initConfig({ network: globalOpts.network });
       const ethClient = await initEthClient(config);
 
-      // Handle input keystore paths
-      let keystorePaths: string[];
-      if (options.input) {
-        // Check if it's a glob pattern or single file
-        if (options.input.includes("*")) {
-          keystorePaths = await glob(options.input, {
-            cwd: process.cwd(),
-            absolute: true,
-          });
-        } else {
-          // Treat as single file path
-          keystorePaths = [options.input];
-        }
-      } else {
-        // Default behavior
-        keystorePaths = await glob("keystores/**/*.json", {
-          cwd: process.cwd(),
-          absolute: true,
-        });
-      }
-
-      if (keystorePaths.length === 0) {
-        console.error("❌ No keystore files found");
-        process.exit(1);
-      }
-
       await command.generateScraperConfig(ethClient, config, {
         network: config.NETWORK,
         l1ChainId: config.ETHEREUM_CHAIN_ID,
-        keystorePaths,
-        includeZeroCoinbases: true,
         ...(options.output ? { outputPath: options.output } : {}),
         ...(options.providerId !== undefined
           ? { providerId: options.providerId }
           : {}),
+        ...(options.prodKeyfile ? { prodKeyfile: options.prodKeyfile } : {}),
       });
     },
   );
@@ -206,7 +185,10 @@ program
 program
   .command("scrape-coinbases")
   .description("Scrape coinbase addresses from chain")
-  .option("--input <path>", "Input keystore file path or glob pattern")
+  .option(
+    "--config <path>",
+    "Path to scraper config file (defaults to standard path for network)",
+  )
   .option("--output <path>", "Output file path for coinbase data")
   .option("--full", "Perform full rescrape from deployment block", false)
   .option(
@@ -214,52 +196,24 @@ program
     "Start from specific block number",
     parseBigInt,
   )
-  .option("--provider-id <id>", "Staking provider ID", parseBigInt)
   .action(
     async (options: {
-      input?: string;
+      config?: string;
       output?: string;
       full: boolean;
       fromBlock?: bigint;
-      providerId?: bigint;
     }) => {
       const globalOpts = program.opts();
       const config = await initConfig({ network: globalOpts.network });
       const ethClient = await initEthClient(config);
 
-      // Handle input keystore paths
-      let keystorePaths: string[];
-      if (options.input) {
-        if (options.input.includes("*")) {
-          keystorePaths = await glob(options.input, {
-            cwd: process.cwd(),
-            absolute: true,
-          });
-        } else {
-          keystorePaths = [options.input];
-        }
-      } else {
-        keystorePaths = await glob("keystores/**/*.json", {
-          cwd: process.cwd(),
-          absolute: true,
-        });
-      }
-
-      if (keystorePaths.length === 0) {
-        console.error("❌ No keystore files found");
-        process.exit(1);
-      }
-
       await command.scrapeCoinbases(ethClient, config, {
         network: config.NETWORK,
-        keystorePaths,
         fullRescrape: options.full,
+        ...(options.config ? { configPath: options.config } : {}),
         ...(options.output ? { outputPath: options.output } : {}),
         ...(options.fromBlock !== undefined
           ? { fromBlock: options.fromBlock }
-          : {}),
-        ...(options.providerId !== undefined
-          ? { providerId: options.providerId }
           : {}),
       });
     },
@@ -279,6 +233,7 @@ program
     collect,
     [],
   )
+  .option("--update-config", "Update scraper config with current states", false)
   .action(
     async (options: {
       active: boolean;
@@ -286,6 +241,7 @@ program
       allActive: boolean;
       allQueued: boolean;
       address: string[];
+      updateConfig: boolean;
     }) => {
       const globalOpts = program.opts();
       const config = await initConfig({ network: globalOpts.network });
@@ -297,6 +253,7 @@ program
         active: options.active,
         queued: options.queued,
         network: config.NETWORK,
+        updateConfig: options.updateConfig,
         ...(options.address.length > 0 ? { addresses: options.address } : {}),
       });
     },

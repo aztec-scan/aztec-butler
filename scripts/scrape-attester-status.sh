@@ -9,12 +9,14 @@
 #   ./scripts/scrape-attester-status.sh --all-queued              # Show ALL queued attesters on-chain
 #   ./scripts/scrape-attester-status.sh --all-active --all-queued # Show ALL attesters on-chain
 #   ./scripts/scrape-attester-status.sh --address 0x123...        # Check specific attester(s)
+#   ./scripts/scrape-attester-status.sh --update-config           # Update scraper config with current on-chain states
 #
 # This will:
 # - Query the Rollup contract for attester status
 # - Show on-chain state (NONE, VALIDATING, ZOMBIE, EXITING)
 # - Display effective balance and exit information
 # - List active and/or queued attesters
+# - Update scraper config lastSeenState field (with --update-config)
 #
 # Flags:
 # --active      : Filter to active attesters from scraper-config
@@ -22,12 +24,14 @@
 # --all-active  : Show ALL active attesters on-chain (not limited to config)
 # --all-queued  : Show ALL queued attesters on-chain (not limited to config)
 # --address     : Check specific attester address(es)
+# --update-config : Update scraper config with current on-chain states
 #
 # Use cases:
 # - Monitor attester state transitions
 # - Check if attesters are active vs queued
 # - Debug attester issues
 # - Validate attester configuration
+# - Automatically update scraper config with current states
 
 set -e
 
@@ -42,6 +46,11 @@ echo "==================================="
 echo ""
 
 # Check flags and show info
+if [[ "$*" == *"--update-config"* ]]; then
+  echo "🔄 Updating scraper config with on-chain states"
+  echo ""
+fi
+
 if [[ "$*" == *"--all-active"* ]]; then
   echo "🔍 Querying ALL active attesters from Rollup contract"
   echo ""

@@ -3,7 +3,10 @@ import {
   AttesterOnChainStatus,
   type ScraperAttester,
 } from "../../types/index.js";
-import { loadScraperConfig } from "../../core/utils/scraperConfigOperations.js";
+import {
+  loadScraperConfig,
+  saveScraperConfig,
+} from "../../core/utils/scraperConfigOperations.js";
 
 interface ScrapeAttesterStatusOptions {
   allActive?: boolean;
@@ -12,6 +15,52 @@ interface ScrapeAttesterStatusOptions {
   queued?: boolean;
   addresses?: string[];
   network: string;
+  updateConfig?: boolean;
+}
+
+/**
+ * Determine the new state for an attester based on on-chain status
+ */
+function determineNewState(
+  attester: ScraperAttester,
+  isInQueue: boolean,
+  onChainStatus: AttesterOnChainStatus | null,
+): string | undefined {
+  const hasCoinbase = attester.coinbase != null;
+
+  // Attester is in entry queue
+  if (isInQueue) {
+    return "IN_STAKING_QUEUE";
+  }
+
+  // Attester is on-chain
+  if (onChainStatus !== null) {
+    if (onChainStatus === AttesterOnChainStatus.VALIDATING) {
+      return "ACTIVE";
+    }
+
+    // ZOMBIE or EXITING
+    if (
+      onChainStatus === AttesterOnChainStatus.ZOMBIE ||
+      onChainStatus === AttesterOnChainStatus.EXITING
+    ) {
+      if (hasCoinbase) {
+        return "NO_LONGER_ACTIVE";
+      }
+    }
+  }
+
+  // Not found on-chain (status NONE or null)
+  if (onChainStatus === null || onChainStatus === AttesterOnChainStatus.NONE) {
+    // Only update to NO_LONGER_ACTIVE if has coinbase
+    if (hasCoinbase) {
+      return "NO_LONGER_ACTIVE";
+    }
+    // For attesters without coinbase, don't change state
+    return attester.lastSeenState; // Keep existing state
+  }
+
+  return attester.lastSeenState; // Default: keep existing
 }
 
 const command = async (
@@ -131,6 +180,104 @@ const command = async (
     }
 
     console.log();
+  }
+
+  // --update-config: Update scraper config with current states
+  if (options.updateConfig) {
+    console.log("Loading scraper config...");
+    const scraperConfig = await loadScraperConfig(options.network);
+    console.log(
+      `✅ Loaded ${scraperConfig.attesters.length} attesters from config\n`,
+    );
+
+    console.log("Fetching on-chain data...");
+    const onChainActive = await ethClient.getAllActiveAttesters();
+    const onChainQueued = await ethClient.getAllQueuedAttesters();
+    console.log(`✅ Found ${onChainActive.length} active attesters on-chain`);
+    console.log(`✅ Found ${onChainQueued.length} queued attesters on-chain\n`);
+
+    // Create lookup maps for fast checking
+    const activeAddressSet = new Set(onChainActive.map((a) => a.toLowerCase()));
+    const queuedAddressSet = new Set(onChainQueued.map((a) => a.toLowerCase()));
+
+    // Create map of on-chain views
+    const onChainViews = new Map<string, AttesterOnChainStatus>();
+    for (const activeAddress of onChainActive) {
+      const view = await ethClient.getAttesterView(activeAddress);
+      if (view) {
+        onChainViews.set(activeAddress.toLowerCase(), view.status);
+      }
+    }
+
+    console.log("Analyzing attester states...\n");
+
+    interface StateChange {
+      address: string;
+      oldState: string | undefined;
+      newState: string | undefined;
+    }
+
+    const changes: StateChange[] = [];
+    const stateBreakdown = new Map<string, number>();
+
+    // Iterate through all attesters in config
+    for (const attester of scraperConfig.attesters) {
+      const addressLower = attester.address.toLowerCase();
+      const isInQueue = queuedAddressSet.has(addressLower);
+      const onChainStatus = onChainViews.get(addressLower) ?? null;
+
+      const newState = determineNewState(attester, isInQueue, onChainStatus);
+
+      if (newState !== attester.lastSeenState) {
+        changes.push({
+          address: attester.address,
+          oldState: attester.lastSeenState,
+          newState,
+        });
+        attester.lastSeenState = newState as any;
+      }
+
+      // Track state breakdown
+      const currentState = attester.lastSeenState || "NEW";
+      stateBreakdown.set(
+        currentState,
+        (stateBreakdown.get(currentState) || 0) + 1,
+      );
+    }
+
+    // Display state changes
+    if (changes.length > 0) {
+      console.log("State Changes:");
+      for (const change of changes) {
+        console.log(
+          `  ${change.address}: ${change.oldState || "undefined"} → ${change.newState || "undefined"}`,
+        );
+      }
+      console.log();
+    }
+
+    // Display summary
+    console.log("Summary:");
+    console.log(`  Total attesters: ${scraperConfig.attesters.length}`);
+    console.log(`  State changes: ${changes.length}`);
+    console.log(
+      `  No changes: ${scraperConfig.attesters.length - changes.length}\n`,
+    );
+
+    console.log("State breakdown:");
+    for (const [state, count] of Array.from(stateBreakdown.entries()).sort()) {
+      console.log(`  ${state}: ${count}`);
+    }
+    console.log();
+
+    // Update lastUpdated timestamp
+    scraperConfig.lastUpdated = new Date().toISOString();
+
+    // Save updated config
+    const savedPath = await saveScraperConfig(scraperConfig);
+    console.log(`✅ Config updated: ${savedPath}\n`);
+
+    return;
   }
 
   // Default behavior or --active/--queued flags: show attesters from scraper config

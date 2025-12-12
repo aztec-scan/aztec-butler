@@ -9,7 +9,7 @@ import z from "zod";
 assert(
   process.env.npm_package_version !== undefined,
   "npm package version is undefined",
-)
+);
 export const PACKAGE_VERSION = process.env.npm_package_version!;
 assert(
   process.env.npm_package_name !== undefined,
@@ -56,8 +56,8 @@ async function loadNetworkConfig(
     // TODO: add default false "showSensitiveInfo"
     console.log(`CONFIGURATION (reading from ${configPath}):
 ${Object.entries(config)
-        .map(([key, value]) => `  ${key}\t${value}`)
-        .join("\n")}
+  .map(([key, value]) => `  ${key}\t${value}`)
+  .join("\n")}
 `);
   }
   return config;
@@ -99,7 +99,7 @@ function buildConfig(network: string) {
       .optional()
       .parse(
         process.env.SAFE_ADDRESS ||
-        process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+          process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
       ),
     MULTISIG_PROPOSER_PRIVATE_KEY: z
       .string()
@@ -124,7 +124,7 @@ function buildConfig(network: string) {
       .positive()
       .parse(
         process.env.STAKING_REWARDS_SCRAPE_INTERVAL_MS ??
-        (60 * 60 * 1000).toString(),
+          (60 * 60 * 1000).toString(),
       ),
     GOOGLE_SHEETS_SPREADSHEET_ID: z
       .string()
@@ -147,7 +147,7 @@ function buildConfig(network: string) {
       .optional()
       .parse(
         process.env.GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE ||
-        "DailyPerCoinbase!A1",
+          "DailyPerCoinbase!A1",
       ),
     GOOGLE_SHEETS_DAILY_EARNED_RANGE: z
       .string()
@@ -199,7 +199,7 @@ export const initConfig = async (options?: {
   } else {
     throw new Error(
       "Multiple network configs found. Please specify --network flag.\n" +
-      `Available: ${availableNetworks.join(", ")}`,
+        `Available: ${availableNetworks.join(", ")}`,
     );
   }
 

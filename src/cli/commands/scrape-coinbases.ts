@@ -4,15 +4,14 @@ import {
   CoinbaseScraperError,
 } from "../../core/components/CoinbaseScraper.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-import { extractAttesterAddresses } from "../../core/utils/keystoreOperations.js";
+import { loadScraperConfig } from "../../core/utils/scraperConfigOperations.js";
 
 interface ScrapeCoinbasesOptions {
   network: string;
   fromBlock?: bigint;
   fullRescrape?: boolean;
-  keystorePaths?: string[];
+  configPath?: string;
   outputPath?: string;
-  providerId?: bigint;
 }
 
 // Default deployment blocks for StakingRegistryContract
@@ -28,62 +27,36 @@ const command = async (
 ) => {
   console.log("\n=== Scraping Coinbase Addresses ===\n");
 
-  // 1. Get attester addresses
-  console.log("Loading attester addresses...");
-  let attesterAddresses: string[];
-
-  if (!options.keystorePaths) {
-    throw new Error("Keystore paths are required");
-  }
-
-  console.log(`Loading ${options.keystorePaths.length} keystore file(s)...`);
-  const { loadKeystoresFromPaths } = await import(
-    "../../core/utils/keystoreOperations.js"
+  // 1. Load scraper config
+  console.log("Loading scraper configuration...");
+  const scraperConfig = await loadScraperConfig(
+    options.network,
+    options.configPath,
   );
-  const keystores = await loadKeystoresFromPaths(options.keystorePaths);
-  attesterAddresses = extractAttesterAddresses(keystores);
 
-  console.log(`✅ Found ${attesterAddresses.length} attester(s) to check`);
+  console.log(`✅ Loaded config for network: ${scraperConfig.network}`);
+  console.log(`✅ Provider ID: ${scraperConfig.stakingProviderId}`);
+  console.log(
+    `✅ Found ${scraperConfig.attesters.length} attester(s) in config`,
+  );
 
-  // 2. Get provider ID
-  let providerId = options.providerId;
-  if (!providerId) {
-    // Fall back to AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS if provided
-    if (config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS) {
-      console.log("\nQuerying staking provider from chain...");
-      const providerData = await ethClient.getStakingProvider(
-        config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-      );
-      if (!providerData) {
-        throw new Error(
-          `Staking provider not found for admin address: ${config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS}`,
-        );
-      }
-      providerId = providerData.providerId;
-      console.log(`✅ Provider ID: ${providerId}`);
-    } else {
-      throw new Error(
-        "Either --provider-id flag or AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS config must be set",
-      );
-    }
-  } else {
-    console.log(`\n✅ Using Provider ID: ${providerId}`);
-  }
+  // Extract attester addresses from config
+  const attesterAddresses = scraperConfig.attesters.map((a) => a.address);
 
-  // 3. Determine scrape mode and start block
+  // 2. Determine scrape mode and start block
   const defaultStartBlock = DEFAULT_START_BLOCKS[options.network] ?? 0n;
 
-  // 4. Initialize CoinbaseScraper
+  // 3. Initialize CoinbaseScraper
   const scraper = new CoinbaseScraper({
     network: options.network,
     ethClient,
-    providerId,
+    providerId: scraperConfig.stakingProviderId,
     attesterAddresses,
     defaultStartBlock,
     ...(options.outputPath ? { outputPath: options.outputPath } : {}),
   });
 
-  // 5. Perform scraping based on mode
+  // 4. Perform scraping based on mode
   let result;
 
   try {
@@ -121,7 +94,7 @@ const command = async (
     throw error;
   }
 
-  // 6. Check for missing attesters
+  // 5. Check for missing attesters
   const mappedAttesters = new Set(
     result.mappings.map((m) => m.attesterAddress.toLowerCase()),
   );
@@ -136,10 +109,10 @@ const command = async (
     missingAttesters.forEach((addr) => console.log(`  - ${addr}`));
   }
 
-  // 7. Print summary
+  // 6. Print summary
   console.log(`\nSummary:`);
   console.log(`  Network: ${options.network}`);
-  console.log(`  Provider ID: ${providerId}`);
+  console.log(`  Provider ID: ${scraperConfig.stakingProviderId}`);
   console.log(`  Start block: ${result.startBlock}`);
   console.log(`  End block: ${result.endBlock}`);
   console.log(`  Blocks scraped: ${result.endBlock - result.startBlock + 1n}`);

@@ -24,16 +24,39 @@ export const ScraperAttesterSchema = z.object({
     .optional(),
 });
 
-export const ScraperConfigSchema = z.object({
-  network: z.string(),
-  l1ChainId: z.union([z.literal(1), z.literal(11155111)]), // TODO: use named constants from somehwere (mainnet and sepolia)
-  stakingProviderId: z.coerce.bigint(),
-  stakingProviderAdmin: z.string().startsWith("0x").length(42),
-  attesters: z.array(ScraperAttesterSchema),
-  publishers: z.array(z.string().startsWith("0x").length(42)),
-  lastUpdated: z.string().datetime(),
-  version: z.literal("1.1"),
-});
+export const ScraperConfigSchema = z
+  .object({
+    network: z.string(),
+    l1ChainId: z.union([z.literal(1), z.literal(11155111)]), // TODO: use named constants from somehwere (mainnet and sepolia)
+    stakingProviderId: z.coerce.bigint(),
+    stakingProviderAdmin: z.string().startsWith("0x").length(42),
+    attesters: z.array(ScraperAttesterSchema),
+    publishers: z.array(z.string().startsWith("0x").length(42)),
+    lastUpdated: z.string().datetime(),
+    version: z.literal("1.1"),
+  })
+  .refine(
+    (config) => {
+      // Check for duplicate attester addresses (case-insensitive)
+      const addresses = config.attesters.map((a) => a.address.toLowerCase());
+      const uniqueAddresses = new Set(addresses);
+      return addresses.length === uniqueAddresses.size;
+    },
+    {
+      message: "Scraper config contains duplicate attester addresses",
+    },
+  )
+  .refine(
+    (config) => {
+      // Check for duplicate publisher addresses (case-insensitive)
+      const publishers = config.publishers.map((p) => p.toLowerCase());
+      const uniquePublishers = new Set(publishers);
+      return publishers.length === uniquePublishers.size;
+    },
+    {
+      message: "Scraper config contains duplicate publisher addresses",
+    },
+  );
 
 export type ScraperConfig = z.infer<typeof ScraperConfigSchema>;
 export type ScraperAttester = z.infer<typeof ScraperAttesterSchema>;

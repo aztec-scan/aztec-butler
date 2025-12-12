@@ -1,16 +1,18 @@
 #!/bin/bash
-# Generate scraper configuration from keystores
+# Generate or update scraper configuration
 # Usage: 
-#   ./scripts/generate-scraper-config.sh                                  # Query provider from admin address
-#   ./scripts/generate-scraper-config.sh --provider-id 123                # Use provider ID directly (faster)
-#   ./scripts/generate-scraper-config.sh --input ./keystores/key1.json    # Use specific keystore file
-#   ./scripts/generate-scraper-config.sh --output ./configs/testnet.json  # Custom output path
+#   ./scripts/generate-scraper-config.sh --network mainnet                  # Update existing config with cached coinbases
+#   ./scripts/generate-scraper-config.sh --network mainnet --provider-id 4  # Create new config with provider ID
+#   ./scripts/generate-scraper-config.sh --network mainnet --prod-keyfile prod-keyfile.json  # Merge attesters from prod keyfile
+#   ./scripts/generate-scraper-config.sh --network mainnet --output custom-path.json         # Custom output path
 #
-# This will:
-# - Find all keystores in ./keystores/ (or use --input for custom path)
-# - Extract attesters (publishers are derived from attesters)
-# - Query staking provider from chain (or use provided ID)
-# - Generate scraper config with coinbase mappings
+# This command:
+# - Loads existing scraper config (or creates new one)
+# - Updates attesters with cached coinbase mappings (if available)
+# - Merges attesters from prod-keyfile (if provided, no duplicates)
+# - Sets lastSeenState: NEW for new attesters without coinbase
+# - Sets lastSeenState: IN_STAKING_QUEUE for attesters with coinbase
+# - Preserves existing lastSeenState if already set
 #
 # Output: ~/.local/share/aztec-butler/{network}-scrape-config.json (or custom path with --output)
 
@@ -25,12 +27,16 @@ echo "==================================="
 echo "Generate Scraper Configuration"
 echo "==================================="
 echo ""
-echo "Using keystores from: ./keystores/ (or custom with --input)"
-echo ""
 
-# Check if --provider-id flag is provided
-if [[ "$*" == *"--provider-id"* ]]; then
-  echo "🚀 Using provided provider ID (skipping chain query)"
+# Check if --prod-keyfile flag is provided
+if [[ "$*" == *"--prod-keyfile"* ]]; then
+  echo "Mode: Merge attesters from production keyfile"
+  echo ""
+elif [[ "$*" == *"--provider-id"* ]]; then
+  echo "Mode: Create/update config with provider ID"
+  echo ""
+else
+  echo "Mode: Update existing config with cached coinbases"
   echo ""
 fi
 
