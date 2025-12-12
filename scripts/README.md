@@ -611,6 +611,15 @@ Required env variables:
 - `AZTEC_NODE_URL` - Aztec node URL
 - `AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` - Your staking provider admin address (optional if using --provider-id)
 
+Optional env variables for Safe integration:
+
+- `SAFE_ADDRESS` - Safe multisig wallet address (for monitoring/proposals)
+- `SAFE_PROPOSALS_ENABLED` - Set to `true` to enable automatic Safe transaction proposals (default: `false`)
+- `MULTISIG_PROPOSER_PRIVATE_KEY` - Private key of a Safe signer (required if SAFE_PROPOSALS_ENABLED=true)
+- `SAFE_API_KEY` - Safe API key for transaction service (required if SAFE_PROPOSALS_ENABLED=true)
+
+**Note:** Setting `SAFE_ADDRESS` without `SAFE_PROPOSALS_ENABLED=true` will enable Safe monitoring (tracking pending transactions) but will NOT automatically create transaction proposals. To enable automatic proposals for publisher top-ups, set `SAFE_PROPOSALS_ENABLED=true`.
+
 ---
 
 ## Output Locations

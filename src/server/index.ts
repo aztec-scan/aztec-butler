@@ -99,9 +99,9 @@ async function initializeNetwork(
   console.log(`[${network}] Initializing staking provider metrics...`);
   initStakingProviderMetrics(network, stakingProviderScraper);
 
-  // Create SafeGlobal client if configured
+  // Create SafeGlobal client if configured and proposals are enabled
   let safeClient: SafeGlobalClient | null = null;
-  if (config.SAFE_ADDRESS) {
+  if (config.SAFE_ADDRESS && config.SAFE_PROPOSALS_ENABLED) {
     // Validate that required Safe credentials are present
     if (!config.MULTISIG_PROPOSER_PRIVATE_KEY || !config.SAFE_API_KEY) {
       throw new Error(
@@ -124,9 +124,13 @@ async function initializeNetwork(
       safeApiKey: config.SAFE_API_KEY,
     });
     console.log(
-      `[${network}] SafeGlobal client initialized for Safe at ${config.SAFE_ADDRESS}`,
+      `[${network}] SafeGlobal client initialized for Safe at ${config.SAFE_ADDRESS} (proposals enabled)`,
     );
     safeClient.startPendingTransactionsPoll();
+  } else if (config.SAFE_ADDRESS && !config.SAFE_PROPOSALS_ENABLED) {
+    console.log(
+      `[${network}] Safe monitoring enabled for ${config.SAFE_ADDRESS}, but automatic proposals are disabled. Set SAFE_PROPOSALS_ENABLED=true to enable.`,
+    );
   }
 
   // Initialize handlers for this network

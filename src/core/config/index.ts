@@ -101,6 +101,12 @@ function buildConfig(network: string) {
         process.env.SAFE_ADDRESS ||
           process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
       ),
+    SAFE_PROPOSALS_ENABLED: z
+      .string()
+      .transform((val) => val === "true" || val === "1")
+      .pipe(z.boolean())
+      .optional()
+      .parse(process.env.SAFE_PROPOSALS_ENABLED ?? "false"),
     MULTISIG_PROPOSER_PRIVATE_KEY: z
       .string()
       .startsWith("0x")
