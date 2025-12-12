@@ -23,5 +23,3 @@ node_modules
 
 # TypeScript build output
 dist/
-
-keystores/production/
