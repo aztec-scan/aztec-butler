@@ -78,11 +78,8 @@ export const startServer = async () => {
 
   initLog("Loading scraper configuration...");
   const scraperConfig = await loadScraperConfig(config.NETWORK);
-  const uniquePublishers = new Set(
-    scraperConfig.attesters.map((a) => a.publisher),
-  ).size;
   console.log(
-    `Loaded scraper config: ${scraperConfig.attesters.length} attesters, ${uniquePublishers} publishers`,
+    `Loaded scraper config: ${scraperConfig.attesters.length} attesters, ${scraperConfig.publishers.length} publishers`,
   );
 
   initLog("Initializing state from scraper config...");

@@ -6,15 +6,17 @@ A tool for helping out with chores on an aztec-node server.
 
 - **Node.js v22.0.0 or higher**
 
+## Documentation
+
+- **[Operator Guide](./operator-guide/README.md)** - Complete guide for validator key management (generate, deploy, register)
+- **[Daemon Setup](./daemon/README.md)** - Run aztec-butler as a systemd service with Prometheus metrics
+
 ## Running as a Service
 
 To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/README.md). The daemon runs the butler in server mode, providing Prometheus metrics and automated monitoring for your Aztec nodes.
 
 ## TODO
 
-1. available_publisher_addresses.json should already have separated on which servers they are used. To prevent deploying same address to two different servers.
-1. scraperConfig should have publishers in a separate array
-   - because with HA one attester has different publishers for each server
 1. there should be one command checking no duplicates of attester addresses across all positions on-chain
    - stakingProviderRegistryQueue
    - rollup entryQueue

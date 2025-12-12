@@ -196,12 +196,7 @@ const command = async (
         await saveScraperConfig(scraperConfig);
         console.log(`✅ Updated scraper config:`);
         console.log(`   Added ${newAttesters.length} new attester(s)`);
-
-        // Count unique publishers
-        const uniquePublishers = new Set(
-          scraperConfig.attesters.map((a) => a.publisher),
-        ).size;
-        console.log(`   Total unique publishers: ${uniquePublishers}`);
+        console.log(`   Total publishers: ${scraperConfig.publishers.length}`);
       }
     } catch (error) {
       console.warn(

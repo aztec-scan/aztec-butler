@@ -43,9 +43,13 @@ const command = async (
   console.log("\nChecking for cached coinbase mappings...");
   const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
   const attesters: ScraperAttester[] = [];
+  const uniquePublishers = new Set<string>();
 
   for (const data of attesterData) {
     let coinbase = data.coinbase;
+
+    // Collect unique publishers
+    uniquePublishers.add(data.publisher);
 
     // Try to load from cache if coinbase is not set
     if (!coinbase) {
@@ -67,7 +71,6 @@ const command = async (
     attesters.push({
       address: data.address,
       coinbase: coinbase,
-      publisher: data.publisher,
     });
   }
 
@@ -120,23 +123,21 @@ const command = async (
     stakingProviderId: providerData.providerId,
     stakingProviderAdmin: stakingProviderAdmin || "unknown",
     attesters,
+    publishers: Array.from(uniquePublishers),
     lastUpdated: new Date().toISOString(),
-    version: "1.0",
+    version: "1.1",
   };
 
   // 6. Validate and save
   console.log("\nSaving scraper configuration...");
   const outputPath = await saveScraperConfig(scraperConfig, options.outputPath);
 
-  // Calculate unique publishers for summary
-  const uniquePublishers = new Set(attesters.map((a) => a.publisher)).size;
-
   console.log(`\n✅ Scraper config generated: ${outputPath}`);
   console.log(`\nSummary:`);
-  console.log(`  Network: ${options.network}`);
+  console.log(`  Network: options.network}`);
   console.log(`  Staking Provider ID: ${providerData.providerId}`);
   console.log(`  Attesters: ${attesters.length}`);
-  console.log(`  Publishers: ${uniquePublishers}`);
+  console.log(`  Publishers: ${uniquePublishers.size}`);
   console.log(`\nYou can now copy this file to your monitoring server.`);
 };
 

@@ -35,6 +35,10 @@ interface KeystoreFile {
   validators: KeystoreValidator[];
 }
 
+interface ServerPublishers {
+  [server: string]: string[]; // e.g., { A: [...], B: [...] }
+}
+
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const command = async (
@@ -96,23 +100,74 @@ const command = async (
     `✅ Loaded ${newPublicKeysData.validators.length} new validator(s) from public keys file`,
   );
 
-  let availablePublishers: string[];
+  let serverPublishers: ServerPublishers;
   try {
     const content = await fs.readFile(options.availablePublishers, "utf-8");
-    availablePublishers = JSON.parse(content);
+    serverPublishers = JSON.parse(content);
   } catch (error) {
     throw new Error(
       `Failed to load available publishers file: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
-  if (!Array.isArray(availablePublishers)) {
+  // Validate structure
+  if (
+    typeof serverPublishers !== "object" ||
+    Array.isArray(serverPublishers) ||
+    serverPublishers === null
+  ) {
     throw new Error(
-      "Invalid available publishers file: must be a JSON array of addresses",
+      "Invalid available publishers file: must be a JSON object with server keys (e.g., {A: [], B: []})",
     );
   }
 
-  console.log(`✅ Loaded ${availablePublishers.length} publisher address(es)`);
+  // Validate all values are arrays
+  for (const [server, publishers] of Object.entries(serverPublishers)) {
+    if (!Array.isArray(publishers)) {
+      throw new Error(
+        `Invalid available publishers file: server "${server}" must have an array of addresses`,
+      );
+    }
+  }
+
+  console.log(
+    `✅ Loaded publishers for server(s): ${Object.keys(serverPublishers).join(", ")}`,
+  );
+
+  // Validate no publisher addresses are shared between servers
+  console.log("\nValidating publisher assignments across servers...");
+
+  const publisherToServers = new Map<string, string[]>();
+
+  for (const [server, publishers] of Object.entries(serverPublishers)) {
+    for (const publisher of publishers) {
+      const normalizedAddr = publisher.toLowerCase();
+      if (!publisherToServers.has(normalizedAddr)) {
+        publisherToServers.set(normalizedAddr, []);
+      }
+      publisherToServers.get(normalizedAddr)!.push(server);
+    }
+  }
+
+  const sharedPublishers = Array.from(publisherToServers.entries())
+    .filter(([, servers]) => servers.length > 1)
+    .map(([addr, servers]) => ({ address: addr, servers }));
+
+  if (sharedPublishers.length > 0) {
+    const errorMsg = sharedPublishers
+      .map(
+        ({ address, servers }) =>
+          `  - ${address} appears in servers: ${servers.join(", ")}`,
+      )
+      .join("\n");
+
+    throw new Error(
+      `FATAL: Publisher addresses cannot be shared between servers:\n${errorMsg}\n\n` +
+        `Each server must have its own unique set of publisher addresses.`,
+    );
+  }
+
+  console.log("✅ No publisher addresses shared between servers");
 
   // 2. Duplicate check
   console.log("\nChecking for duplicate attesters...");
@@ -170,7 +225,15 @@ const command = async (
 
   const publicClient = ethClient.getPublicClient();
 
-  for (const publisherAddr of availablePublishers) {
+  // Collect all unique publishers across all servers
+  const allPublishers = new Set<string>();
+  for (const publishers of Object.values(serverPublishers)) {
+    for (const addr of publishers) {
+      allPublishers.add(addr);
+    }
+  }
+
+  for (const publisherAddr of allPublishers) {
     const balance = await publicClient.getBalance({
       address: publisherAddr as `0x${string}`,
     });
@@ -197,15 +260,20 @@ const command = async (
   if (haCount > 1) {
     console.log(`\nValidating high availability setup (count: ${haCount})...`);
 
-    if (availablePublishers.length < haCount) {
+    const prefixes = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").slice(0, haCount);
+    const availableServers = Object.keys(serverPublishers).filter(
+      (key) => serverPublishers[key]!.length > 0,
+    );
+
+    if (availableServers.length < haCount) {
       throw new Error(
-        `FATAL: Not enough publishers for high availability.\n` +
-          `Need ${haCount} publishers but only have ${availablePublishers.length}`,
+        `FATAL: Not enough servers configured for high availability.\n` +
+          `Need ${haCount} servers (${prefixes.join(", ")}) but only have ${availableServers.length} configured: ${availableServers.join(", ")}`,
       );
     }
 
     console.log(
-      `✅ Sufficient publishers for ${haCount}-way high availability`,
+      `✅ Sufficient servers configured for ${haCount}-way high availability`,
     );
   }
 
@@ -244,7 +312,23 @@ const command = async (
   const outputFiles: { filename: string; data: KeystoreFile }[] = [];
 
   if (haCount === 1) {
-    // Single file output
+    // Single file output - use server "A"
+    if (!serverPublishers.A) {
+      throw new Error(
+        `FATAL: Server "A" not found in available publishers file.\n` +
+          `When running without high availability, publishers for server "A" are required.`,
+      );
+    }
+
+    const availablePublishers = serverPublishers.A;
+
+    if (availablePublishers.length === 0) {
+      throw new Error(
+        `FATAL: Server "A" has no publisher addresses.\n` +
+          `At least one publisher address is required for server "A".`,
+      );
+    }
+
     let outputFilename = `${outputBasePath}.new`;
     let outputPath = path.join(outputDir, outputFilename);
 
@@ -271,19 +355,30 @@ const command = async (
         validators: validatorsWithPublishers,
       },
     });
+
+    console.log(
+      `✅ Using ${availablePublishers.length} publisher(s) from server A`,
+    );
   } else {
-    // High availability mode - multiple files with non-overlapping publishers
-    const publishersPerFile = Math.floor(availablePublishers.length / haCount);
-    const prefixes = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    // High availability mode - use specified server keys
+    const prefixes = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").slice(0, haCount);
+
+    // Validate all required servers have publishers
+    const missingServers = prefixes.filter(
+      (server) =>
+        !serverPublishers[server] || serverPublishers[server].length === 0,
+    );
+
+    if (missingServers.length > 0) {
+      throw new Error(
+        `FATAL: Missing or empty publisher arrays for server(s): ${missingServers.join(", ")}\n` +
+          `High availability count of ${haCount} requires publishers for servers: ${prefixes.join(", ")}`,
+      );
+    }
 
     for (let i = 0; i < haCount; i++) {
-      const prefix = prefixes[i];
-      const startIdx = i * publishersPerFile;
-      const endIdx =
-        i === haCount - 1
-          ? availablePublishers.length
-          : (i + 1) * publishersPerFile;
-      const filePublishers = availablePublishers.slice(startIdx, endIdx);
+      const prefix = prefixes[i]!;
+      const filePublishers = serverPublishers[prefix]!;
 
       const outputFilename = `${prefix}_${outputBasePath}.new`;
       const outputPath = path.join(outputDir, outputFilename);
@@ -302,7 +397,9 @@ const command = async (
         },
       });
 
-      console.log(`  ${outputFilename}: ${filePublishers.length} publisher(s)`);
+      console.log(
+        `  ${outputFilename}: ${filePublishers.length} publisher(s) from server ${prefix}`,
+      );
     }
   }
 
@@ -346,13 +443,22 @@ const command = async (
       stakingProviderId: stakingProviderData.providerId,
       stakingProviderAdmin: config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
       attesters: [],
+      publishers: [],
       lastUpdated: new Date().toISOString(),
-      version: "1.0",
+      version: "1.1",
     };
   }
 
   // Use publishers from the first/A file
   const firstFileValidators = outputFiles[0]!.data.validators;
+
+  // Collect unique publishers from the first file
+  const uniquePublishers = new Set<string>();
+  for (const validator of firstFileValidators) {
+    if (validator.publisher) {
+      uniquePublishers.add(validator.publisher as string);
+    }
+  }
 
   // Create a map of existing attesters for deduplication
   const existingAttestersMap = new Map<string, ScraperAttester>(
@@ -366,7 +472,6 @@ const command = async (
 
     const newAttester: ScraperAttester = {
       address: validator.attester.eth,
-      publisher: validator.publisher as string, // We know it's assigned at this point
       coinbase: validator.coinbase || ZERO_ADDRESS,
       lastSeenState: existing?.lastSeenState || "NEW",
     };
@@ -384,7 +489,9 @@ const command = async (
   }
 
   scraperConfig.attesters = Array.from(existingAttestersMap.values());
+  scraperConfig.publishers = Array.from(uniquePublishers);
   scraperConfig.lastUpdated = new Date().toISOString();
+  scraperConfig.version = "1.1";
 
   const savedPath = await saveScraperConfig(scraperConfig);
   console.log(`✅ Updated scraper config: ${savedPath}`);
@@ -394,7 +501,13 @@ const command = async (
   console.log(
     `Total validators: ${mergedValidators.length} (${productionData.validators.length} existing + ${newPublicKeysData.validators.length} new)`,
   );
-  console.log(`Publishers: ${availablePublishers.length}`);
+
+  // Show publishers per server
+  console.log(`Servers configured:`);
+  for (const [server, publishers] of Object.entries(serverPublishers)) {
+    console.log(`  - Server ${server}: ${publishers.length} publisher(s)`);
+  }
+
   console.log(`Output files: ${outputFiles.length}`);
   for (const { filename } of outputFiles) {
     console.log(`  - ${filename}`);

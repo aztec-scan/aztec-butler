@@ -68,28 +68,24 @@ export class PublisherScraper extends AbstractScraper {
       const publisherDataMap: PublisherDataMap = new Map();
       const client = this.ethClient.getPublicClient();
 
-      // Build map of unique publishers and count attesters per publisher
-      const attesterCountPerPublisher = new Map<string, number>();
-      const uniquePublishers = new Set<string>();
+      // Use publishers from scraper config directly
+      const uniquePublishers = new Set<string>(this.scraperConfig.publishers);
 
-      for (const attester of this.scraperConfig.attesters) {
-        const publisherAddr = attester.publisher;
-        uniquePublishers.add(publisherAddr);
-        const count = attesterCountPerPublisher.get(publisherAddr) || 0;
-        attesterCountPerPublisher.set(publisherAddr, count + 1);
-      }
+      // Calculate attesters per publisher for top-up calculation
+      // Since we don't know which attester uses which publisher (varies by server),
+      // we assume even distribution for balance monitoring purposes
+      const attesterCount = this.scraperConfig.attesters.length;
+      const publisherCount = this.scraperConfig.publishers.length;
+      const attestersPerPublisher = Math.ceil(attesterCount / publisherCount);
 
       // Scrape balances for each unique publisher
       for (const publisherAddress of uniquePublishers) {
-        const attesterCount =
-          attesterCountPerPublisher.get(publisherAddress) || 0;
-
         const currentBalance = await client.getBalance({
           address: publisherAddress as `0x${string}`,
         });
 
         const requiredTopUp =
-          BigInt(attesterCount) * this.recommendedEthPerAttester -
+          BigInt(attestersPerPublisher) * this.recommendedEthPerAttester -
           currentBalance;
 
         publisherDataMap.set(publisherAddress as HexString, {

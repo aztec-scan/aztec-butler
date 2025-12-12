@@ -55,7 +55,7 @@ const command = async (
   const displayAttester = async (
     address: string,
     showConfigInfo: boolean = false,
-    configAttester?: { coinbase: string; publisher: string },
+    configAttester?: { coinbase: string },
   ) => {
     console.log(`\nAttester: ${address}`);
     const view = await ethClient.getAttesterView(address);
@@ -71,7 +71,6 @@ const command = async (
 
     if (showConfigInfo && configAttester) {
       console.log(`  Config Coinbase: ${configAttester.coinbase}`);
-      console.log(`  Config Publisher: ${configAttester.publisher}`);
     }
 
     if (view.exit.exists) {
@@ -241,9 +240,6 @@ const command = async (
           queuedAttestersData.forEach((attesterData, index) => {
             console.log(`  [${index}] ${attesterData.address}`);
             console.log(`    Config Coinbase: ${attesterData.config.coinbase}`);
-            console.log(
-              `    Config Publisher: ${attesterData.config.publisher}`,
-            );
           });
           console.log();
         } else {

@@ -5,7 +5,6 @@ import { z } from "zod";
 export const ScraperAttesterSchema = z.object({
   address: z.string().startsWith("0x").length(42),
   coinbase: z.string().startsWith("0x").length(42), // Required - use 0x0000000000000000000000000000000000000000 if not yet set
-  publisher: z.string().startsWith("0x").length(42),
   lastSeenState: z
     .enum([
       "NEW",
@@ -24,8 +23,9 @@ export const ScraperConfigSchema = z.object({
   stakingProviderId: z.coerce.bigint(),
   stakingProviderAdmin: z.string().startsWith("0x").length(42),
   attesters: z.array(ScraperAttesterSchema),
+  publishers: z.array(z.string().startsWith("0x").length(42)),
   lastUpdated: z.string().datetime(),
-  version: z.literal("1.0"),
+  version: z.literal("1.1"),
 });
 
 export type ScraperConfig = z.infer<typeof ScraperConfigSchema>;

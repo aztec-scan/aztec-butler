@@ -40,21 +40,15 @@ export const initPublisherMetrics = () => {
       return;
     }
 
-    // Calculate load for each publisher by counting attesters
-    const publisherLoadMap = new Map<string, number>();
-
-    for (const attester of scraperConfig.attesters) {
-      const publisherAddr = attester.publisher.toLowerCase();
-      publisherLoadMap.set(
-        publisherAddr,
-        (publisherLoadMap.get(publisherAddr) || 0) + 1,
-      );
-    }
+    // Calculate load for each publisher
+    // Since we don't know which attester uses which publisher (varies by server in HA mode),
+    // we assume even distribution for monitoring purposes
+    const attesterCount = scraperConfig.attesters.length;
+    const publisherCount = scraperConfig.publishers.length;
+    const attestersPerPublisher = Math.ceil(attesterCount / publisherCount);
 
     for (const [_privKey, publisherData] of data.entries()) {
-      const load =
-        publisherLoadMap.get(publisherData.publisherAddress.toLowerCase()) || 0;
-      observableResult.observe(load, {
+      observableResult.observe(attestersPerPublisher, {
         publisher_address: publisherData.publisherAddress,
       });
     }
