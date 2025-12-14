@@ -23,6 +23,7 @@ import {
   StakingRewardsSnapshotSchema,
   StakingRewardsDailyAggregate,
   StakingRewardsDailyAggregateSchema,
+  type EntryQueueStats,
 } from "../../types/index.js";
 import type { ScraperConfig } from "../../types/scraper-config.js";
 import fs from "fs/promises";
@@ -73,6 +74,7 @@ export type NetworkState = {
   publisherData: PublisherDataMap | null;
   stakingRewardsData: StakingRewardsMap | null;
   stakingRewardsHistory: StakingRewardsSnapshot[];
+  entryQueueStats: EntryQueueStats | null;
 };
 
 /**
@@ -119,6 +121,7 @@ const getNetworkState = (network: string): NetworkState => {
       publisherData: null,
       stakingRewardsData: null,
       stakingRewardsHistory: [],
+      entryQueueStats: null,
     };
     networkStates.set(network, state);
   }
@@ -1135,4 +1138,23 @@ export const updateScraperConfigState = (
 export const getScraperConfig = (network: string): ScraperConfig | null => {
   const state = getNetworkState(network);
   return state.scraperConfig;
+};
+
+/**
+ * Update entry queue stats from scraper
+ */
+export const updateEntryQueueStats = (
+  network: string,
+  stats: EntryQueueStats | null,
+) => {
+  const state = getNetworkState(network);
+  state.entryQueueStats = stats;
+};
+
+/**
+ * Get entry queue stats
+ */
+export const getEntryQueueStats = (network: string): EntryQueueStats | null => {
+  const state = getNetworkState(network);
+  return state.entryQueueStats;
 };

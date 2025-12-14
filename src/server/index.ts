@@ -7,6 +7,7 @@ import {
   initAttesterMetrics,
   initPublisherMetrics,
   initStakingRewardsMetrics,
+  initEntryQueueMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
 import {
@@ -15,6 +16,7 @@ import {
   PublisherScraper,
   RollupScraper,
   StakingRewardsScraper,
+  EntryQueueScraper,
 } from "./scrapers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
 import {
@@ -118,6 +120,11 @@ async function initializeNetwork(
       `[${network}] SAFE_ADDRESS not configured, skipping staking rewards scraper`,
     );
   }
+
+  // Register entry queue scraper (10 minute interval)
+  console.log(`[${network}] Registering entry queue scraper...`);
+  const entryQueueScraper = new EntryQueueScraper(network, config, 600_000);
+  scraperManager.register(entryQueueScraper, 600_000);
 
   // Initialize staking provider metrics for this network
   console.log(`[${network}] Initializing staking provider metrics...`);
@@ -243,6 +250,7 @@ export const startServer = async (specificNetwork?: string) => {
   initAttesterMetrics();
   initPublisherMetrics();
   initStakingRewardsMetrics();
+  initEntryQueueMetrics();
 
   // Initialize config metrics for all networks
   initLog("Initializing configuration metrics for all networks...");

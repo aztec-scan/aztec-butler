@@ -296,6 +296,22 @@ program
     },
   );
 
+// Command: get-queue-stats
+program
+  .command("get-queue-stats")
+  .description("Get entry queue statistics and timing estimates")
+  .option("--json", "Output as JSON", false)
+  .action(async (options: { json: boolean }) => {
+    const globalOpts = program.opts();
+    const config = await initConfig({ network: globalOpts.network });
+    const ethClient = await initEthClient(config);
+
+    await command.getQueueStats(ethClient, config, {
+      network: config.NETWORK,
+      json: options.json,
+    });
+  });
+
 // Parse and handle errors
 program.parseAsync(process.argv).catch((error) => {
   console.error("❌ Error:\n");

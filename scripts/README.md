@@ -271,7 +271,102 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 8. Start Server
+### 8. Get Queue Stats
+
+```bash
+# Human-readable output with timing estimates
+./scripts/get-queue-stats.sh
+
+# JSON output for scripting
+./scripts/get-queue-stats.sh --json
+
+# Specify network
+./scripts/get-queue-stats.sh --network testnet
+```
+
+**What it does:**
+
+- Fetches entry queue data from the rollup contract
+- Calculates time estimates for when attesters will become active
+- Shows global queue statistics:
+  - Total attesters waiting in queue
+  - Time per attester to move from queue to active
+  - Estimated timestamp when last attester will become active
+- Shows provider-specific statistics (if configured):
+  - Number of your attesters in queue
+  - When your next attester will become active
+  - **When your next attester missing coinbase will become active** (critical!)
+  - When your last attester will become active
+
+**Output (Human-readable):**
+
+```
+=== Entry Queue Statistics ===
+
+Network: testnet
+Provider ID: 42
+
+📊 Global Queue Status:
+  Total Attesters in Queue: 150
+  Current Epoch: 1234
+  Epoch Duration: 1 hour
+  Flush Size per Epoch: 10 attesters
+  Time per Attester: ~6 minutes
+
+  ⏰ Last Attester Estimated Entry: 2025-12-15 18:30:00 UTC (in 15 hours)
+
+🏢 Provider Queue Status:
+  Your Attesters in Queue: 25
+
+  ⏰ Next Attester Arrival: 2025-12-14 10:00:00 UTC (in 2 hours)
+
+  ⚠️  Next Attester Missing Coinbase: 2025-12-14 12:30:00 UTC (in 4.5 hours)
+      Address: 0x1234...5678
+      ⚡ Action Required: Configure coinbase before activation
+
+  ⏰ Last Attester Arrival: 2025-12-14 18:00:00 UTC (in 10 hours)
+
+💡 Tip: Use 'npm run cli -- scrape-coinbases' to update coinbase configurations
+```
+
+**Output (JSON format with `--json`):**
+
+```json
+{
+  "network": "testnet",
+  "providerId": "42",
+  "global": {
+    "totalQueueLength": 150,
+    "currentEpoch": 1234,
+    "epochDuration": 3600,
+    "flushSize": 10,
+    "timePerAttester": 360,
+    "lastAttesterTimestamp": 1734285000
+  },
+  "provider": {
+    "queueCount": 25,
+    "nextArrivalTimestamp": 1734277800,
+    "nextMissingCoinbase": {
+      "timestamp": 1734286200,
+      "address": "0x1234...5678"
+    },
+    "lastArrivalTimestamp": 1734307200
+  }
+}
+```
+
+**Use cases:**
+
+- Check how long until your attesters become active
+- Identify attesters that need coinbase configuration urgently
+- Plan coinbase updates before attesters enter the queue
+- Monitor queue congestion and timing
+
+**Important:** The "Next Attester Missing Coinbase" metric is the most critical - it tells you exactly when you need to have a coinbase configured by to avoid activation without rewards.
+
+---
+
+### 9. Start Server
 
 ```bash
 ./scripts/start-server.sh
@@ -282,7 +377,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 - Starts Aztec Butler in server (scraper) mode
 - Loads cached attesters and publishers if available
 - Starts Prometheus metrics exporter on port 9464
-- Runs periodic scrapers for on-chain data
+- Runs periodic scrapers for on-chain data (including entry queue stats every 10 minutes)
 
 **Prerequisites:**
 
@@ -296,7 +391,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 9. Get Metrics
+### 10. Get Metrics
 
 ```bash
 # Using default token and URL
@@ -416,6 +511,25 @@ npm run cli -- generate-scraper-config --provider-id 123
 # Re-scrape coinbases if attesters changed (use provider ID for speed)
 PROVIDER_ID=123  # Your provider ID
 ./scripts/scrape-coinbases.sh --provider-id $PROVIDER_ID
+
+# Check entry queue timing weekly to plan coinbase updates
+./scripts/get-queue-stats.sh
+```
+
+### Planning Coinbase Updates
+
+```bash
+# 1. Check which attesters are in queue and when they'll activate
+./scripts/get-queue-stats.sh
+
+# 2. If attesters are missing coinbase and will activate soon, update them
+# The output will show: "⚠️ Next Attester Missing Coinbase: 2025-12-14 12:30:00 UTC (in 4.5 hours)"
+
+# 3. Update coinbase configurations by scraping current state
+./scripts/scrape-coinbases.sh
+
+# 4. Verify queue stats again
+./scripts/get-queue-stats.sh
 ```
 
 ### Monitoring Attester Status
@@ -426,6 +540,12 @@ PROVIDER_ID=123  # Your provider ID
 
 # Update attester cache for server monitoring
 ./scripts/scrape-attester-status.sh --output-file testnet-cached-attesters.json
+
+# Check entry queue status and timing estimates
+./scripts/get-queue-stats.sh
+
+# Get queue stats in JSON format for automation
+./scripts/get-queue-stats.sh --json
 ```
 
 ---
@@ -480,6 +600,15 @@ npm run cli -- scrape-attester-status --address 0x123... --address 0x456...
 
 # Scrape attester status and save to file
 npm run cli -- scrape-attester-status --output-file testnet-cached-attesters.json
+
+# Get queue stats (human-readable)
+npm run cli -- get-queue-stats
+
+# Get queue stats (JSON format)
+npm run cli -- get-queue-stats --json
+
+# Get queue stats for specific network
+npm run cli -- get-queue-stats --network testnet
 ```
 
 ---

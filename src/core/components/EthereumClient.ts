@@ -823,4 +823,52 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
       totalAllocation,
     };
   }
+
+  /**
+   * Get how many validators can be flushed from queue now
+   */
+  async getAvailableValidatorFlushes(): Promise<bigint> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getAvailableValidatorFlushes();
+  }
+
+  /**
+   * Get the next epoch when flush can occur
+   */
+  async getNextFlushableEpoch(): Promise<bigint> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getNextFlushableEpoch();
+  }
+
+  /**
+   * Get max number of validators that can be added from queue
+   */
+  async getEntryQueueFlushSize(): Promise<bigint> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getEntryQueueFlushSize();
+  }
+
+  /**
+   * Check if bootstrap phase is complete
+   */
+  async getIsBootstrapped(): Promise<boolean> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getIsBootstrapped();
+  }
+
+  /**
+   * Get epoch duration from rollup config (in seconds)
+   */
+  async getEpochDuration(): Promise<bigint> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getEpochDuration();
+  }
+
+  /**
+   * Get current epoch number
+   */
+  async getCurrentEpoch(): Promise<bigint> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getCurrentEpoch();
+  }
 }

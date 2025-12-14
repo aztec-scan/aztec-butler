@@ -1,6 +1,6 @@
 # Aztec Butler
 
-A tool for helping out with chores on an aztec-node server.
+An tool for helping out with managing multiple aztec nodes with an opinionated workflow and set-up.
 
 ## Requirements
 
@@ -17,21 +17,14 @@ To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/
 
 ## TODO
 
-1. there should be one command checking no duplicates of attester addresses across all positions on-chain
+1. double-check: there should be one command checking no duplicates of attester addresses across all positions on-chain
    - stakingProviderRegistryQueue
    - rollup entryQueue
    - rollup active validators
 
 ### Roadmap
 
-1. EntryQueue time stats - to simplify when to update coinbases
-   - Time per attester entry
-   - Total attesters in queue
-   - Last attester in total queue estimated date for entry
-   - ProviderIDs total attesters in queue
-   - ProviderIDs next attesters arrival (date)
-   - ProviderIDs next attesters, missing coinbase, arrival (date)
-   - ProviderIDs last attesters arrival (date)
 1. replace need for aztecmonitor
    - P2P connection status
    - chain tips
+1. merge attester-scraper and entry-queue stats scraper. (they both scrape from the same resource and can be done in one go)

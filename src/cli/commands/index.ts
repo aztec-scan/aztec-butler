@@ -7,3 +7,4 @@ export { default as scrapeCoinbases } from "./scrape-coinbases.js";
 export { default as scrapeAttesterStatus } from "./scrape-attester-status.js";
 export { default as processPrivateKeys } from "./process-private-keys.js";
 export { default as prepareDeployment } from "./prepare-deployment.js";
+export { default as getQueueStats } from "./get-queue-stats.js";
