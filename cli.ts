@@ -306,11 +306,6 @@ program
     "Path to JSON array of available publisher addresses",
   )
   .option(
-    "--high-availability-count <n>",
-    "Create N files with non-overlapping publishers",
-    (value) => parseInt(value, 10),
-  )
-  .option(
     "-o, --output <path>",
     "Output file path (default: [production-keys].new)",
   )
@@ -319,7 +314,6 @@ program
       productionKeys: string;
       newPublicKeys: string;
       availablePublishers: string;
-      highAvailabilityCount?: number;
       output?: string;
     }) => {
       const globalOpts = program.opts();
@@ -331,9 +325,6 @@ program
         newPublicKeys: options.newPublicKeys,
         availablePublishers: options.availablePublishers,
         network: config.NETWORK,
-        ...(options.highAvailabilityCount !== undefined
-          ? { highAvailabilityCount: options.highAvailabilityCount }
-          : {}),
         ...(options.output ? { outputPath: options.output } : {}),
       });
     },

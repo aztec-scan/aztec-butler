@@ -14,7 +14,6 @@ interface PrepareDeploymentOptions {
   productionKeys: string;
   newPublicKeys: string;
   availablePublishers: string;
-  highAvailabilityCount?: number;
   outputPath?: string;
   network: string;
 }
@@ -254,28 +253,23 @@ const command = async (
 
   console.log("✅ All publishers have ETH");
 
-  // 5. High availability validation
-  const haCount = options.highAvailabilityCount || 1;
+  // 5. Server detection
+  console.log("\nDetecting servers from available publishers...");
 
-  if (haCount > 1) {
-    console.log(`\nValidating high availability setup (count: ${haCount})...`);
+  const serverIds = Object.keys(serverPublishers).filter(
+    (key) => serverPublishers[key]!.length > 0,
+  );
 
-    const prefixes = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").slice(0, haCount);
-    const availableServers = Object.keys(serverPublishers).filter(
-      (key) => serverPublishers[key]!.length > 0,
-    );
-
-    if (availableServers.length < haCount) {
-      throw new Error(
-        `FATAL: Not enough servers configured for high availability.\n` +
-          `Need ${haCount} servers (${prefixes.join(", ")}) but only have ${availableServers.length} configured: ${availableServers.join(", ")}`,
-      );
-    }
-
-    console.log(
-      `✅ Sufficient servers configured for ${haCount}-way high availability`,
+  if (serverIds.length === 0) {
+    throw new Error(
+      `FATAL: No servers with publishers found in available publishers file.\n` +
+        `At least one server with publisher addresses is required.`,
     );
   }
+
+  console.log(
+    `✅ Found ${serverIds.length} server(s): ${serverIds.join(", ")}`,
+  );
 
   // 6. Generate output file(s)
   console.log("\nGenerating output file(s)...");
@@ -283,6 +277,55 @@ const command = async (
   const outputBasePath =
     options.outputPath || path.basename(options.productionKeys);
   const outputDir = path.dirname(options.outputPath || options.productionKeys);
+
+  // Helper function to find highest existing version for a server
+  const findHighestVersion = async (
+    baseWithoutExt: string,
+    serverId: string,
+    dir: string,
+  ): Promise<number> => {
+    const files = await fs.readdir(dir).catch(() => []);
+
+    let highestVersion = 0;
+    const regex = new RegExp(
+      `^${baseWithoutExt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}_${serverId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}_v(\\d+)\\.json$`,
+    );
+
+    for (const file of files) {
+      const match = file.match(regex);
+      if (match && match[1]) {
+        const version = parseInt(match[1], 10);
+        if (version > highestVersion) {
+          highestVersion = version;
+        }
+      }
+    }
+
+    return highestVersion;
+  };
+
+  // Helper function to generate versioned filename
+  const generateVersionedFilename = async (
+    basePath: string,
+    serverId: string,
+    dir: string,
+  ): Promise<string> => {
+    // Remove .json extension if present
+    const baseWithoutExt = basePath.endsWith(".json")
+      ? basePath.slice(0, -5)
+      : basePath;
+
+    // Find highest existing version and increment
+    const highestVersion = await findHighestVersion(
+      baseWithoutExt,
+      serverId,
+      dir,
+    );
+    const nextVersion = highestVersion + 1;
+
+    const filename = `${baseWithoutExt}_${serverId}_v${nextVersion}.json`;
+    return path.join(dir, filename);
+  };
 
   // Merge all validators (without publishers yet)
   const mergedValidators: KeystoreValidator[] = [
@@ -311,40 +354,24 @@ const command = async (
 
   const outputFiles: { filename: string; data: KeystoreFile }[] = [];
 
-  if (haCount === 1) {
-    // Single file output - use server "A"
-    if (!serverPublishers.A) {
-      throw new Error(
-        `FATAL: Server "A" not found in available publishers file.\n` +
-          `When running without high availability, publishers for server "A" are required.`,
-      );
+  // Generate one file per server
+  for (const serverId of serverIds) {
+    const filePublishers = serverPublishers[serverId]!;
+
+    if (filePublishers.length === 0) {
+      console.warn(`⚠️  Skipping server ${serverId}: no publishers configured`);
+      continue;
     }
 
-    const availablePublishers = serverPublishers.A;
-
-    if (availablePublishers.length === 0) {
-      throw new Error(
-        `FATAL: Server "A" has no publisher addresses.\n` +
-          `At least one publisher address is required for server "A".`,
-      );
-    }
-
-    let outputFilename = `${outputBasePath}.new`;
-    let outputPath = path.join(outputDir, outputFilename);
-
-    // Check if .new exists, create .new2 instead
-    try {
-      await fs.access(outputPath);
-      outputFilename = `${outputBasePath}.new2`;
-      outputPath = path.join(outputDir, outputFilename);
-      console.log(`  .new file exists, creating ${outputFilename} instead`);
-    } catch {
-      // File doesn't exist, use .new
-    }
+    const outputPath = await generateVersionedFilename(
+      outputBasePath,
+      serverId,
+      outputDir,
+    );
 
     const validatorsWithPublishers = assignPublishers(
       mergedValidators,
-      availablePublishers,
+      filePublishers,
     );
 
     outputFiles.push({
@@ -357,50 +384,14 @@ const command = async (
     });
 
     console.log(
-      `✅ Using ${availablePublishers.length} publisher(s) from server A`,
+      `  ${path.basename(outputPath)}: ${filePublishers.length} publisher(s) from server ${serverId}`,
     );
-  } else {
-    // High availability mode - use specified server keys
-    const prefixes = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").slice(0, haCount);
+  }
 
-    // Validate all required servers have publishers
-    const missingServers = prefixes.filter(
-      (server) =>
-        !serverPublishers[server] || serverPublishers[server].length === 0,
+  if (outputFiles.length === 0) {
+    throw new Error(
+      `FATAL: No output files generated. Ensure at least one server has publishers configured.`,
     );
-
-    if (missingServers.length > 0) {
-      throw new Error(
-        `FATAL: Missing or empty publisher arrays for server(s): ${missingServers.join(", ")}\n` +
-          `High availability count of ${haCount} requires publishers for servers: ${prefixes.join(", ")}`,
-      );
-    }
-
-    for (let i = 0; i < haCount; i++) {
-      const prefix = prefixes[i]!;
-      const filePublishers = serverPublishers[prefix]!;
-
-      const outputFilename = `${prefix}_${outputBasePath}.new`;
-      const outputPath = path.join(outputDir, outputFilename);
-
-      const validatorsWithPublishers = assignPublishers(
-        mergedValidators,
-        filePublishers,
-      );
-
-      outputFiles.push({
-        filename: outputPath,
-        data: {
-          schemaVersion: productionData.schemaVersion || 1,
-          remoteSigner: productionData.remoteSigner,
-          validators: validatorsWithPublishers,
-        },
-      });
-
-      console.log(
-        `  ${outputFilename}: ${filePublishers.length} publisher(s) from server ${prefix}`,
-      );
-    }
   }
 
   // Write all output files
@@ -501,16 +492,17 @@ const command = async (
   );
 
   // Show publishers per server
-  console.log(`Servers configured:`);
-  for (const [server, publishers] of Object.entries(serverPublishers)) {
-    console.log(`  - Server ${server}: ${publishers.length} publisher(s)`);
+  console.log(`Servers detected: ${serverIds.length}`);
+  for (const serverId of serverIds) {
+    const publishers = serverPublishers[serverId]!;
+    console.log(`  - Server ${serverId}: ${publishers.length} publisher(s)`);
   }
 
-  console.log(`Output files: ${outputFiles.length}`);
+  console.log(`\nOutput files generated: ${outputFiles.length}`);
   for (const { filename } of outputFiles) {
-    console.log(`  - ${filename}`);
+    console.log(`  - ${path.basename(filename)}`);
   }
-  console.log(`Scraper config: ${savedPath}`);
+  console.log(`\nScraper config: ${savedPath}`);
   console.log("\n✅ Deployment preparation complete!");
 };
 

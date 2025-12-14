@@ -23,9 +23,9 @@ Ensure your environment is properly configured before beginning the key manageme
 
   ```json
   {
-    "A": ["0x1111...", "0x2222...", "0x3333..."],
-    "B": ["0x4444...", "0x5555..."],
-    "C": ["0x6666..."]
+    "server1": ["0x1111...", "0x2222...", "0x3333..."],
+    "server2": ["0x4444...", "0x5555..."],
+    "server3": ["0x6666..."]
   }
   ```
 
@@ -108,9 +108,9 @@ If deploying with HA:
 
 ```json
 {
-  "A": ["0x111...", "0x222...", "0x333...", "0x444...", "0x555..."],
-  "B": ["0x666...", "0x777...", "0x888...", "0x999...", "0xAAA..."],
-  "C": ["0xBBB...", "0xCCC...", "0xDDD...", "0xEEE...", "0xFFF..."]
+  "server1": ["0x111...", "0x222...", "0x333...", "0x444...", "0x555..."],
+  "server2": ["0x666...", "0x777...", "0x888...", "0x999...", "0xAAA..."],
+  "server3": ["0xBBB...", "0xCCC...", "0xDDD...", "0xEEE...", "0xFFF..."]
 }
 ```
 
@@ -147,7 +147,7 @@ npm link
 
 ```bash
 # Old format: ["0x111...", "0x222..."]
-# New format: {"A": ["0x111...", "0x222..."]}
+# Format: {"server1": ["0x111...", "0x222..."], "server2": ["0x333..."]}
 ```
 
 ## Next Steps

@@ -50,37 +50,44 @@ Collection of bash scripts for common Aztec Butler operations.
 ### 2. Prepare Deployment
 
 ```bash
-# Basic usage
+# Basic usage - automatically detects servers from available_publishers
 ./scripts/prepare-deployment.sh \
   prod-testnet-keyfile.json \
   new-public-keys.json \
   testnet_available_publisher_addresses.json
 
-# High availability mode (3-way split)
-./scripts/prepare-deployment.sh \
-  prod-testnet-keyfile.json \
-  new-public-keys.json \
-  testnet_available_publisher_addresses.json \
-  --high-availability-count 3
+# Output files are automatically created, one per server in the publishers file
+# Example output: prod-testnet-keyfile_server1_v1.json, prod-testnet-keyfile_server2_v1.json
 
-# Custom output path
+# Custom output path base
 ./scripts/prepare-deployment.sh \
   prod-testnet-keyfile.json \
   new-public-keys.json \
   testnet_available_publisher_addresses.json \
-  --output /path/to/output.json
+  --output /path/to/output
 ```
 
 **Arguments:**
 
 - `production-keys` - Path to existing production keyfile with remoteSigner (required)
 - `new-public-keys` - Path to new public keys from process-private-keys (required)
-- `available-publishers` - Path to JSON array of publisher addresses (required)
+- `available-publishers` - Path to JSON object with server IDs as keys and publisher arrays as values (required)
+
+**Available Publishers File Format:**
+
+```json
+{
+  "server1": ["0x111...", "0x222..."],
+  "server2": ["0x333...", "0x444..."],
+  "server3": ["0x555...", "0x666..."]
+}
+```
+
+The number of output files is automatically determined by the number of keys in this file.
 
 **Options:**
 
-- `--high-availability-count <n>` - Create N files with non-overlapping publishers
-- `--output <path>` - Custom output file path (default: `<production-keys>.new`)
+- `--output <path>` - Custom output file path base (default: `<production-keys>`)
 
 **What it does:**
 
@@ -91,32 +98,32 @@ Collection of bash scripts for common Aztec Butler operations.
    - Fails if any publisher has 0 ETH
    - Warns if any publisher has < MIN_ETH_PER_ATTESTER (0.1 ETH default)
 5. **Generates output files:**
-   - Standard mode: Single file `<production-keys>.new` (or `.new2` if exists)
-   - HA mode: Multiple files `A_<production-keys>.new`, `B_<production-keys>.new`, etc.
+   - Automatically generates one file per server in available_publishers
+   - Naming: `<production-keys>_<serverId>_v<N>.json`
+   - Version number auto-increments from highest existing version
    - Merges all validators (existing + new)
    - Round-robin assigns publishers to ALL validators
 6. **Updates scraper config** with new attesters in "NEW" state
 
-**High Availability Mode:**
+**Multiple Servers:**
 
-When using `--high-availability-count`:
+When available_publishers contains multiple server keys:
 
-- Creates N files with ALL validators but different publisher sets
-- Publishers are partitioned into non-overlapping sets
-- Requires at least N publishers (fails if not enough)
-- Example with 10 publishers and HA count 3:
-  - File A: publishers 1-3
-  - File B: publishers 4-6
-  - File C: publishers 7-10
+- Creates one file per server with ALL validators but different publisher sets
+- Each server uses only its own publisher addresses
+- Example with 3 servers:
+  - `prod_server1_v1.json`: uses publishers from "server1"
+  - `prod_server2_v1.json`: uses publishers from "server2"
+  - `prod_server3_v1.json`: uses publishers from "server3"
 
 **Output:**
 
-- One or more `.new` files with merged validators and assigned publishers
+- One or more `*_<serverId>_v<N>.json` files with merged validators and assigned publishers
 - Updated scraper config at `~/.local/share/aztec-butler/{network}-scrape-config.json`
 
 **Use case:** Phase 3 of key flow - prepare final deployment files with publisher assignments
 
-**Important:** After this step, manually deploy the `.new` file(s) to your node(s).
+**Important:** After this step, manually deploy the generated file(s) to your node(s).
 
 ---
 

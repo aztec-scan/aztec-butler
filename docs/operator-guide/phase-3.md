@@ -34,7 +34,21 @@ flowchart TD
 
 ## Steps
 
-### 1. Basic Deployment (Single Server)
+### 1. Prepare Deployment Files
+
+The command automatically detects the number of servers from your `available_publisher_addresses.json` file.
+
+**Example available_publisher_addresses.json:**
+
+```json
+{
+  "server1": ["0x111...", "0x222...", "0x333..."],
+  "server2": ["0x444...", "0x555...", "0x666..."],
+  "server3": ["0x777...", "0x888...", "0x999..."]
+}
+```
+
+**Run the command:**
 
 ```bash
 aztec-butler prepare-deployment \
@@ -43,60 +57,52 @@ aztec-butler prepare-deployment \
   --available-publishers available_publisher_addresses.json
 ```
 
-**This command:**
+**This automatically creates one file per server:**
 
-- Merges existing and new validators
-- Assigns publishers from server "A"
-- Validates all inputs
-- Creates `prod-testnet-keyfile.json.new`
-- Updates scraper config
-
-### 2. High Availability Deployment (Multiple Servers)
-
-```bash
-aztec-butler prepare-deployment \
-  --production-keys prod-testnet-keyfile.json \
-  --new-public-keys public-new-private-keys.json \
-  --available-publishers available_publisher_addresses.json \
-  --high-availability-count 3
-```
-
-**This creates 3 files:**
-
-- `A_prod-testnet-keyfile.json.new` (uses publishers from server A)
-- `B_prod-testnet-keyfile.json.new` (uses publishers from server B)
-- `C_prod-testnet-keyfile.json.new` (uses publishers from server C)
+- `prod-testnet-keyfile_server1_v1.json` (uses publishers from server1)
+- `prod-testnet-keyfile_server2_v1.json` (uses publishers from server2)
+- `prod-testnet-keyfile_server3_v1.json` (uses publishers from server3)
 
 All files contain **the same validators** but **different publishers**.
 
-### 3. Verify Output Files
+**For single server:** Use a file with just one key:
 
-#### Single Server:
+```json
+{
+  "server1": ["0x111...", "0x222..."]
+}
+```
+
+Output: `prod-testnet-keyfile_server1_v1.json`
+
+### 2. Verify Output Files
+
+#### Check a single file:
 
 ```bash
 # Check validator count
-jq '.validators | length' prod-testnet-keyfile.json.new
+jq '.validators | length' prod-testnet-keyfile_server1_v1.json
 
 # Verify all validators have publishers
-jq '.validators[] | select(.publisher == null)' prod-testnet-keyfile.json.new
+jq '.validators[] | select(.publisher == null)' prod-testnet-keyfile_server1_v1.json
 # Should output nothing
 ```
 
-#### High Availability:
+#### Multiple Servers:
 
 ```bash
 # Verify all files have same validators
-diff <(jq '.validators[].attester.eth' A_prod-testnet-keyfile.json.new | sort) \
-     <(jq '.validators[].attester.eth' B_prod-testnet-keyfile.json.new | sort)
+diff <(jq '.validators[].attester.eth' prod-testnet-keyfile_server1_v1.json | sort) \
+     <(jq '.validators[].attester.eth' prod-testnet-keyfile_server2_v1.json | sort)
 # Should show no differences
 
 # Verify different publishers
-diff <(jq '.validators[].publisher' A_prod-testnet-keyfile.json.new | sort) \
-     <(jq '.validators[].publisher' B_prod-testnet-keyfile.json.new | sort)
+diff <(jq '.validators[].publisher' prod-testnet-keyfile_server1_v1.json | sort) \
+     <(jq '.validators[].publisher' prod-testnet-keyfile_server2_v1.json | sort)
 # Should show differences
 ```
 
-### 4. Review Scraper Config
+### 3. Review Scraper Config
 
 The command automatically updates the scraper config:
 
@@ -144,8 +150,7 @@ The command performs these checks automatically:
 - [ ] Ran prepare-deployment command successfully
 - [ ] No validation errors or warnings
 - [ ] Deployment file(s) created:
-  - [ ] `prod-testnet-keyfile.json.new` (single server), OR
-  - [ ] `A_prod-testnet-keyfile.json.new`, `B_...`, `C_...` (HA)
+  - [ ] `prod-testnet-keyfile_<serverId>_v1.json` for each server
 - [ ] Verified validator count matches expected (old + new)
 - [ ] Verified all validators have publisher addresses assigned
 - [ ] Verified publishers have sufficient ETH balance
@@ -163,7 +168,7 @@ Dev Machine:
   ├── available_publisher_addresses.json       # Existing
   ├── new-private-keys.json                    # Phase 1 (can delete after secure storage)
   ├── public-new-private-keys.json             # Phase 2
-  └── prod-testnet-keyfile.json.new            # ✅ New - Ready to deploy
+  └── prod-testnet-keyfile_server1_v1.json     # ✅ New - Ready to deploy
 
 Scraper Config:
   ~/.local/share/aztec-butler/
@@ -182,9 +187,9 @@ Dev Machine:
   ├── prod-testnet-keyfile.json                # Existing
   ├── available_publisher_addresses.json       # Existing
   ├── public-new-private-keys.json             # Phase 2
-  ├── A_prod-testnet-keyfile.json.new          # ✅ New - Deploy to Server A
-  ├── B_prod-testnet-keyfile.json.new          # ✅ New - Deploy to Server B
-  └── C_prod-testnet-keyfile.json.new          # ✅ New - Deploy to Server C
+  ├── prod-testnet-keyfile_server1_v1.json     # ✅ New - Deploy to Server 1
+  ├── prod-testnet-keyfile_server2_v1.json     # ✅ New - Deploy to Server 2
+  └── prod-testnet-keyfile_server3_v1.json     # ✅ New - Deploy to Server 3
 ```
 
 ## Common Issues
@@ -219,28 +224,25 @@ Dev Machine:
 # Then re-run prepare-deployment
 ```
 
-### Issue: "Server A not found in available publishers"
+### Issue: "No servers with publishers found"
 
-**Cause:** Publisher file doesn't have server "A" key.
+**Cause:** Publisher file has no keys or all server arrays are empty.
 
-**Solution:** Ensure publisher file has correct structure:
+**Solution:** Ensure publisher file has correct structure with at least one server:
 
 ```json
 {
-  "A": ["0x111...", "0x222..."]
+  "server1": ["0x111...", "0x222..."]
 }
 ```
 
-### Issue: "Not enough servers for HA count"
+### Issue: "No output files generated"
 
-**Cause:** HA count exceeds available servers in publisher file.
-
-**Example:** `--high-availability-count 3` but file only has A and B.
+**Cause:** All server entries in the publisher file have empty arrays.
 
 **Solution:**
 
-- Add server C to publisher file, OR
-- Reduce `--high-availability-count` to 2
+- Ensure at least one server has publisher addresses
 
 ### Issue: "Publisher addresses shared between servers"
 
@@ -250,8 +252,8 @@ Dev Machine:
 
 ```json
 {
-  "A": ["0x111..."],
-  "B": ["0x222..."] // ✅ Different from A
+  "server1": ["0x111..."],
+  "server2": ["0x222..."] // ✅ Different from server1
 }
 ```
 

@@ -72,8 +72,7 @@ aztec-butler get-add-keys-to-staking-provider-calldata \
 
 If running multiple validator nodes with the same attesters:
 
-- Use `--high-availability-count N` flag in Phase 3
-- Ensure you have enough publisher addresses (at least N publishers)
+- Multiple servers auto-detected from available_publishers file in Phase 3
 - Each server gets a unique set of publishers
 - See [Phase 3](phase-3.md) for HA setup details
 
@@ -83,9 +82,9 @@ Publishers are now managed per-server in `available_publisher_addresses.json`:
 
 ```json
 {
-  "A": ["0x1111...", "0x2222..."],
-  "B": ["0x3333...", "0x4444..."],
-  "C": ["0x5555..."]
+  "server1": ["0x1111...", "0x2222..."],
+  "server2": ["0x3333...", "0x4444..."],
+  "server3": ["0x5555..."]
 }
 ```
 

@@ -2,6 +2,9 @@
 # Prepare deployment by merging production keys with new public keys
 # Usage: ./scripts/prepare-deployment.sh <production-keys> <new-public-keys> <available-publishers> [options]
 #
+# The number of output files is automatically determined by the number of server keys
+# in the available-publishers JSON file.
+#
 # This will:
 # - Load production keyfile with remoteSigner
 # - Load new public keys file (from process-private-keys)
@@ -15,32 +18,19 @@
 # Arguments:
 #   production-keys: Path to existing production keyfile (required)
 #   new-public-keys: Path to new public keys file (required)
-#   available-publishers: Path to JSON array of publisher addresses (required)
+#   available-publishers: Path to JSON object with server IDs as keys and publisher arrays as values (required)
 #
 # Options:
-#   --high-availability-count <n>: Create N files with non-overlapping publishers
-#   --output <path>: Custom output file path (default: <production-keys>.new)
+#   --output <path>: Custom output file path base (default: <production-keys>)
 #
 # Examples:
-#   # Basic usage
+#   # Automatically generates one file per server in available_publishers
 #   ./scripts/prepare-deployment.sh \
 #     prod-testnet-keyfile.json \
 #     new-public-keys.json \
 #     testnet_available_publisher_addresses.json
 #
-#   # High availability mode (3-way split)
-#   ./scripts/prepare-deployment.sh \
-#     prod-testnet-keyfile.json \
-#     new-public-keys.json \
-#     testnet_available_publisher_addresses.json \
-#     --high-availability-count 3
-#
-#   # Custom output path
-#   ./scripts/prepare-deployment.sh \
-#     prod-testnet-keyfile.json \
-#     new-public-keys.json \
-#     testnet_available_publisher_addresses.json \
-#     --output /path/to/output.json
+#   # Output: prod-testnet-keyfile_server1_v1.json, prod-testnet-keyfile_server2_v1.json, etc.
 
 set -e
 
@@ -52,13 +42,13 @@ if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
   echo ""
   echo "Usage: $0 <production-keys> <new-public-keys> <available-publishers> [options]"
   echo ""
+  echo "The number of output files is automatically determined by server keys in available-publishers."
+  echo ""
   echo "Options:"
-  echo "  --high-availability-count <n>  Create N files with non-overlapping publishers"
-  echo "  --output <path>                Custom output file path"
+  echo "  --output <path>                Custom output file path base"
   echo ""
   echo "Examples:"
   echo "  $0 prod-testnet-keyfile.json new-public-keys.json publishers.json"
-  echo "  $0 prod.json new.json pubs.json --high-availability-count 3"
   echo "  $0 prod.json new.json pubs.json --output custom-output.json"
   exit 1
 fi
