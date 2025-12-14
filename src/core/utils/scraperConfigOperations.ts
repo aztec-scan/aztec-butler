@@ -78,20 +78,40 @@ export function validateScraperConfig(config: unknown): ScraperConfig {
 
 /**
  * Load coinbase mapping cache for a specific network
+ * Now reads from {network}-cached-coinbases.json (renamed for consistency)
+ * Falls back to old filename for backwards compatibility
  */
 export async function loadCoinbaseCache(
   network: string,
   customPath?: string,
 ): Promise<CoinbaseMappingCache | null> {
-  const filePath =
-    customPath || path.join(getDataDir(), `${network}-mapped-coinbases.json`);
+  // Try new filename first
+  const newFilePath =
+    customPath || path.join(getDataDir(), `${network}-cached-coinbases.json`);
 
   try {
-    const content = await fs.readFile(filePath, "utf-8");
+    const content = await fs.readFile(newFilePath, "utf-8");
     const data = JSON.parse(content);
     return CoinbaseMappingCacheSchema.parse(data);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // Try old filename for backwards compatibility
+      if (!customPath) {
+        const oldFilePath = path.join(
+          getDataDir(),
+          `${network}-mapped-coinbases.json`,
+        );
+        try {
+          const content = await fs.readFile(oldFilePath, "utf-8");
+          const data = JSON.parse(content);
+          return CoinbaseMappingCacheSchema.parse(data);
+        } catch (oldError) {
+          if ((oldError as NodeJS.ErrnoException).code === "ENOENT") {
+            return null; // Cache doesn't exist yet, which is okay
+          }
+          throw oldError;
+        }
+      }
       return null; // Cache doesn't exist yet, which is okay
     }
     throw error;
@@ -100,6 +120,7 @@ export async function loadCoinbaseCache(
 
 /**
  * Save coinbase mapping cache
+ * Now saves to {network}-cached-coinbases.json (renamed for consistency)
  */
 export async function saveCoinbaseCache(
   cache: CoinbaseMappingCache,
@@ -110,7 +131,7 @@ export async function saveCoinbaseCache(
 
   const filePath =
     customPath ||
-    path.join(getDataDir(), `${validated.network}-mapped-coinbases.json`);
+    path.join(getDataDir(), `${validated.network}-cached-coinbases.json`);
 
   // Ensure directory exists
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -120,7 +141,7 @@ export async function saveCoinbaseCache(
     filePath,
     JSON.stringify(
       validated,
-      (key, value) => (typeof value === "bigint" ? value.toString() : value),
+      (_, value) => (typeof value === "bigint" ? value.toString() : value),
       2,
     ),
     "utf-8",

@@ -1,12 +1,13 @@
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
+import type { ButlerConfig } from "../../core/config/index.js";
 import {
   AttesterOnChainStatus,
   type ScraperAttester,
 } from "../../types/index.js";
 import {
-  loadScraperConfig,
-  saveScraperConfig,
-} from "../../core/utils/scraperConfigOperations.js";
+  loadCachedAttesters,
+  saveCachedAttesters,
+} from "../../core/utils/cachedAttestersOperations.js";
 
 interface ScrapeAttesterStatusOptions {
   allActive?: boolean;
@@ -16,7 +17,6 @@ interface ScrapeAttesterStatusOptions {
   providerQueue?: boolean;
   addresses?: string[];
   network: string;
-  updateConfig?: boolean;
 }
 
 /**

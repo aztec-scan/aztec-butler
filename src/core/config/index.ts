@@ -86,6 +86,10 @@ function buildConfig(network: string) {
       .string()
       .url()
       .parse(process.env.AZTEC_NODE_URL || "http://localhost:8080"),
+    AZTEC_STAKING_PROVIDER_ID: z.coerce
+      .bigint()
+      .optional()
+      .parse(process.env.AZTEC_STAKING_PROVIDER_ID),
     AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS: z
       .string()
       .startsWith("0x")
