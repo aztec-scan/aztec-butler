@@ -16,8 +16,7 @@ export const ScraperAttesterSchema = z.object({
     .enum([
       "NEW",
       "IN_STAKING_PROVIDER_QUEUE",
-      "COINBASE_NEEDED",
-      "IN_STAKING_QUEUE",
+      "ROLLUP_ENTRY_QUEUE",
       "ACTIVE",
       "NO_LONGER_ACTIVE",
     ])

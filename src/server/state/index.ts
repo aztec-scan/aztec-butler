@@ -47,8 +47,7 @@ export type StakingProviderData = z.infer<typeof StakingProviderDataSchema>;
 export enum AttesterState {
   NEW = "NEW",
   IN_STAKING_PROVIDER_QUEUE = "IN_STAKING_PROVIDER_QUEUE",
-  COINBASE_NEEDED = "COINBASE_NEEDED",
-  IN_STAKING_QUEUE = "IN_STAKING_QUEUE",
+  ROLLUP_ENTRY_QUEUE = "ROLLUP_ENTRY_QUEUE",
   ACTIVE = "ACTIVE",
   NO_LONGER_ACTIVE = "NO_LONGER_ACTIVE",
 }
@@ -641,19 +640,6 @@ export const updateAttesterState = (
     `[${network}] Trying to update attester ${attesterAddress} state: ${oldState || "none"} -> ${newState}`,
   );
 
-  // Validate COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE
-  if (
-    newState === AttesterState.COINBASE_NEEDED &&
-    oldState !== AttesterState.IN_STAKING_PROVIDER_QUEUE &&
-    oldState !== undefined
-  ) {
-    console.error(
-      `[${network}] ERROR: Invalid state transition to COINBASE_NEEDED from ${oldState} for attester ${attesterAddress}. ` +
-        `COINBASE_NEEDED can only be entered from IN_STAKING_PROVIDER_QUEUE.`,
-    );
-    return; // Don't allow the transition
-  }
-
   const newEntry: AttesterStateEntry = {
     attesterAddress,
     state: newState,
@@ -985,10 +971,9 @@ function getStatePriority(state: AttesterState): number {
   const priorities: Record<AttesterState, number> = {
     [AttesterState.NEW]: 1,
     [AttesterState.IN_STAKING_PROVIDER_QUEUE]: 2,
-    [AttesterState.COINBASE_NEEDED]: 3,
-    [AttesterState.IN_STAKING_QUEUE]: 4,
-    [AttesterState.ACTIVE]: 5,
-    [AttesterState.NO_LONGER_ACTIVE]: 6,
+    [AttesterState.ROLLUP_ENTRY_QUEUE]: 3,
+    [AttesterState.ACTIVE]: 4,
+    [AttesterState.NO_LONGER_ACTIVE]: 5,
   };
   return priorities[state];
 }

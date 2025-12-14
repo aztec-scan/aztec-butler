@@ -18,11 +18,9 @@ import { AttesterOnChainStatus } from "../../types/index.js";
 
 // Metrics instances
 let attesterInfoGauge: ObservableGauge | null = null;
-let attesterCoinbaseNeededGauge: ObservableGauge | null = null;
 let nbrofAttestersInStateGauge: ObservableGauge | null = null;
 let attesterOnChainStatusGauge: ObservableGauge | null = null;
 let attestersMissingCoinbaseGauge: ObservableGauge | null = null;
-let attestersMissingCoinbaseUrgentGauge: ObservableGauge | null = null;
 // TODO: add gauge for proposer ETH balance
 
 /**
@@ -33,13 +31,6 @@ export const initAttesterMetrics = () => {
     description:
       "Attester address, coinbase address and (TODO) publisher address (value=1)",
   });
-
-  attesterCoinbaseNeededGauge = createObservableGauge(
-    "attesters_coinbase_needed",
-    {
-      description: "Attesters in COINBASE_NEEDED state (value=1 per attester)",
-    },
-  );
 
   nbrofAttestersInStateGauge = createObservableGauge(
     "nbrof_attesters_in_state",
@@ -62,24 +53,6 @@ export const initAttesterMetrics = () => {
             coinbase_address: coinbase,
           });
         }
-      }
-    }
-  });
-
-  attesterCoinbaseNeededGauge.addCallback((observableResult) => {
-    const networkStates = getAllNetworkStates();
-
-    for (const [network, _state] of networkStates.entries()) {
-      const attestersNeedingCoinbase = getAttestersByState(
-        network,
-        AttesterState.COINBASE_NEEDED,
-      );
-
-      for (const entry of attestersNeedingCoinbase) {
-        observableResult.observe(1, {
-          network,
-          attester_address: entry.attesterAddress,
-        });
       }
     }
   });
@@ -145,33 +118,6 @@ export const initAttesterMetrics = () => {
             attester_address: attester,
           });
         }
-      }
-    }
-  });
-
-  // New metric: attesters missing coinbase in COINBASE_NEEDED state (urgent)
-  attestersMissingCoinbaseUrgentGauge = createObservableGauge(
-    "attesters_missing_coinbase_urgent",
-    {
-      description:
-        "Attesters in COINBASE_NEEDED state (urgent attention required, value=1 per attester)",
-    },
-  );
-
-  attestersMissingCoinbaseUrgentGauge.addCallback((observableResult) => {
-    const networkStates = getAllNetworkStates();
-
-    for (const [network, _state] of networkStates.entries()) {
-      const attestersNeedingCoinbase = getAttestersByState(
-        network,
-        AttesterState.COINBASE_NEEDED,
-      );
-
-      for (const entry of attestersNeedingCoinbase) {
-        observableResult.observe(1, {
-          network,
-          attester_address: entry.attesterAddress,
-        });
       }
     }
   });

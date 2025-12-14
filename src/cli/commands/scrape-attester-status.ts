@@ -38,7 +38,7 @@ function determineNewState(
 
   // Attester is in entry queue
   if (isInQueue) {
-    return "IN_STAKING_QUEUE";
+    return "ROLLUP_ENTRY_QUEUE";
   }
 
   // Attester is on-chain

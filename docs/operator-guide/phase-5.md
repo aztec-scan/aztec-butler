@@ -209,7 +209,7 @@ After registration, validators progress through these states:
 ```mermaid
 flowchart LR
     A[NEW] -->|Register| B[IN_STAKING_PROVIDER_QUEUE]
-    B -->|Wait for slot| C[IN_STAKING_QUEUE]
+    B -->|Wait for slot| C[ROLLUP_ENTRY_QUEUE]
     C -->|Become active| D[ACTIVE]
 
     style A fill:#fff4e1
@@ -221,8 +221,8 @@ flowchart LR
 **Typical timeline:**
 
 - **Phase 5 completion → IN_STAKING_PROVIDER_QUEUE:** Immediate
-- **IN_STAKING_PROVIDER_QUEUE → IN_STAKING_QUEUE:** Variable (depends on protocol)
-- **IN_STAKING_QUEUE → ACTIVE:** Next epoch or activation period
+- **IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE:** Variable (depends on protocol)
+- **ROLLUP_ENTRY_QUEUE → ACTIVE:** Next epoch or activation period
 
 Monitor progress with:
 
@@ -334,7 +334,7 @@ Continue to monitor for the next few epochs:
 aztec-butler scrape-attester-status --network testnet --show-all
 
 # Watch for state transitions
-# NEW → IN_STAKING_PROVIDER_QUEUE → IN_STAKING_QUEUE → ACTIVE
+# NEW → IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE → ACTIVE
 ```
 
 ## Next Steps
