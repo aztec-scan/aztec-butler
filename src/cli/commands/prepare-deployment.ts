@@ -4,11 +4,6 @@ import path from "path";
 import { formatEther } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-import {
-  loadScraperConfig,
-  saveScraperConfig,
-} from "../../core/utils/scraperConfigOperations.js";
-import type { ScraperConfig, ScraperAttester } from "../../types/index.js";
 
 interface PrepareDeploymentOptions {
   productionKeys: string;
@@ -400,91 +395,6 @@ const command = async (
     console.log(`✅ Created ${filename}`);
   }
 
-  // 7. Update scraper config
-  console.log("\nUpdating scraper config...");
-
-  let scraperConfig: ScraperConfig;
-  try {
-    scraperConfig = await loadScraperConfig(options.network);
-    console.log(`  Loaded existing scraper config for ${options.network}`);
-  } catch (error) {
-    // Create new config if it doesn't exist
-    console.log(
-      `  No existing scraper config found, creating new one for ${options.network}`,
-    );
-
-    assert(
-      config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-      "Staking provider admin address must be provided",
-    );
-
-    const stakingProviderData = await ethClient.getStakingProvider(
-      config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-    );
-
-    if (!stakingProviderData) {
-      throw new Error(
-        `Staking provider not found for admin address: ${config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS}`,
-      );
-    }
-
-    scraperConfig = {
-      network: options.network,
-      l1ChainId: config.ETHEREUM_CHAIN_ID as 1 | 11155111,
-      stakingProviderId: stakingProviderData.providerId,
-      stakingProviderAdmin: config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-      attesters: [],
-      publishers: [],
-      lastUpdated: new Date().toISOString(),
-      version: "1.1",
-    };
-  }
-
-  // Use publishers from the first/A file
-  const firstFileValidators = outputFiles[0]!.data.validators;
-
-  // Collect unique publishers from the first file
-  const uniquePublishers = new Set<string>();
-  for (const validator of firstFileValidators) {
-    if (validator.publisher) {
-      uniquePublishers.add(validator.publisher as string);
-    }
-  }
-
-  // Create a map of existing attesters for deduplication
-  const existingAttestersMap = new Map<string, ScraperAttester>(
-    scraperConfig.attesters.map((a) => [a.address.toLowerCase(), a]),
-  );
-
-  // Add/update attesters from the new validators
-  for (const validator of firstFileValidators) {
-    const attesterAddr = validator.attester.eth.toLowerCase();
-    const existing = existingAttestersMap.get(attesterAddr);
-
-    const newAttester: ScraperAttester = {
-      address: validator.attester.eth,
-      lastSeenState: existing?.lastSeenState || "NEW",
-    };
-
-    // Add coinbase only if it exists and is not zero address
-    if (validator.coinbase && validator.coinbase !== ZERO_ADDRESS) {
-      newAttester.coinbase = validator.coinbase;
-    } else if (existing?.coinbase && existing.coinbase !== ZERO_ADDRESS) {
-      // Preserve existing non-zero coinbase
-      newAttester.coinbase = existing.coinbase;
-    }
-
-    existingAttestersMap.set(attesterAddr, newAttester);
-  }
-
-  scraperConfig.attesters = Array.from(existingAttestersMap.values());
-  scraperConfig.publishers = Array.from(uniquePublishers);
-  scraperConfig.lastUpdated = new Date().toISOString();
-  scraperConfig.version = "1.1";
-
-  const savedPath = await saveScraperConfig(scraperConfig);
-  console.log(`✅ Updated scraper config: ${savedPath}`);
-
   // Summary
   console.log("\n=== Summary ===");
   console.log(
@@ -502,7 +412,6 @@ const command = async (
   for (const { filename } of outputFiles) {
     console.log(`  - ${path.basename(filename)}`);
   }
-  console.log(`\nScraper config: ${savedPath}`);
   console.log("\n✅ Deployment preparation complete!");
 };
 

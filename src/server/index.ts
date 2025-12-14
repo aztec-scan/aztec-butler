@@ -19,12 +19,15 @@ import {
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
 import {
   initNetworkState,
-  initAttesterStatesFromScraperConfig,
-  updateScraperConfigState,
+  initAttesterStatesFromCache,
+  updatePublishersState,
 } from "./state/index.js";
 import { AztecClient } from "../core/components/AztecClient.js";
 import { SafeGlobalClient } from "../core/components/SafeGlobalClient.js";
-import { loadScraperConfig } from "../core/utils/scraperConfigOperations.js";
+import {
+  loadCachedAttesters,
+  loadAvailablePublishers,
+} from "../core/utils/cachedAttestersOperations.js";
 
 let logCounter = 0;
 
@@ -49,17 +52,42 @@ async function initializeNetwork(
   // Initialize state for this network
   initNetworkState(network);
 
-  // Load scraper configuration
-  console.log(`[${network}] Loading scraper configuration...`);
-  const scraperConfig = await loadScraperConfig(network);
-  console.log(
-    `[${network}] Loaded scraper config: ${scraperConfig.attesters.length} attesters, ${scraperConfig.publishers.length} publishers`,
-  );
+  // Load cached attesters (optional)
+  let cachedAttesters: Array<{
+    address: string;
+    coinbase?: string;
+    lastSeenState?: string;
+  }> = [];
+  try {
+    const cache = await loadCachedAttesters(network);
+    cachedAttesters = cache.attesters;
+    console.log(
+      `[${network}] Loaded cached attesters: ${cachedAttesters.length} attester(s)`,
+    );
+  } catch (error) {
+    console.warn(
+      `[${network}] No cached attesters found, starting with empty attester list`,
+    );
+  }
 
-  // Initialize state from scraper config
-  console.log(`[${network}] Initializing state from scraper config...`);
-  initAttesterStatesFromScraperConfig(network, scraperConfig);
-  updateScraperConfigState(network, scraperConfig);
+  // Load available publishers (optional)
+  let publishers: string[] = [];
+  try {
+    const pubData = await loadAvailablePublishers(network);
+    publishers = Object.values(pubData).flat();
+    console.log(
+      `[${network}] Loaded available publishers: ${publishers.length} publisher(s)`,
+    );
+  } catch (error) {
+    console.warn(
+      `[${network}] No publisher config found, starting with empty publisher list`,
+    );
+  }
+
+  // Initialize state from cache
+  console.log(`[${network}] Initializing state from cache...`);
+  initAttesterStatesFromCache(network, cachedAttesters);
+  updatePublishersState(network, publishers);
 
   // Register rollup scraper (60 second interval)
   console.log(`[${network}] Registering rollup scraper...`);

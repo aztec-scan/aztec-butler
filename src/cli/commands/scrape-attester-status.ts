@@ -73,6 +73,7 @@ function determineNewState(
 
 const command = async (
   ethClient: EthereumClient,
+  config: ButlerConfig,
   options: ScrapeAttesterStatusOptions,
 ) => {
   console.log("\n=== Attester On-Chain Status ===\n");
@@ -130,7 +131,7 @@ const command = async (
     console.log(`  Withdrawer: ${view.config.withdrawer}`);
 
     if (showConfigInfo && configAttester) {
-      console.log(`  Config Coinbase: ${configAttester.coinbase || "Not set"}`);
+      console.log(`  Cached Coinbase: ${configAttester.coinbase || "Not set"}`);
     }
 
     if (view.exit.exists) {
@@ -147,7 +148,19 @@ const command = async (
     return view;
   };
 
-  // --all-active: Show all active attesters from on-chain
+  // Load cached attesters (if exists) - will be used/updated if available
+  let cachedAttesters: ScraperAttester[] = [];
+  let cacheExists = false;
+  try {
+    const cache = await loadCachedAttesters(options.network);
+    cachedAttesters = cache.attesters;
+    cacheExists = true;
+  } catch (error) {
+    // Cache doesn't exist yet, which is okay
+    cacheExists = false;
+  }
+
+  // --all-active: Show all active attesters from on-chain and update cache
   if (options.allActive) {
     console.log("Fetching all active attesters from on-chain...\n");
     const activeAttesters = await ethClient.getAllActiveAttesters();
@@ -161,6 +174,27 @@ const command = async (
       }
       console.log();
     }
+
+    // Update cache with all active attesters
+    if (activeAttesters.length > 0) {
+      console.log("Updating attester cache...");
+      const updatedAttesters = activeAttesters.map(
+        (address): ScraperAttester => {
+          const existing = cachedAttesters.find(
+            (a) => a.address.toLowerCase() === address.toLowerCase(),
+          );
+          return existing || { address, lastSeenState: "ACTIVE" };
+        },
+      );
+
+      const savedPath = await saveCachedAttesters(
+        options.network,
+        updatedAttesters,
+      );
+      console.log(`✅ Attester cache updated: ${savedPath}\n`);
+    }
+
+    return;
   }
 
   // --all-queued: Show all queued attesters from on-chain
@@ -177,6 +211,8 @@ const command = async (
       });
       console.log();
     }
+
+    return;
   }
 
   // --address: Show specific attester(s) by address
@@ -188,373 +224,283 @@ const command = async (
     }
 
     console.log();
-  }
-
-  // --update-config: Update scraper config with current states
-  if (options.updateConfig) {
-    console.log("Loading scraper config...");
-    const scraperConfig = await loadScraperConfig(options.network);
-    console.log(
-      `✅ Loaded ${scraperConfig.attesters.length} attesters from config\n`,
-    );
-
-    console.log("Fetching on-chain data...");
-    const onChainActive = await ethClient.getAllActiveAttesters();
-    const onChainQueued = await ethClient.getAllQueuedAttesters();
-
-    // Fetch provider queue
-    const stakingProviderData = await ethClient.getStakingProvider(
-      scraperConfig.stakingProviderAdmin,
-    );
-    let onChainProviderQueue: string[] = [];
-    if (stakingProviderData) {
-      const queueLength = await ethClient.getProviderQueueLength(
-        stakingProviderData.providerId,
-      );
-      if (queueLength > 0n) {
-        onChainProviderQueue = await ethClient.getProviderQueue(
-          stakingProviderData.providerId,
-        );
-      }
-    }
-
-    console.log(`✅ Found ${onChainActive.length} active attesters on-chain`);
-    console.log(`✅ Found ${onChainQueued.length} queued attesters on-chain`);
-    console.log(
-      `✅ Found ${onChainProviderQueue.length} attesters in provider queue\n`,
-    );
-
-    // Create lookup maps for fast checking
-    const activeAddressSet = new Set(onChainActive.map((a) => a.toLowerCase()));
-    const queuedAddressSet = new Set(onChainQueued.map((a) => a.toLowerCase()));
-    const providerQueueSet = new Set(
-      onChainProviderQueue.map((a) => a.toLowerCase()),
-    );
-
-    // Create map of on-chain views
-    const onChainViews = new Map<string, AttesterOnChainStatus>();
-    for (const activeAddress of onChainActive) {
-      const view = await ethClient.getAttesterView(activeAddress);
-      if (view) {
-        onChainViews.set(activeAddress.toLowerCase(), view.status);
-      }
-    }
-
-    console.log("Analyzing attester states...\n");
-
-    interface StateChange {
-      address: string;
-      oldState: string | undefined;
-      newState: string | undefined;
-    }
-
-    const changes: StateChange[] = [];
-    const stateBreakdown = new Map<string, number>();
-
-    // Iterate through all attesters in config
-    for (const attester of scraperConfig.attesters) {
-      const addressLower = attester.address.toLowerCase();
-      const isInQueue = queuedAddressSet.has(addressLower);
-      const isInProviderQueue = providerQueueSet.has(addressLower);
-      const onChainStatus = onChainViews.get(addressLower) ?? null;
-
-      const newState = determineNewState(
-        attester,
-        isInQueue,
-        isInProviderQueue,
-        onChainStatus,
-      );
-
-      if (newState !== attester.lastSeenState) {
-        changes.push({
-          address: attester.address,
-          oldState: attester.lastSeenState,
-          newState,
-        });
-        attester.lastSeenState = newState as any;
-      }
-
-      // Track state breakdown
-      const currentState = attester.lastSeenState || "NEW";
-      stateBreakdown.set(
-        currentState,
-        (stateBreakdown.get(currentState) || 0) + 1,
-      );
-    }
-
-    // Display state changes
-    if (changes.length > 0) {
-      console.log("State Changes:");
-      for (const change of changes) {
-        console.log(
-          `  ${change.address}: ${change.oldState || "undefined"} → ${change.newState || "undefined"}`,
-        );
-      }
-      console.log();
-    }
-
-    // Display summary
-    console.log("Summary:");
-    console.log(`  Total attesters: ${scraperConfig.attesters.length}`);
-    console.log(`  State changes: ${changes.length}`);
-    console.log(
-      `  No changes: ${scraperConfig.attesters.length - changes.length}\n`,
-    );
-
-    console.log("State breakdown:");
-    for (const [state, count] of Array.from(stateBreakdown.entries()).sort()) {
-      console.log(`  ${state}: ${count}`);
-    }
-    console.log();
-
-    // Update lastUpdated timestamp
-    scraperConfig.lastUpdated = new Date().toISOString();
-
-    // Save updated config
-    const savedPath = await saveScraperConfig(scraperConfig);
-    console.log(`✅ Config updated: ${savedPath}\n`);
-
     return;
   }
 
-  // Default behavior or --active/--queued flags: show attesters from scraper config
-  if (
-    !options.allActive &&
-    !options.allQueued &&
-    (!options.addresses || options.addresses.length === 0)
-  ) {
-    try {
-      const scraperConfig = await loadScraperConfig(options.network);
+  // Default behavior: automatically update cache if it exists, or show help if it doesn't
+  if (!cacheExists) {
+    console.log(
+      "No cached attesters found. This is normal if you haven't run this command before.",
+    );
+    console.log("\nTo populate the cache, use one of the following options:");
+    console.log("  --all-active    : Scrape all active attesters on-chain");
+    console.log("  --all-queued    : Scrape all queued attesters on-chain");
+    console.log(
+      "  --address <addr>: Scrape specific attester(s) (can specify multiple times)",
+    );
+    console.log("\nExamples:");
+    console.log("  aztec-butler scrape-attester-status --all-active");
+    console.log("  aztec-butler scrape-attester-status --all-queued");
+    console.log(
+      "  aztec-butler scrape-attester-status --address 0x123... --address 0x456...",
+    );
+    return;
+  }
 
-      if (scraperConfig.attesters.length === 0) {
-        console.log("No attesters found in scraper config.\n");
+  // Cache exists - automatically update it with current states
+  console.log("Loading cached attesters...");
+  console.log(`✅ Loaded ${cachedAttesters.length} attesters from cache\n`);
+
+  if (cachedAttesters.length === 0) {
+    console.log("No attesters found in cache.\n");
+    return;
+  }
+
+  console.log("Fetching on-chain data...");
+  const onChainActive = await ethClient.getAllActiveAttesters();
+  const onChainQueued = await ethClient.getAllQueuedAttesters();
+
+  // Fetch provider queue if provider ID is available
+  let onChainProviderQueue: string[] = [];
+  if (config.AZTEC_STAKING_PROVIDER_ID) {
+    const queueLength = await ethClient.getProviderQueueLength(
+      config.AZTEC_STAKING_PROVIDER_ID,
+    );
+    if (queueLength > 0n) {
+      onChainProviderQueue = await ethClient.getProviderQueue(
+        config.AZTEC_STAKING_PROVIDER_ID,
+      );
+    }
+  }
+
+  console.log(`✅ Found ${onChainActive.length} active attesters on-chain`);
+  console.log(`✅ Found ${onChainQueued.length} queued attesters on-chain`);
+  console.log(
+    `✅ Found ${onChainProviderQueue.length} attesters in provider queue\n`,
+  );
+
+  // Create lookup maps for fast checking
+  const activeAddressSet = new Set(onChainActive.map((a) => a.toLowerCase()));
+  const queuedAddressSet = new Set(onChainQueued.map((a) => a.toLowerCase()));
+  const providerQueueSet = new Set(
+    onChainProviderQueue.map((a) => a.toLowerCase()),
+  );
+
+  // Create map of on-chain views
+  const onChainViews = new Map<string, AttesterOnChainStatus>();
+  for (const activeAddress of onChainActive) {
+    const view = await ethClient.getAttesterView(activeAddress);
+    if (view) {
+      onChainViews.set(activeAddress.toLowerCase(), view.status);
+    }
+  }
+
+  console.log("Analyzing attester states...\n");
+
+  interface StateChange {
+    address: string;
+    oldState: string | undefined;
+    newState: string | undefined;
+  }
+
+  const changes: StateChange[] = [];
+  const stateBreakdown = new Map<string, number>();
+
+  // Iterate through all attesters in cache
+  for (const attester of cachedAttesters) {
+    const addressLower = attester.address.toLowerCase();
+    const isInQueue = queuedAddressSet.has(addressLower);
+    const isInProviderQueue = providerQueueSet.has(addressLower);
+    const onChainStatus = onChainViews.get(addressLower) ?? null;
+
+    const newState = determineNewState(
+      attester,
+      isInQueue,
+      isInProviderQueue,
+      onChainStatus,
+    );
+
+    if (newState !== attester.lastSeenState) {
+      changes.push({
+        address: attester.address,
+        oldState: attester.lastSeenState,
+        newState,
+      });
+      attester.lastSeenState = newState as any;
+    }
+
+    // Track state breakdown
+    const currentState = attester.lastSeenState || "NEW";
+    stateBreakdown.set(
+      currentState,
+      (stateBreakdown.get(currentState) || 0) + 1,
+    );
+  }
+
+  // Display state changes
+  if (changes.length > 0) {
+    console.log("State Changes:");
+    for (const change of changes) {
+      console.log(
+        `  ${change.address}: ${change.oldState || "undefined"} → ${change.newState || "undefined"}`,
+      );
+    }
+    console.log();
+  }
+
+  // Display summary
+  console.log("Summary:");
+  console.log(`  Total attesters: ${cachedAttesters.length}`);
+  console.log(`  State changes: ${changes.length}`);
+  console.log(`  No changes: ${cachedAttesters.length - changes.length}\n`);
+
+  console.log("State breakdown:");
+  for (const [state, count] of Array.from(stateBreakdown.entries()).sort()) {
+    console.log(`  ${state}: ${count}`);
+  }
+  console.log();
+
+  // Save updated cache (always save, even if no changes - updates timestamp)
+  const savedPath = await saveCachedAttesters(options.network, cachedAttesters);
+  console.log(`✅ Attester cache updated: ${savedPath}\n`);
+
+  // Determine which attesters to show based on flags
+  const anyFlagProvided =
+    options.active === true ||
+    options.queued === true ||
+    options.providerQueue === true;
+
+  const shouldShowActive = anyFlagProvided ? options.active === true : true;
+  const shouldShowQueued = anyFlagProvided ? options.queued === true : true;
+  const shouldShowProviderQueue = anyFlagProvided
+    ? options.providerQueue === true
+    : true;
+
+  // Display filtered results
+  if (shouldShowActive || shouldShowQueued || shouldShowProviderQueue) {
+    console.log("Fetching detailed attester information...\n");
+
+    const cachedAddressSet = new Set(
+      cachedAttesters.map((a) => a.address.toLowerCase()),
+    );
+
+    // Active attesters
+    if (shouldShowActive) {
+      const activeAttestersData: Array<{
+        address: string;
+        config: ScraperAttester;
+      }> = [];
+
+      for (const activeAddress of onChainActive) {
+        if (cachedAddressSet.has(activeAddress.toLowerCase())) {
+          const cachedAttester = cachedAttesters.find(
+            (a) => a.address.toLowerCase() === activeAddress.toLowerCase(),
+          )!;
+          activeAttestersData.push({
+            address: activeAddress,
+            config: cachedAttester,
+          });
+        }
+      }
+
+      if (activeAttestersData.length > 0) {
+        console.log(
+          `Active Attesters from Cache (${activeAttestersData.length} total):`,
+        );
+        for (const attesterData of activeAttestersData) {
+          await displayAttester(
+            attesterData.address,
+            true,
+            attesterData.config,
+          );
+        }
+        console.log();
+      } else {
+        console.log("No active attesters found in cache.\n");
+      }
+    }
+
+    // Queued attesters
+    if (shouldShowQueued) {
+      const queuedAttestersData: Array<{
+        address: string;
+        config: ScraperAttester;
+      }> = [];
+
+      for (const queuedAddress of onChainQueued) {
+        if (cachedAddressSet.has(queuedAddress.toLowerCase())) {
+          const cachedAttester = cachedAttesters.find(
+            (a) => a.address.toLowerCase() === queuedAddress.toLowerCase(),
+          )!;
+          queuedAttestersData.push({
+            address: queuedAddress,
+            config: cachedAttester,
+          });
+        }
+      }
+
+      if (queuedAttestersData.length > 0) {
+        console.log(
+          `Queued Attesters from Cache (${queuedAttestersData.length} total):`,
+        );
+        queuedAttestersData.forEach((attesterData, index) => {
+          console.log(`  [${index}] ${attesterData.address}`);
+          console.log(
+            `    Cached Coinbase: ${attesterData.config.coinbase || "Not set"}`,
+          );
+        });
+        console.log();
+      } else {
+        console.log("No queued attesters found in cache.\n");
+      }
+    }
+
+    // Provider queue attesters
+    if (shouldShowProviderQueue) {
+      if (!config.AZTEC_STAKING_PROVIDER_ID) {
+        console.error(
+          "❌ Error: AZTEC_STAKING_PROVIDER_ID is not set in config.",
+        );
+        console.error(
+          "   The --provider-queue flag requires AZTEC_STAKING_PROVIDER_ID in your base.env file.\n",
+        );
         return;
       }
 
-      // Determine which attesters to show based on flags
-      // If no flags are provided, show all categories (default)
-      // If one or more flags are provided, show only those categories
-      const anyFlagProvided =
-        options.active === true ||
-        options.queued === true ||
-        options.providerQueue === true;
-
-      const shouldShowActive = anyFlagProvided ? options.active === true : true;
-      const shouldShowQueued = anyFlagProvided ? options.queued === true : true;
-      const shouldShowProviderQueue = anyFlagProvided
-        ? options.providerQueue === true
-        : true;
-
-      console.log("Fetching attesters from scraper config...\n");
-
-      // Create a set of config attester addresses for fast lookup
-      const configAddressSet = new Set(
-        scraperConfig.attesters.map((a) => a.address.toLowerCase()),
-      );
-
-      // Fetch and filter active attesters if needed
-      let activeAttestersData: Array<{
+      const providerQueueAttestersData: Array<{
         address: string;
-        view: Awaited<ReturnType<typeof ethClient.getAttesterView>>;
-        config: (typeof scraperConfig.attesters)[0];
+        config: ScraperAttester;
       }> = [];
 
-      if (shouldShowActive) {
-        console.log("Checking which config attesters are active on-chain...\n");
-        const onChainActive = await ethClient.getAllActiveAttesters();
-
-        // Find config attesters that are in the active list
-        for (const activeAddress of onChainActive) {
-          if (configAddressSet.has(activeAddress.toLowerCase())) {
-            const configAttester = scraperConfig.attesters.find(
-              (a) => a.address.toLowerCase() === activeAddress.toLowerCase(),
-            )!;
-            const view = await ethClient.getAttesterView(activeAddress);
-            if (view) {
-              activeAttestersData.push({
-                address: activeAddress,
-                view,
-                config: configAttester,
-              });
-            }
-          }
-        }
-      }
-
-      // Fetch and filter queued attesters if needed
-      let queuedAttestersData: Array<{
-        address: string;
-        config: (typeof scraperConfig.attesters)[0];
-      }> = [];
-
-      if (shouldShowQueued) {
-        console.log("Checking which config attesters are queued on-chain...\n");
-        const onChainQueued = await ethClient.getAllQueuedAttesters();
-
-        // Find config attesters that are in the queue
-        for (const queuedAddress of onChainQueued) {
-          if (configAddressSet.has(queuedAddress.toLowerCase())) {
-            const configAttester = scraperConfig.attesters.find(
-              (a) => a.address.toLowerCase() === queuedAddress.toLowerCase(),
-            )!;
-            queuedAttestersData.push({
-              address: queuedAddress,
-              config: configAttester,
-            });
-          }
-        }
-      }
-
-      // Fetch and filter provider queue attesters if needed
-      let providerQueueAttestersData: Array<{
-        address: string;
-        config: (typeof scraperConfig.attesters)[0];
-      }> = [];
-
-      if (shouldShowProviderQueue) {
-        console.log(
-          "Checking which config attesters are in provider queue...\n",
-        );
-
-        // Check if stakingProviderAdmin is set
-        if (!scraperConfig.stakingProviderAdmin) {
-          console.error(
-            "❌ Error: stakingProviderAdmin is not set in scraper config.",
-          );
-          console.error(
-            "   The --provider-queue flag requires a valid stakingProviderAdmin.\n",
-          );
-          return;
-        }
-
-        // Get staking provider data
-        const stakingProviderData = await ethClient.getStakingProvider(
-          scraperConfig.stakingProviderAdmin,
-        );
-
-        if (!stakingProviderData) {
-          console.error(
-            `❌ Error: No staking provider found for admin address ${scraperConfig.stakingProviderAdmin}`,
-          );
-          console.error(
-            "   Please ensure the staking provider is registered on-chain.\n",
-          );
-          return;
-        }
-
-        const queueLength = await ethClient.getProviderQueueLength(
-          stakingProviderData.providerId,
-        );
-
-        if (queueLength > 0n) {
-          const providerQueue = await ethClient.getProviderQueue(
-            stakingProviderData.providerId,
-          );
-
-          // Find config attesters that are in the provider queue
-          for (const providerQueueAddress of providerQueue) {
-            if (configAddressSet.has(providerQueueAddress.toLowerCase())) {
-              const configAttester = scraperConfig.attesters.find(
-                (a) =>
-                  a.address.toLowerCase() ===
-                  providerQueueAddress.toLowerCase(),
-              )!;
-              providerQueueAttestersData.push({
-                address: providerQueueAddress,
-                config: configAttester,
-              });
-            }
-          }
-        }
-      }
-
-      // Display active attesters if requested
-      if (shouldShowActive) {
-        if (activeAttestersData.length > 0) {
-          console.log(
-            `Active Attesters from Config (${activeAttestersData.length} total):`,
-          );
-          for (const attesterData of activeAttestersData) {
-            await displayAttester(
-              attesterData.address,
-              true,
-              attesterData.config,
-            );
-          }
-          console.log();
-        } else {
-          console.log("No active attesters found in scraper config.\n");
-        }
-      }
-
-      // Display queued attesters if requested
-      if (shouldShowQueued) {
-        if (queuedAttestersData.length > 0) {
-          console.log(
-            `Queued Attesters from Config (${queuedAttestersData.length} total):`,
-          );
-          queuedAttestersData.forEach((attesterData, index) => {
-            console.log(`  [${index}] ${attesterData.address}`);
-            console.log(
-              `    Config Coinbase: ${attesterData.config.coinbase || "Not set"}`,
-            );
+      for (const providerQueueAddress of onChainProviderQueue) {
+        if (cachedAddressSet.has(providerQueueAddress.toLowerCase())) {
+          const cachedAttester = cachedAttesters.find(
+            (a) =>
+              a.address.toLowerCase() === providerQueueAddress.toLowerCase(),
+          )!;
+          providerQueueAttestersData.push({
+            address: providerQueueAddress,
+            config: cachedAttester,
           });
-          console.log();
-        } else {
-          console.log("No queued attesters found in scraper config.\n");
         }
       }
 
-      // Display provider queue attesters if requested
-      if (shouldShowProviderQueue) {
-        if (providerQueueAttestersData.length > 0) {
+      if (providerQueueAttestersData.length > 0) {
+        console.log(
+          `Provider Queue Attesters from Cache (${providerQueueAttestersData.length} total):`,
+        );
+        providerQueueAttestersData.forEach((attesterData, index) => {
+          console.log(`  [${index}] ${attesterData.address}`);
           console.log(
-            `Provider Queue Attesters from Config (${providerQueueAttestersData.length} total):`,
+            `    Cached Coinbase: ${attesterData.config.coinbase || "Not set"}`,
           );
-          providerQueueAttestersData.forEach((attesterData, index) => {
-            console.log(`  [${index}] ${attesterData.address}`);
-            console.log(
-              `    Config Coinbase: ${attesterData.config.coinbase || "Not set"}`,
-            );
-            console.log(
-              `    Last Seen State: ${attesterData.config.lastSeenState || "Not set"}`,
-            );
-          });
-          console.log();
-        } else {
-          console.log("No provider queue attesters found in scraper config.\n");
-        }
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("not found")) {
-        console.log(
-          "No scraper config found. Please specify one of the following options:",
-        );
-        console.log("  --all-active    : Scrape all active attesters on-chain");
-        console.log("  --all-queued    : Scrape all queued attesters on-chain");
-        console.log(
-          "  --address <addr>: Scrape specific attester(s) (can specify multiple times)",
-        );
-        console.log("\nOr generate a scraper config first:");
-        console.log(
-          `  npm run cli -- generate-scraper-config --network ${options.network}`,
-        );
-        console.log("\nExamples:");
-        console.log("  npm run cli -- scrape-attester-status");
-        console.log("  npm run cli -- scrape-attester-status --active");
-        console.log("  npm run cli -- scrape-attester-status --queued");
-        console.log("  npm run cli -- scrape-attester-status --provider-queue");
-        console.log("  npm run cli -- scrape-attester-status --all-active");
-        console.log("  npm run cli -- scrape-attester-status --all-queued");
-        console.log(
-          "  npm run cli -- scrape-attester-status --address 0x123... --address 0x456...",
-        );
-        console.log(
-          "  npm run cli -- scrape-attester-status --all-active --all-queued",
-        );
-        console.log("  npm run cli -- scrape-attester-status --update-config");
+          console.log(
+            `    Last Seen State: ${attesterData.config.lastSeenState || "Not set"}`,
+          );
+        });
+        console.log();
       } else {
-        throw error;
+        console.log("No provider queue attesters found in cache.\n");
       }
     }
   }

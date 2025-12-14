@@ -150,37 +150,6 @@ program
     });
   });
 
-// Command: generate-scraper-config
-program
-  .command("generate-scraper-config")
-  .description(
-    "Generate or update scraper configuration from production keyfile or existing config",
-  )
-  .option("--prod-keyfile <path>", "Production keyfile (public keys only)")
-  .option("--output <path>", "Output file path for scraper config")
-  .option("--provider-id <id>", "Staking provider ID", parseBigInt)
-  .action(
-    async (options: {
-      prodKeyfile?: string;
-      output?: string;
-      providerId?: bigint;
-    }) => {
-      const globalOpts = program.opts();
-      const config = await initConfig({ network: globalOpts.network });
-      const ethClient = await initEthClient(config);
-
-      await command.generateScraperConfig(ethClient, config, {
-        network: config.NETWORK,
-        l1ChainId: config.ETHEREUM_CHAIN_ID,
-        ...(options.output ? { outputPath: options.output } : {}),
-        ...(options.providerId !== undefined
-          ? { providerId: options.providerId }
-          : {}),
-        ...(options.prodKeyfile ? { prodKeyfile: options.prodKeyfile } : {}),
-      });
-    },
-  );
-
 // Command: scrape-coinbases
 program
   .command("scrape-coinbases")
@@ -222,23 +191,22 @@ program
 // Command: scrape-attester-status
 program
   .command("scrape-attester-status")
-  .description("Scrape attester on-chain status (defaults to config attesters)")
-  .option("--active", "Check active attesters from config", false)
-  .option("--queued", "Check queued attesters from config", false)
+  .description("Scrape attester on-chain status and automatically update cache")
+  .option("--active", "Show only active attesters from cache", false)
+  .option("--queued", "Show only queued attesters from cache", false)
   .option(
     "--provider-queue",
-    "Check provider queue attesters from config",
+    "Show only provider queue attesters from cache",
     false,
   )
-  .option("--all-active", "Check all active attesters on-chain", false)
-  .option("--all-queued", "Check all queued attesters on-chain", false)
+  .option("--all-active", "Scrape all active attesters on-chain", false)
+  .option("--all-queued", "Scrape all queued attesters on-chain", false)
   .option(
     "--address <address>",
     "Specific attester address to check (can be repeated)",
     collect,
     [],
   )
-  .option("--update-config", "Update scraper config with current states", false)
   .action(
     async (options: {
       active: boolean;
@@ -247,20 +215,18 @@ program
       allActive: boolean;
       allQueued: boolean;
       address: string[];
-      updateConfig: boolean;
     }) => {
       const globalOpts = program.opts();
       const config = await initConfig({ network: globalOpts.network });
       const ethClient = await initEthClient(config);
 
-      await command.scrapeAttesterStatus(ethClient, {
+      await command.scrapeAttesterStatus(ethClient, config, {
         allActive: options.allActive,
         allQueued: options.allQueued,
         active: options.active,
         queued: options.queued,
         providerQueue: options.providerQueue,
         network: config.NETWORK,
-        updateConfig: options.updateConfig,
         ...(options.address.length > 0 ? { addresses: options.address } : {}),
       });
     },

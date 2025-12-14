@@ -1045,6 +1045,79 @@ export const initAttesterStatesFromScraperConfig = (
 };
 
 /**
+ * Initialize attester states from cached attesters
+ * Called on server startup with the new cache system
+ */
+export const initAttesterStatesFromCache = (
+  network: string,
+  cachedAttesters: Array<{
+    address: string;
+    coinbase?: string;
+    lastSeenState?: string;
+  }>,
+): void => {
+  console.log(`[State/${network}] Initializing attester states from cache...`);
+
+  const state = getNetworkState(network);
+
+  // Initialize each attester's state
+  for (const attester of cachedAttesters) {
+    const dbStateEntry = state.attesterStates.get(attester.address);
+    const cacheState = attester.lastSeenState as AttesterState | undefined;
+
+    if (dbStateEntry && cacheState) {
+      // Both DB and cache have state - use whichever is higher priority
+      const dbPriority = getStatePriority(dbStateEntry.state);
+      const cachePriority = getStatePriority(cacheState);
+
+      if (cachePriority > dbPriority) {
+        console.log(
+          `[State/${network}] Attester ${attester.address}: Using cache state "${cacheState}" ` +
+            `(priority ${cachePriority}) over DB state "${dbStateEntry.state}" (priority ${dbPriority})`,
+        );
+        updateAttesterState(network, attester.address, cacheState);
+      } else {
+        console.log(
+          `[State/${network}] Attester ${attester.address}: Keeping DB state "${dbStateEntry.state}" ` +
+            `(priority ${dbPriority}) over cache state "${cacheState}" (priority ${cachePriority})`,
+        );
+      }
+    } else if (cacheState) {
+      // Only cache has state - use it
+      console.log(
+        `[State/${network}] Attester ${attester.address}: Initializing from cache state "${cacheState}"`,
+      );
+      updateAttesterState(network, attester.address, cacheState);
+    } else if (!dbStateEntry) {
+      // No DB state and no cache state - initialize to NEW
+      updateAttesterState(network, attester.address, AttesterState.NEW);
+    }
+    // else: DB state exists and no cache state - do nothing (keep existing DB state)
+  }
+
+  console.log(
+    `[State/${network}] Attester states initialized: ${state.attesterStates.size} attesters`,
+  );
+};
+
+/**
+ * Update publishers list in state
+ * Called on server startup to populate the publisher addresses being monitored
+ */
+export const updatePublishersState = (
+  network: string,
+  publishers: string[],
+): void => {
+  console.log(
+    `[State/${network}] Updating publishers state with ${publishers.length} publisher(s)`,
+  );
+
+  // Note: Publisher data is updated by the PublisherScraper
+  // This function just logs the initialization
+  // The actual publisher tracking happens in the scraper and state updates
+};
+
+/**
  * Store scraper config in state for use by metrics and other modules
  */
 export const updateScraperConfigState = (
