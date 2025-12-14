@@ -55,11 +55,6 @@ aztec-butler get-add-keys-to-staking-provider-calldata \
 aztec-butler get-add-keys-to-staking-provider-calldata \
   --keystore-paths prod-testnet-keyfile.json \
   --network mainnet
-
-# Update scraper config after generating calldata
-aztec-butler get-add-keys-to-staking-provider-calldata \
-  --keystore-paths prod-testnet-keyfile.json \
-  --update-scraper-config
 ```
 
 ### 2. Review Output
@@ -174,7 +169,7 @@ Verify:
 - [ ] All new validators appear in provider queue on-chain
 - [ ] Transaction confirmed on block explorer
 - [ ] Private keys still securely stored in GCP/Vault
-- [ ] Scraper config updated (if using `--update-scraper-config`)
+- [ ] Attester cache updated (optional)
 
 ### 7. Cleanup
 
@@ -204,7 +199,7 @@ mv public-new-private-keys.json archive/$(date +%Y-%m-%d)/
 - [ ] Confirmed transaction on block explorer
 - [ ] Private keys securely stored (GCP/Vault)
 - [ ] Private key files deleted from dev machine
-- [ ] Scraper config updated
+- [ ] Attester cache updated (optional)
 - [ ] Team notified of successful deployment
 
 ## Timeline
@@ -314,7 +309,7 @@ Before considering deployment complete:
 
 ### Monitoring
 
-- [ ] ✅ Scraper config includes new validators
+- [ ] ✅ Attester cache includes new validators (optional)
 - [ ] ✅ Monitoring dashboards updated
 - [ ] ✅ Alert thresholds configured for new validators
 - [ ] ✅ On-call team notified

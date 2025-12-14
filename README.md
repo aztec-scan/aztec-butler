@@ -24,12 +24,6 @@ To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/
 
 ### Roadmap
 
-1. separate scrape-config-files
-   - config i.e. off-chain-data like URLs
-   - cached state scraped from operator-machine
-     - publishers
-     - attester-keys
-     - coinbases
 1. EntryQueue time stats - to simplify when to update coinbases
    - Time per attester entry
    - Total attesters in queue

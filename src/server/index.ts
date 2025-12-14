@@ -50,13 +50,13 @@ async function initializeNetwork(
   console.log(`\n--- Initializing network: ${network} ---`);
 
   // Initialize state for this network
-  initNetworkState(network);
+  await initNetworkState(network);
 
   // Load cached attesters (optional)
   let cachedAttesters: Array<{
     address: string;
-    coinbase?: string;
-    lastSeenState?: string;
+    coinbase?: string | undefined;
+    lastSeenState?: string | undefined;
   }> = [];
   try {
     const cache = await loadCachedAttesters(network);
@@ -96,16 +96,12 @@ async function initializeNetwork(
 
   // Register staking provider scraper (30 second interval)
   console.log(`[${network}] Registering staking provider scraper...`);
-  const stakingProviderScraper = new StakingProviderScraper(
-    network,
-    config,
-    scraperConfig,
-  );
+  const stakingProviderScraper = new StakingProviderScraper(network, config);
   scraperManager.register(stakingProviderScraper, 30_000);
 
   // Register publisher scraper (30 second interval)
   console.log(`[${network}] Registering publisher scraper...`);
-  const publisherScraper = new PublisherScraper(network, config, scraperConfig);
+  const publisherScraper = new PublisherScraper(network, config, publishers);
   scraperManager.register(publisherScraper, 30_000);
 
   // Register staking rewards scraper (default hourly interval)

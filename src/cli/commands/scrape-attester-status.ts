@@ -156,8 +156,20 @@ const command = async (
     cachedAttesters = cache.attesters;
     cacheExists = true;
   } catch (error) {
-    // Cache doesn't exist yet, which is okay
-    cacheExists = false;
+    // Cache doesn't exist yet - try to load from old scraper config as fallback
+    try {
+      const { loadScraperConfig } = await import(
+        "../../core/utils/scraperConfigOperations.js"
+      );
+      const scraperConfig = await loadScraperConfig(options.network);
+      cachedAttesters = scraperConfig.attesters;
+      cacheExists = true;
+      console.log(
+        "⚠️  Loaded attesters from old scraper config - will migrate to new cache format\n",
+      );
+    } catch (scraperConfigError) {
+      cacheExists = false;
+    }
   }
 
   // --all-active: Show all active attesters from on-chain and update cache

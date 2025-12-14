@@ -124,9 +124,7 @@ const command = async (
     console.log(`  Updated mappings: ${result.updatedMappings}`);
   }
   console.log(`  Missing mappings: ${missingAttesters.length}`);
-  console.log(
-    `\nYou can now use this cache when generating scraper config with generate-scraper-config command.`,
-  );
+  console.log(`\nCoinbase cache has been updated.`);
 };
 
 export default command;

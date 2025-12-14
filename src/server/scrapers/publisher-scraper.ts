@@ -2,14 +2,13 @@ import { AbstractScraper } from "./base-scraper.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import { AztecClient } from "../../core/components/AztecClient.js";
 import { EthereumClient } from "../../core/components/EthereumClient.js";
-import { updatePublisherData } from "../state/index.js";
+import { updatePublisherData, getAttesterStates } from "../state/index.js";
 import { parseEther } from "viem";
 import type { HexString, PublisherDataMap } from "../../types/index.js";
-import type { ScraperConfig } from "../../types/scraper-config.js";
 
 /**
  * Scraper for publisher ETH balances and required top-ups
- * Uses scraper config with public addresses only
+ * Uses config and state instead of scraper config
  */
 export class PublisherScraper extends AbstractScraper {
   readonly name = "publisher";
@@ -18,15 +17,17 @@ export class PublisherScraper extends AbstractScraper {
   private ethClient: EthereumClient | null = null;
   private lastScrapedData: PublisherDataMap | null = null;
   private recommendedEthPerAttester: bigint = 0n;
+  private publishers: string[] = [];
 
   constructor(
     network: string,
     private config: ButlerConfig,
-    private scraperConfig: ScraperConfig,
+    publishers: string[],
   ) {
     super();
     this.network = network;
     this.recommendedEthPerAttester = parseEther(config.MIN_ETH_PER_ATTESTER);
+    this.publishers = publishers;
   }
 
   async init(): Promise<void> {
@@ -36,10 +37,10 @@ export class PublisherScraper extends AbstractScraper {
     });
     const nodeInfo = await aztecClient.getNodeInfo();
 
-    // Validate chain ID matches scraper config
-    if (this.scraperConfig.l1ChainId !== nodeInfo.l1ChainId) {
+    // Validate chain ID matches config
+    if (this.config.ETHEREUM_CHAIN_ID !== nodeInfo.l1ChainId) {
       throw new Error(
-        `Chain ID mismatch: scraper config has ${this.scraperConfig.l1ChainId}, ` +
+        `Chain ID mismatch: config has ${this.config.ETHEREUM_CHAIN_ID}, ` +
           `but node reports ${nodeInfo.l1ChainId}`,
       );
     }
@@ -54,12 +55,19 @@ export class PublisherScraper extends AbstractScraper {
       rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
     });
 
-    console.log(`Publisher scraper initialized`);
+    console.log(
+      `[${this.name}] Publisher scraper initialized with ${this.publishers.length} publisher(s)`,
+    );
   }
 
   async scrape(): Promise<void> {
     if (!this.ethClient) {
-      console.error("[publisher] Ethereum client not initialized");
+      console.error(`[${this.name}] Ethereum client not initialized`);
+      return;
+    }
+
+    if (this.publishers.length === 0) {
+      // No publishers configured, skip
       return;
     }
 
@@ -67,15 +75,16 @@ export class PublisherScraper extends AbstractScraper {
       const publisherDataMap: PublisherDataMap = new Map();
       const client = this.ethClient.getPublicClient();
 
-      // Use publishers from scraper config directly
-      const uniquePublishers = new Set<string>(this.scraperConfig.publishers);
+      // Use unique publishers
+      const uniquePublishers = new Set<string>(this.publishers);
 
       // Calculate attesters per publisher for top-up calculation
-      // Since we don't know which attester uses which publisher (varies by server),
-      // we assume even distribution for balance monitoring purposes
-      const attesterCount = this.scraperConfig.attesters.length;
-      const publisherCount = this.scraperConfig.publishers.length;
-      const attestersPerPublisher = Math.ceil(attesterCount / publisherCount);
+      // Get attester count from state
+      const attesterStates = getAttesterStates(this.network);
+      const attesterCount = attesterStates.size;
+      const publisherCount = uniquePublishers.size;
+      const attestersPerPublisher =
+        publisherCount > 0 ? Math.ceil(attesterCount / publisherCount) : 0;
 
       // Scrape balances for each unique publisher
       for (const publisherAddress of uniquePublishers) {

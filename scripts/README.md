@@ -103,7 +103,6 @@ The number of output files is automatically determined by the number of keys in 
    - Version number auto-increments from highest existing version
    - Merges all validators (existing + new)
    - Round-robin assigns publishers to ALL validators
-6. **Updates scraper config** with new attesters in "NEW" state
 
 **Multiple Servers:**
 
@@ -119,7 +118,6 @@ When available_publishers contains multiple server keys:
 **Output:**
 
 - One or more `*_<serverId>_v<N>.json` files with merged validators and assigned publishers
-- Updated scraper config at `~/.local/share/aztec-butler/{network}-scrape-config.json`
 
 **Use case:** Phase 3 of key flow - prepare final deployment files with publisher assignments
 
@@ -156,33 +154,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 4. Generate Scraper Configuration
-
-```bash
-# Using admin address from config (queries chain)
-./scripts/generate-scraper-config.sh
-
-# Using provider ID directly (faster, skips query)
-./scripts/generate-scraper-config.sh --provider-id 123
-```
-
-**What it does:**
-
-- Finds all keystores in `./keystores/`
-- Extracts attester addresses (publishers derived from attesters)
-- Queries staking provider from chain (or uses provided ID)
-- Checks for cached coinbase mappings
-- Generates scraper configuration
-
-**Output:** `~/.local/share/aztec-butler/{network}-scrape-config.json`
-
-**Use case:** Create initial scraper config or regenerate after adding new keystores
-
-**Pro tip:** Use `--provider-id` to skip the RPC query for faster execution
-
----
-
-### 5. Scrape Coinbase Addresses
+### 4. Scrape Coinbase Addresses
 
 ```bash
 # Incremental scrape (default - fast, uses cache)
@@ -217,9 +189,9 @@ npm run cli -- generate-scraper-config --provider-id 123
 - Merges with existing cache if available
 - Validates for coinbase conflicts
 
-**Output:** `~/.local/share/aztec-butler/{network}-mapped-coinbases.json`
+**Output:** `~/.local/share/aztec-butler/{network}-cached-coinbases.json`
 
-**Use case:** Discover coinbase addresses for attesters (required for accurate scraper config)
+**Use case:** Discover coinbase addresses for attesters (for monitoring and analysis)
 
 **Performance:**
 
@@ -233,39 +205,19 @@ npm run cli -- generate-scraper-config --provider-id 123
 ### 6. Scrape Attester Status
 
 ```bash
-# Show all attesters from scraper config (default)
-./scripts/scrape-attester-status.sh
-
-# Show only active attesters from scraper config
-./scripts/scrape-attester-status.sh --active
-
-# Show only queued attesters from scraper config
-./scripts/scrape-attester-status.sh --queued
-
-# Show both active and queued from scraper config (same as default)
-./scripts/scrape-attester-status.sh --active --queued
-
-# Show ALL active attesters on-chain (not limited to config)
-./scripts/scrape-attester-status.sh --all-active
-
-# Show ALL queued attesters on-chain (not limited to config)
-./scripts/scrape-attester-status.sh --all-queued
-
-# Show ALL attesters on-chain
-./scripts/scrape-attester-status.sh --all-active --all-queued
-
 # Check specific attester(s)
 ./scripts/scrape-attester-status.sh --address 0x123...
 ./scripts/scrape-attester-status.sh --address 0x123... --address 0x456...
+
+# Output to file (creates/updates cache)
+./scripts/scrape-attester-status.sh --output-file testnet-cached-attesters.json
 ```
 
 **Flags:**
 
-- `--active` - Show only active attesters from scraper config
-- `--queued` - Show only queued attesters from scraper config
-- `--all-active` - Show ALL active attesters on-chain (ignores config)
-- `--all-queued` - Show ALL queued attesters on-chain (ignores config)
 - `--address` - Check specific attester address(es)
+- `--output-file` - Save results to file (auto-updates cache)
+- `--network` - Specify network (testnet/mainnet)
 
 **What it does:**
 
@@ -273,21 +225,17 @@ npm run cli -- generate-scraper-config --provider-id 123
 - Shows attester state: NONE, VALIDATING, ZOMBIE, or EXITING
 - Displays effective balance for each attester
 - Shows exit information (if attester is exiting)
-- Default behavior: shows attesters from scraper-config
-- With `--all-*` flags: shows all on-chain attesters regardless of config
+- Can output to file for server monitoring
 
 **Output:**
 
-- Active attesters: address, status, balance, exit info
-- Queued attesters: position in queue and address
-- Config attesters: includes coinbase and publisher from config
-- Specific attesters: full details including withdrawer and exit status
+- Console: Attester details including address, status, balance, exit info
+- File (if --output-file): Cached attesters JSON for server monitoring
 
 **Use cases:**
 
-- Monitor your attesters' state transitions (default mode)
-- Check if your attesters are active vs queued
-- See all active/queued attesters on the network
+- Check specific attester status
+- Update attester cache for monitoring
 - Debug attester issues
 - Validate attester is in expected state before operations
 
@@ -300,38 +248,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 7. Add Keys to Staking Provider
-
-```bash
-# Without updating scraper config
-./scripts/add-keys.sh keystores/examples/key1.json
-
-# With automatic scraper config update
-./scripts/add-keys.sh keystores/production/testnet/key1.json --update-config
-```
-
-**Arguments:**
-
-- `<keystore-file>` - Path to keystore JSON file (required)
-- `--update-config` - Also update scraper config with new keys (optional)
-
-**What it does:**
-
-- Loads the specified keystore file
-- Checks for duplicate attesters in provider queue (prevents failures)
-- Generates BLS registration data using GSE contract
-- Creates `addKeysToProvider` calldata
-- Optionally updates scraper config with new attesters
-
-**Output:** Calldata JSON printed to console + attester addresses
-
-**Use case:** Generate calldata to add new validators to your staking provider
-
-**Important:** Copy the generated calldata and propose it to your Safe multisig manually.
-
----
-
-### 8. Check Publisher ETH Balances
+### 7. Check Publisher ETH Balances
 
 ```bash
 ./scripts/check-publisher-eth.sh
@@ -354,7 +271,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ---
 
-### 9. Start Server
+### 8. Start Server
 
 ```bash
 ./scripts/start-server.sh
@@ -363,22 +280,23 @@ npm run cli -- generate-scraper-config --provider-id 123
 **What it does:**
 
 - Starts Aztec Butler in server (scraper) mode
-- Loads scraper configuration from `~/.local/share/aztec-butler/{network}-scrape-config.json`
+- Loads cached attesters and publishers if available
 - Starts Prometheus metrics exporter on port 9464
 - Runs periodic scrapers for on-chain data
 
 **Prerequisites:**
 
-- Scraper config must be generated first (use `generate-scraper-config.sh`)
 - Environment config at `~/.config/aztec-butler/{network}-base.env`
+- Optional: Cached attesters at `~/.local/share/aztec-butler/{network}-cached-attesters.json`
+- Optional: Available publishers at `~/.local/share/aztec-butler/{network}-available-publishers.json`
 
-**Use case:** Run monitoring server with public-keys-only configuration
+**Use case:** Run monitoring server
 
-**Note:** Server uses scraper config only (no access to private keys). Press Ctrl+C to stop.
+**Note:** Server uses cached data and config only (no access to private keys). Press Ctrl+C to stop.
 
 ---
 
-### 10. Get Metrics
+### 9. Get Metrics
 
 ```bash
 # Using default token and URL
@@ -421,7 +339,7 @@ npm run cli -- generate-scraper-config --provider-id 123
 # - Restart nodes
 
 # Phase 5: Register keys to provider
-./scripts/add-keys.sh prod-testnet-keyfile.json --update-config
+./scripts/add-keys.sh prod-testnet-keyfile.json
 # Copy calldata and propose to Safe multisig
 
 # Cleanup: Delete private keys file after successful GCP storage
@@ -452,15 +370,13 @@ npm run cli -- generate-scraper-config --provider-id 123
 ```bash
 # 1. Add your keystores to ./keystores/
 # 2. Configure your .env file
-# 3. Generate scraper config
-./scripts/generate-scraper-config.sh
 
-# 4. Check publisher balances
+# 3. Check publisher balances
 ./scripts/check-publisher-eth.sh
 
-# 5. If balances are low, use the funding calldata to top up
+# 4. If balances are low, use the funding calldata to top up
 
-# 6. Start monitoring server (optional - for metrics/monitoring)
+# 5. Start monitoring server (optional - for metrics/monitoring)
 ./scripts/start-server.sh
 ```
 
@@ -483,8 +399,8 @@ npm run cli -- generate-scraper-config --provider-id 123
 
 ```bash
 # 1. Add new keystore file to ./keystores/
-# 2. Generate calldata and update scraper config
-./scripts/add-keys.sh keystores/production/testnet/key2.json --update-config
+# 2. Generate calldata
+./scripts/add-keys.sh keystores/production/testnet/key2.json
 
 # 3. Copy calldata and propose to Safe multisig
 # 4. After transaction succeeds, verify with:
@@ -500,32 +416,16 @@ npm run cli -- generate-scraper-config --provider-id 123
 # Re-scrape coinbases if attesters changed (use provider ID for speed)
 PROVIDER_ID=123  # Your provider ID
 ./scripts/scrape-coinbases.sh --provider-id $PROVIDER_ID
-./scripts/generate-scraper-config.sh --provider-id $PROVIDER_ID
 ```
 
 ### Monitoring Attester Status
 
 ```bash
-# Check your attesters from config (default)
-./scripts/scrape-attester-status.sh
-
-# Check only your active attesters
-./scripts/scrape-attester-status.sh --active
-
-# Check only your queued attesters
-./scripts/scrape-attester-status.sh --queued
-
-# Check all active attesters on the network
-./scripts/scrape-attester-status.sh --all-active
-
-# Check if attesters are stuck in queue
-./scripts/scrape-attester-status.sh --all-queued
-
-# Check specific attester after adding keys
+# Check specific attester
 ./scripts/scrape-attester-status.sh --address 0x1234567890abcdef1234567890abcdef12345678
 
-# Full overview of all on-chain attesters
-./scripts/scrape-attester-status.sh --all-active --all-queued
+# Update attester cache for server monitoring
+./scripts/scrape-attester-status.sh --output-file testnet-cached-attesters.json
 ```
 
 ---
@@ -558,15 +458,11 @@ npm run cli -- prepare-deployment \
 # Get provider ID
 npm run cli -- get-provider-id 0x1234567890abcdef1234567890abcdef12345678
 
-# Generate scraper config
-npm run cli -- generate-scraper-config
-npm run cli -- generate-scraper-config --provider-id 123
-
-# Add keys with update
-npm run cli -- add-keys keystores/examples/key1.json --update-config
+# Add keys
+npm run cli -- get-add-keys-to-staking-provider-calldata --keystore-paths keystores/examples/key1.json
 
 # Check balances
-npm run cli -- check-publisher-eth
+npm run cli -- get-publisher-eth
 
 # Scrape coinbases (incremental)
 npm run cli -- scrape-coinbases
@@ -578,24 +474,12 @@ npm run cli -- scrape-coinbases --full
 # Scrape from specific block
 npm run cli -- scrape-coinbases --from-block 12345678
 
-# Scrape attester status (default - shows your config attesters)
-npm run cli -- scrape-attester-status
-
-# Scrape attester status (only active from config)
-npm run cli -- scrape-attester-status --active
-
-# Scrape attester status (only queued from config)
-npm run cli -- scrape-attester-status --queued
-
-# Scrape attester status (all active on-chain)
-npm run cli -- scrape-attester-status --all-active
-
-# Scrape attester status (all queued on-chain)
-npm run cli -- scrape-attester-status --all-queued
-
 # Scrape attester status (specific addresses)
 npm run cli -- scrape-attester-status --address 0x123...
 npm run cli -- scrape-attester-status --address 0x123... --address 0x456...
+
+# Scrape attester status and save to file
+npm run cli -- scrape-attester-status --output-file testnet-cached-attesters.json
 ```
 
 ---
@@ -633,8 +517,9 @@ Optional env variables for Safe integration:
 
 All generated files are saved to `~/.local/share/aztec-butler/`:
 
-- `{network}-scrape-config.json` - Scraper configuration
-- `{network}-mapped-coinbases.json` - Coinbase cache
+- `{network}-cached-attesters.json` - Cached attester data
+- `{network}-cached-coinbases.json` - Coinbase cache
+- `{network}-available-publishers.json` - Available publisher addresses (for server mode)
 
 ---
 

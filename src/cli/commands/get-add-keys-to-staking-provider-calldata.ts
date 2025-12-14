@@ -203,7 +203,7 @@ const command = async (
         `\n⚠️  Could not update scraper config: ${error instanceof Error ? error.message : String(error)}`,
       );
       console.warn(
-        "   Run generate-scraper-config to create a new config with all keystores.",
+        "   You may need to manually update your cached attesters file.",
       );
     }
   }

@@ -1,21 +1,21 @@
 #!/bin/bash
 
 # Start Aztec Butler in server (scraper) mode
-# Requires scraper config to be generated first via generate-scraper-config.sh
 #
 # Usage: 
 #   ./scripts/start-server.sh                    # Run all networks
 #   ./scripts/start-server.sh --network mainnet  # Run specific network
 #
 # Prerequisites:
-# - Scraper config exists: ~/.local/share/aztec-butler/{network}-scrape-config.json
 # - Environment config: ~/.config/aztec-butler/{network}-base.env
+# - Optional: Cached attesters: ~/.local/share/aztec-butler/{network}-cached-attesters.json
+# - Optional: Available publishers: ~/.local/share/aztec-butler/{network}-available-publishers.json
 #
 # The server will:
-# - Load scraper config (public keys only)
+# - Load cached attesters and publishers if available (will be populated on first scrape if missing)
 # - Start Prometheus metrics exporter on port 9464
 # - Run periodic scrapers for on-chain data
-# - Track attester states and publisher balances (publishers derived from attesters)
+# - Track attester states and publisher balances
 
 set -e
 

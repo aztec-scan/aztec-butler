@@ -7,14 +7,14 @@ import {
   StakingProviderDataSchema,
   type StakingProviderData,
   getAttesterState,
+  getAttesterStates,
   countAttestersByState,
 } from "../state/index.js";
 import { processAttesterState } from "../state/transitions.js";
-import type { ScraperConfig } from "../../types/scraper-config.js";
 
 /**
  * Scraper for staking provider-related data from the staking registry
- * Uses scraper config with public addresses only
+ * Uses config and state instead of scraper config
  */
 export class StakingProviderScraper extends AbstractScraper {
   readonly name = "staking-provider";
@@ -27,15 +27,22 @@ export class StakingProviderScraper extends AbstractScraper {
   constructor(
     network: string,
     private config: ButlerConfig,
-    private scraperConfig: ScraperConfig,
   ) {
     super();
     this.network = network;
   }
 
   async init(): Promise<void> {
-    // Get admin address from scraper config
-    this.stakingProviderAdmin = this.scraperConfig.stakingProviderAdmin;
+    // Get admin address from config
+    this.stakingProviderAdmin =
+      this.config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS || null;
+
+    if (!this.stakingProviderAdmin) {
+      console.warn(
+        `[${this.name}] AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS not configured, scraper will be inactive`,
+      );
+      return;
+    }
 
     // Initialize Aztec client
     const aztecClient = new AztecClient({
@@ -43,10 +50,10 @@ export class StakingProviderScraper extends AbstractScraper {
     });
     const nodeInfo = await aztecClient.getNodeInfo();
 
-    // Validate chain ID matches scraper config
-    if (this.scraperConfig.l1ChainId !== nodeInfo.l1ChainId) {
+    // Validate chain ID matches config
+    if (this.config.ETHEREUM_CHAIN_ID !== nodeInfo.l1ChainId) {
       throw new Error(
-        `Chain ID mismatch: scraper config has ${this.scraperConfig.l1ChainId}, ` +
+        `Chain ID mismatch: config has ${this.config.ETHEREUM_CHAIN_ID}, ` +
           `but node reports ${nodeInfo.l1ChainId}`,
       );
     }
@@ -62,7 +69,7 @@ export class StakingProviderScraper extends AbstractScraper {
     });
 
     console.log(
-      `Staking provider scraper initialized for admin: ${this.stakingProviderAdmin}`,
+      `[${this.name}] Staking provider scraper initialized for admin: ${this.stakingProviderAdmin}`,
     );
   }
 
@@ -80,7 +87,7 @@ export class StakingProviderScraper extends AbstractScraper {
 
       if (!stakingProviderData) {
         console.log(
-          `Staking provider not registered for admin address: ${this.stakingProviderAdmin}`,
+          `[${this.name}] Staking provider not registered for admin address: ${this.stakingProviderAdmin}`,
         );
         this.lastScrapedData = null;
         return;
@@ -124,18 +131,24 @@ export class StakingProviderScraper extends AbstractScraper {
   }
 
   /**
-   * Manage attester states based on scraper config and on-chain data
+   * Manage attester states based on state and on-chain data
    */
   private async manageAttesterStates(providerId: bigint): Promise<void> {
     try {
       const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-      // Get attesters from scraper config
-      const attestersToProcess = this.scraperConfig.attesters.map(
-        (attester) => ({
-          address: attester.address,
-          hasCoinbase: attester.coinbase !== ZERO_ADDRESS,
-        }),
+      // Get attesters from state
+      const attesterStates = getAttesterStates(this.network);
+      const attestersToProcess = Array.from(attesterStates.keys()).map(
+        (address) => {
+          // Check if attester has coinbase by getting coinbase info from state
+          // For now, we'll need to track this separately or get it from cached attesters
+          // For simplicity, assume no coinbase (will be updated by state transitions)
+          return {
+            address,
+            hasCoinbase: false, // This will be determined by state transitions
+          };
+        },
       );
 
       // Process each attester

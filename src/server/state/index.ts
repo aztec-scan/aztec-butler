@@ -1052,8 +1052,8 @@ export const initAttesterStatesFromCache = (
   network: string,
   cachedAttesters: Array<{
     address: string;
-    coinbase?: string;
-    lastSeenState?: string;
+    coinbase?: string | undefined;
+    lastSeenState?: string | undefined;
   }>,
 ): void => {
   console.log(`[State/${network}] Initializing attester states from cache...`);

@@ -35,9 +35,6 @@ const command = async (
   console.log(
     `   npm run cli -- scrape-coinbases --provider-id ${providerData.providerId}`,
   );
-  console.log(
-    `   npm run cli -- generate-scraper-config --provider-id ${providerData.providerId}`,
-  );
 };
 
 export default command;

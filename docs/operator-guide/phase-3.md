@@ -1,6 +1,6 @@
 # Phase 3: Prepare Deployment
 
-Create deployment-ready keyfiles with publisher assignments and update monitoring configuration.
+Create deployment-ready keyfiles with publisher assignments.
 
 ## Overview
 
@@ -16,8 +16,7 @@ flowchart TD
     E -->|Zero Coinbase| H[Error: Invalid coinbase]
     E -->|No ETH| I[Error: Publisher unfunded]
 
-    F --> J[prod-testnet-keyfile.json.new]
-    F --> K[Scraper Config Updated]
+    F --> J[prod-testnet-keyfile_server1_v1.json]
 
     style A fill:#fff4e1
     style B fill:#fff4e1
@@ -25,7 +24,6 @@ flowchart TD
     style D fill:#4CAF50
     style F fill:#2196F3
     style J fill:#2196F3
-    style K fill:#2196F3
 ```
 
 **Location:** Dev machine  
@@ -102,21 +100,17 @@ diff <(jq '.validators[].publisher' prod-testnet-keyfile_server1_v1.json | sort)
 # Should show differences
 ```
 
-### 3. Review Scraper Config
+### 3. Update Attester Cache (Optional)
 
-The command automatically updates the scraper config:
+After deployment, you can update the cached attesters file for monitoring:
 
 ```bash
-# Check config location (shown in command output)
-cat ~/.local/share/aztec-butler/<network>-scrape-config.json | jq '.'
+aztec-butler scrape-attester-status \
+  --network testnet \
+  --output-file testnet-cached-attesters.json
 ```
 
-**Verify:**
-
-- All attesters present (old + new)
-- Publishers array contains unique addresses
-- New attesters have `lastSeenState: "NEW"`
-- Version is `"1.1"`
+This creates/updates `~/.local/share/aztec-butler/testnet-cached-attesters.json` which the server uses for monitoring.
 
 ## Command Validations
 
@@ -154,8 +148,6 @@ The command performs these checks automatically:
 - [ ] Verified validator count matches expected (old + new)
 - [ ] Verified all validators have publisher addresses assigned
 - [ ] Verified publishers have sufficient ETH balance
-- [ ] Scraper config updated successfully
-- [ ] Reviewed scraper config contains all attesters
 
 ## File Locations After Phase 3
 
@@ -169,10 +161,6 @@ Dev Machine:
   ├── new-private-keys.json                    # Phase 1 (can delete after secure storage)
   ├── public-new-private-keys.json             # Phase 2
   └── prod-testnet-keyfile_server1_v1.json     # ✅ New - Ready to deploy
-
-Scraper Config:
-  ~/.local/share/aztec-butler/
-  └── <network>-scrape-config.json             # ✅ Updated
 
 Validator Node:
   /path/to/aztec/

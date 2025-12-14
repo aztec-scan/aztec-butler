@@ -101,9 +101,9 @@ Throughout the process, you'll work with these file types:
 | Private keys        | `.json`   | Private keys, public keys      | 🔴 **CRITICAL** |
 | Public keys         | `.json`   | Public keys only               | 🟡 Sensitive    |
 | Production keyfile  | `.json`   | Public keys + web3signer URL   | 🟢 Safe         |
-| Deployment files    | `.new`    | Ready-to-deploy keyfile        | 🟢 Safe         |
+| Deployment files    | `.json`   | Ready-to-deploy keyfile        | 🟢 Safe         |
 | Publisher addresses | `.json`   | Publisher addresses per server | 🟢 Safe         |
-| Scraper config      | `.json`   | Monitoring configuration       | 🟢 Safe         |
+| Cached attesters    | `.json`   | Cached attester data           | 🟢 Safe         |
 
 ## Getting Help
 
