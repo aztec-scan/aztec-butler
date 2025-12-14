@@ -1,6 +1,6 @@
 # Aztec Butler
 
-An tool for helping out with managing multiple aztec nodes with an opinionated workflow and set-up.
+A tool for helping out with managing multiple aztec nodes with an opinionated workflow and set-up.
 
 ## Requirements
 
