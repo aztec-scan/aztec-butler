@@ -1,10 +1,12 @@
 /**
  * Attester state transition logic
  *
- * This module handles all state transitions for attesters based on:
- * - Current state
- * - Coinbase presence in DataDir
- * - Provider queue membership (derived from metrics/state)
+ * This module handles all state transitions for attesters based PURELY on on-chain state:
+ * - Provider queue membership (from staking contract)
+ * - Rollup entry queue membership (from rollup contract)
+ * - On-chain attester status (NONE, VALIDATING, ZOMBIE, EXITING)
+ *
+ * Coinbase configuration is tracked separately and does NOT affect state transitions.
  */
 
 import {
@@ -34,89 +36,152 @@ export function isAttesterInProviderQueue(
   }
 
   // Check if attester is in the queue array
-  return stakingProviderData.queue.includes(attesterAddress);
+  return stakingProviderData.queue.some(
+    (addr) => addr.toLowerCase() === attesterAddress.toLowerCase(),
+  );
 }
 
 /**
- * Handle state transitions for an attester based on current state and conditions
+ * Handle state transitions for an attester based on on-chain state ONLY
+ *
+ * State machine (purely on-chain):
+ * NEW → IN_STAKING_PROVIDER_QUEUE (when added to provider queue)
+ * IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE (when moved to rollup entry queue)
+ * ROLLUP_ENTRY_QUEUE → ACTIVE (when status becomes VALIDATING)
+ * ACTIVE → NO_LONGER_ACTIVE (when status becomes ZOMBIE or EXITING)
  *
  * @param network - The network name
  * @param attesterAddress - The attester's Ethereum address
  * @param currentState - Current state of the attester
- * @param hasCoinbase - Whether the attester has a coinbase address
  */
 export async function handleStateTransitions(
   network: string,
   attesterAddress: string,
   currentState: AttesterState,
-  hasCoinbase: boolean,
 ): Promise<void> {
+  const attesterState = getAttesterState(network, attesterAddress);
+  const onChainView = attesterState?.onChainView;
+  const isInProviderQueue = isAttesterInProviderQueue(network, attesterAddress);
+
   switch (currentState) {
-    case AttesterState.ACTIVE:
-      // If active attester loses coinbase, this is a fatal error
-      if (!hasCoinbase) {
-        console.error(
-          `[${network}] FATAL: Active attester without coinbase detected! ${attesterAddress}`,
+    case AttesterState.NEW:
+      // Check if attester joined the provider queue
+      if (isInProviderQueue) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} joined provider queue (NEW → IN_STAKING_PROVIDER_QUEUE)`,
+        );
+        updateAttesterState(
+          network,
+          attesterAddress,
+          AttesterState.IN_STAKING_PROVIDER_QUEUE,
         );
       }
-      break;
-
-    case AttesterState.NEW:
-      if (hasCoinbase) {
-        // Attester got a coinbase while in NEW state
+      // Check if attester went directly to rollup entry queue (has onChainView but not VALIDATING)
+      else if (onChainView && onChainView.status === AttesterOnChainStatus.NONE) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} entered rollup entry queue directly (NEW → ROLLUP_ENTRY_QUEUE)`,
+        );
         updateAttesterState(
           network,
           attesterAddress,
           AttesterState.ROLLUP_ENTRY_QUEUE,
         );
-      } else {
-        // Check if attester is in provider queue
-        const isInProviderQueue = isAttesterInProviderQueue(
-          network,
-          attesterAddress,
+      }
+      // Check if attester became active directly
+      else if (
+        onChainView &&
+        onChainView.status === AttesterOnChainStatus.VALIDATING
+      ) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} became active directly (NEW → ACTIVE)`,
         );
-        if (isInProviderQueue) {
+        updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
+      }
+      break;
+
+    case AttesterState.IN_STAKING_PROVIDER_QUEUE:
+      // Check if attester left provider queue
+      if (!isInProviderQueue) {
+        // Check if they're now in rollup entry queue or became active
+        if (
+          onChainView &&
+          onChainView.status === AttesterOnChainStatus.VALIDATING
+        ) {
+          console.log(
+            `[${network}] Attester ${attesterAddress} left provider queue and became active (IN_STAKING_PROVIDER_QUEUE → ACTIVE)`,
+          );
+          updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
+        } else if (
+          onChainView &&
+          onChainView.status === AttesterOnChainStatus.NONE
+        ) {
+          console.log(
+            `[${network}] Attester ${attesterAddress} left provider queue, now in rollup entry queue (IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE)`,
+          );
           updateAttesterState(
             network,
             attesterAddress,
-            AttesterState.IN_STAKING_PROVIDER_QUEUE,
+            AttesterState.ROLLUP_ENTRY_QUEUE,
+          );
+        } else {
+          // No on-chain view but not in provider queue anymore
+          // This could mean they left the queue without being registered yet
+          // Wait for rollup scraper to update onChainView
+          console.log(
+            `[${network}] Attester ${attesterAddress} left provider queue, waiting for on-chain view update`,
           );
         }
       }
       break;
 
-    case AttesterState.IN_STAKING_PROVIDER_QUEUE:
-      // Check if attester is still in queue
-      const stillInQueue = isAttesterInProviderQueue(network, attesterAddress);
-      if (hasCoinbase) {
-        // Got coinbase while in queue - moves to rollup entry queue
+    case AttesterState.ROLLUP_ENTRY_QUEUE:
+      // Check if attester became active
+      if (
+        onChainView &&
+        onChainView.status === AttesterOnChainStatus.VALIDATING
+      ) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} became active (ROLLUP_ENTRY_QUEUE → ACTIVE)`,
+        );
+        updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
+      }
+      // Check if attester lost on-chain view (shouldn't happen but handle it)
+      else if (!onChainView || onChainView.status !== AttesterOnChainStatus.NONE) {
+        console.warn(
+          `[${network}] Attester ${attesterAddress} in ROLLUP_ENTRY_QUEUE has unexpected on-chain state`,
+        );
+      }
+      break;
+
+    case AttesterState.ACTIVE:
+      // Check if attester is no longer active
+      if (
+        onChainView &&
+        (onChainView.status === AttesterOnChainStatus.ZOMBIE ||
+          onChainView.status === AttesterOnChainStatus.EXITING)
+      ) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} is no longer active (status: ${AttesterOnChainStatus[onChainView.status]}) (ACTIVE → NO_LONGER_ACTIVE)`,
+        );
         updateAttesterState(
           network,
           attesterAddress,
-          AttesterState.ROLLUP_ENTRY_QUEUE,
+          AttesterState.NO_LONGER_ACTIVE,
         );
       }
-      // If no longer in queue and no coinbase, stay in this state
-      // Entry queue scraper will track when coinbase is needed
+      // Warn if active attester lost validation status
+      else if (
+        !onChainView ||
+        onChainView.status !== AttesterOnChainStatus.VALIDATING
+      ) {
+        console.error(
+          `[${network}] CRITICAL: Active attester ${attesterAddress} lost VALIDATING status on-chain!`,
+        );
+      }
       break;
 
-    case AttesterState.ROLLUP_ENTRY_QUEUE:
-      // Check if attester is now active on-chain
-      const attesterState = getAttesterState(network, attesterAddress);
-      if (
-        attesterState?.onChainView &&
-        attesterState.onChainView.status !== AttesterOnChainStatus.NONE
-      ) {
-        // Attester is now on-chain and active
-        updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
-      }
-      // If coinbase removed, log warning but stay in this state
-      // This shouldn't happen in normal operation
-      if (!hasCoinbase) {
-        console.warn(
-          `[${network}] Warning: Attester ${attesterAddress} in ROLLUP_ENTRY_QUEUE lost its coinbase`,
-        );
-      }
+    case AttesterState.NO_LONGER_ACTIVE:
+      // Terminal state - no transitions
       break;
 
     default:
@@ -128,34 +193,51 @@ export async function handleStateTransitions(
 
 /**
  * Process a single attester and handle its state transitions
+ * State transitions are based PURELY on on-chain data.
  *
  * @param network - The network name
  * @param attesterAddress - The attester's Ethereum address
- * @param hasCoinbase - Whether the attester has a coinbase
  * @param currentState - Current state entry (or undefined if new)
  */
 export async function processAttesterState(
   network: string,
   attesterAddress: string,
-  hasCoinbase: boolean,
   currentState: AttesterState | undefined,
 ): Promise<void> {
-  // If no current state, initialize the attester
+  const attesterState = getAttesterState(network, attesterAddress);
+  const onChainView = attesterState?.onChainView;
+  const isInProviderQueue = isAttesterInProviderQueue(network, attesterAddress);
+
+  // If no current state, initialize the attester based on on-chain state
   if (!currentState) {
-    // New attester discovered
-    // Initialize as ROLLUP_ENTRY_QUEUE if it has coinbase, otherwise NEW
-    const initialState = hasCoinbase
-      ? AttesterState.ROLLUP_ENTRY_QUEUE
-      : AttesterState.NEW;
-    updateAttesterState(network, attesterAddress, initialState);
+    // Determine initial state from on-chain data
+    if (onChainView && onChainView.status === AttesterOnChainStatus.VALIDATING) {
+      // Already active on-chain
+      updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
+    } else if (
+      onChainView &&
+      onChainView.status === AttesterOnChainStatus.NONE
+    ) {
+      // In rollup entry queue (has on-chain view but not yet validating)
+      updateAttesterState(
+        network,
+        attesterAddress,
+        AttesterState.ROLLUP_ENTRY_QUEUE,
+      );
+    } else if (isInProviderQueue) {
+      // In provider queue
+      updateAttesterState(
+        network,
+        attesterAddress,
+        AttesterState.IN_STAKING_PROVIDER_QUEUE,
+      );
+    } else {
+      // Not in any queue or on-chain
+      updateAttesterState(network, attesterAddress, AttesterState.NEW);
+    }
     return;
   }
 
   // Handle transitions for existing attesters
-  await handleStateTransitions(
-    network,
-    attesterAddress,
-    currentState,
-    hasCoinbase,
-  );
+  await handleStateTransitions(network, attesterAddress, currentState);
 }

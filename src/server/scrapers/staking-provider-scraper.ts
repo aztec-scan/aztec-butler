@@ -132,34 +132,22 @@ export class StakingProviderScraper extends AbstractScraper {
   }
 
   /**
-   * Manage attester states based on state and on-chain data
+   * Manage attester states based on on-chain data ONLY
+   * State transitions are purely derived from:
+   * - Provider queue membership
+   * - Rollup contract state (via onChainView)
    */
   private async manageAttesterStates(providerId: bigint): Promise<void> {
     try {
-      const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-
       // Get attesters from state
       const attesterStates = getAttesterStates(this.network);
-      const coinbaseInfo = getAttesterCoinbaseInfo(this.network);
-
-      const attestersToProcess = Array.from(attesterStates.keys()).map(
-        (address) => {
-          // Check if attester has coinbase by looking up in coinbase info
-          const hasCoinbase = coinbaseInfo.has(address);
-          return {
-            address,
-            hasCoinbase,
-          };
-        },
-      );
 
       // Process each attester
-      for (const { address, hasCoinbase } of attestersToProcess) {
+      for (const address of attesterStates.keys()) {
         const currentState = getAttesterState(this.network, address);
         await processAttesterState(
           this.network,
           address,
-          hasCoinbase,
           currentState?.state,
         );
       }
