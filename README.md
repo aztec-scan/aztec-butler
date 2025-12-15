@@ -125,13 +125,6 @@ The monitoring server automatically discovers and merges all keys files matching
 
 To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/README.md). The daemon runs the butler in server mode, providing Prometheus metrics and automated monitoring for your Aztec nodes.
 
-## TODO
-
-1. double-check: there should be one command checking no duplicates of attester addresses across all positions on-chain
-   - stakingProviderRegistryQueue
-   - rollup entryQueue
-   - rollup active validators
-
 ### Roadmap
 
 1. replace need for aztecmonitor

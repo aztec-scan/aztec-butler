@@ -222,6 +222,73 @@ const command = async (
     `✅ Found ${onChainProviderQueue.length} attesters in provider queue\n`,
   );
 
+  // Check for duplicate attesters across all three on-chain positions
+  console.log("Checking for duplicate attesters across all positions...");
+  const allOnChainAddresses = [
+    ...onChainActive,
+    ...onChainQueued,
+    ...onChainProviderQueue,
+  ];
+
+  const addressOccurrences = new Map<string, string[]>();
+
+  // Track which positions each address appears in
+  for (const addr of onChainActive) {
+    const addrLower = addr.toLowerCase();
+    if (!addressOccurrences.has(addrLower)) {
+      addressOccurrences.set(addrLower, []);
+    }
+    addressOccurrences.get(addrLower)!.push("active validators");
+  }
+
+  for (const addr of onChainQueued) {
+    const addrLower = addr.toLowerCase();
+    if (!addressOccurrences.has(addrLower)) {
+      addressOccurrences.set(addrLower, []);
+    }
+    addressOccurrences.get(addrLower)!.push("rollup entry queue");
+  }
+
+  for (const addr of onChainProviderQueue) {
+    const addrLower = addr.toLowerCase();
+    if (!addressOccurrences.has(addrLower)) {
+      addressOccurrences.set(addrLower, []);
+    }
+    addressOccurrences.get(addrLower)!.push("staking provider queue");
+  }
+
+  // Find duplicates (addresses appearing in more than one position)
+  const duplicates = Array.from(addressOccurrences.entries()).filter(
+    ([, positions]) => positions.length > 1,
+  );
+
+  if (duplicates.length > 0) {
+    console.error(
+      "\n❌ FATAL: Found duplicate attester addresses across on-chain positions!\n",
+    );
+    console.error(
+      "The following attesters appear in multiple positions (this should never happen):\n",
+    );
+
+    for (const [address, positions] of duplicates) {
+      console.error(`  ${address}`);
+      console.error(`    Found in: ${positions.join(", ")}`);
+    }
+
+    console.error(
+      "\nThis indicates a critical system integrity issue. Attesters should only exist in ONE position at a time.",
+    );
+    console.error(
+      "Expected flow: staking provider queue -> rollup entry queue -> active validators",
+    );
+
+    throw new Error(
+      `Found ${duplicates.length} duplicate attester(s) across on-chain positions. Aborting.`,
+    );
+  }
+
+  console.log("✅ No duplicate attesters found across positions\n");
+
   // Create lookup maps for fast checking
   const activeAddressSet = new Set(onChainActive.map((a) => a.toLowerCase()));
   const queuedAddressSet = new Set(onChainQueued.map((a) => a.toLowerCase()));
