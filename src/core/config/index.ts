@@ -148,6 +148,10 @@ function buildConfig(network: string) {
       .string()
       .optional()
       .parse(process.env.GOOGLE_SHEETS_RANGE || "DailyTotal!A1"),
+    GCP_PROJECT_ID: z
+      .string()
+      .optional()
+      .parse(process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT),
     GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z
       .string()
       .optional()
