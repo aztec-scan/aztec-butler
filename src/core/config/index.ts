@@ -152,10 +152,6 @@ function buildConfig(network: string) {
       .string()
       .optional()
       .parse(process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT),
-    GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z
-      .string()
-      .optional()
-      .parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH),
     GOOGLE_SHEETS_COINBASES_RANGE: z
       .string()
       .optional()

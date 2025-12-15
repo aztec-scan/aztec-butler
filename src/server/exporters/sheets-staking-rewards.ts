@@ -1,75 +1,22 @@
-import fs from "fs/promises";
-import crypto from "node:crypto";
 import {
   getAttesterCoinbaseInfo,
   getStakingRewardsHistory,
 } from "../state/index.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-
-type ServiceAccount = {
-  client_email: string;
-  private_key: string;
-};
+import { GoogleAuth } from "google-auth-library";
 
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
-const base64Url = (input: Buffer | string) =>
-  Buffer.from(input)
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
+const sheetsAuthClient = new GoogleAuth({ scopes: [SHEETS_SCOPE] });
 
-const createJwt = (serviceAccount: ServiceAccount, scope: string): string => {
-  const iat = Math.floor(Date.now() / 1000);
-  const exp = iat + 3600;
-
-  const header = {
-    alg: "RS256",
-    typ: "JWT",
-  };
-
-  const claims = {
-    iss: serviceAccount.client_email,
-    scope,
-    aud: TOKEN_URL,
-    exp,
-    iat,
-  };
-
-  const unsigned = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claims))}`;
-  const signer = crypto.createSign("RSA-SHA256");
-  signer.update(unsigned);
-  signer.end();
-  const signature = signer.sign(serviceAccount.private_key);
-  return `${unsigned}.${base64Url(signature)}`;
-};
-
-const getAccessToken = async (serviceAccount: ServiceAccount) => {
-  const assertion = createJwt(serviceAccount, SHEETS_SCOPE);
-  const params = new URLSearchParams({
-    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-    assertion,
-  });
-
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: params.toString(),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `Failed to obtain Google access token (${res.status}): ${text}`,
-    );
+const getAccessToken = async () => {
+  const client = await sheetsAuthClient.getClient();
+  const accessToken = await client.getAccessToken();
+  if (!accessToken || !accessToken.token) {
+    throw new Error("Failed to obtain Google access token via ADC");
   }
 
-  const data = (await res.json()) as { access_token: string };
-  return data.access_token;
+  return accessToken.token;
 };
 
 const formatDailyRows = (network: string) => {
@@ -384,28 +331,13 @@ export const exportStakingRewardsDailyToSheets = async (
   network: string,
   config: ButlerConfig,
 ): Promise<void> => {
-  if (
-    !config.GOOGLE_SHEETS_SPREADSHEET_ID ||
-    !config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH
-  ) {
+  if (!config.GOOGLE_SHEETS_SPREADSHEET_ID) {
     return;
   }
 
   const range = config.GOOGLE_SHEETS_RANGE || "Daily!A1";
 
-  const keyRaw = await fs.readFile(
-    config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
-    "utf-8",
-  );
-  const keyJson = JSON.parse(keyRaw) as ServiceAccount;
-
-  if (!keyJson.client_email || !keyJson.private_key) {
-    throw new Error(
-      "Invalid service account key: missing client_email or private_key",
-    );
-  }
-
-  const token = await getAccessToken(keyJson);
+  const token = await getAccessToken();
   const rows = formatDailyRows(network);
 
   const res = await fetch(
@@ -438,29 +370,14 @@ export const exportStakingRewardsDailyPerCoinbaseToSheets = async (
   network: string,
   config: ButlerConfig,
 ): Promise<void> => {
-  if (
-    !config.GOOGLE_SHEETS_SPREADSHEET_ID ||
-    !config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH
-  ) {
+  if (!config.GOOGLE_SHEETS_SPREADSHEET_ID) {
     return;
   }
 
   const range =
     config.GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE || "DailyPerCoinbase!A1";
 
-  const keyRaw = await fs.readFile(
-    config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
-    "utf-8",
-  );
-  const keyJson = JSON.parse(keyRaw) as ServiceAccount;
-
-  if (!keyJson.client_email || !keyJson.private_key) {
-    throw new Error(
-      "Invalid service account key: missing client_email or private_key",
-    );
-  }
-
-  const token = await getAccessToken(keyJson);
+  const token = await getAccessToken();
   const rows = formatDailyPerCoinbaseRows(network);
 
   const res = await fetch(
@@ -495,28 +412,13 @@ export const exportStakingRewardsDailyEarnedToSheets = async (
   network: string,
   config: ButlerConfig,
 ): Promise<void> => {
-  if (
-    !config.GOOGLE_SHEETS_SPREADSHEET_ID ||
-    !config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH
-  ) {
+  if (!config.GOOGLE_SHEETS_SPREADSHEET_ID) {
     return;
   }
 
   const range = config.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1";
 
-  const keyRaw = await fs.readFile(
-    config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
-    "utf-8",
-  );
-  const keyJson = JSON.parse(keyRaw) as ServiceAccount;
-
-  if (!keyJson.client_email || !keyJson.private_key) {
-    throw new Error(
-      "Invalid service account key: missing client_email or private_key",
-    );
-  }
-
-  const token = await getAccessToken(keyJson);
+  const token = await getAccessToken();
   const rows = formatDailyEarnedRows(network);
 
   const res = await fetch(
@@ -551,28 +453,13 @@ export const exportCoinbasesToSheets = async (
   network: string,
   config: ButlerConfig,
 ): Promise<void> => {
-  if (
-    !config.GOOGLE_SHEETS_SPREADSHEET_ID ||
-    !config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH
-  ) {
+  if (!config.GOOGLE_SHEETS_SPREADSHEET_ID) {
     return;
   }
 
   const range = config.GOOGLE_SHEETS_COINBASES_RANGE || "Coinbases!A1";
 
-  const keyRaw = await fs.readFile(
-    config.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
-    "utf-8",
-  );
-  const keyJson = JSON.parse(keyRaw) as ServiceAccount;
-
-  if (!keyJson.client_email || !keyJson.private_key) {
-    throw new Error(
-      "Invalid service account key: missing client_email or private_key",
-    );
-  }
-
-  const token = await getAccessToken(keyJson);
+  const token = await getAccessToken();
   const rows = formatCoinbaseRows(network);
 
   const res = await fetch(
