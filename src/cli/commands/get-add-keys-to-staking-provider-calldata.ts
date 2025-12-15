@@ -8,16 +8,12 @@ import {
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { STAKING_REGISTRY_ABI, HexString } from "../../types/index.js";
 import { ButlerConfig } from "../../core/config/index.js";
-import {
-  loadScraperConfig,
-  saveScraperConfig,
-} from "../../core/utils/scraperConfigOperations.js";
 import { extractAttesterCoinbasePairs } from "../../core/utils/keystoreOperations.js";
 
 interface AddKeysOptions {
   keystorePath: string;
   network: string;
-  updateConfig?: boolean;
+  // updateConfig option removed - deprecated with scraper config format
 }
 
 const get0xString = (bn: bigint): HexString => {
@@ -157,56 +153,6 @@ const command = async (
   attesterAddresses.forEach((attester: string, index: number) => {
     console.log(`${index + 1}. ${attester}`);
   });
-
-  // 6. Update scraper config if requested
-  if (options.updateConfig) {
-    console.log("\n=== Updating Scraper Config ===\n");
-
-    try {
-      const scraperConfig = await loadScraperConfig(options.network);
-      console.log("✅ Loaded existing scraper config");
-
-      // Extract new attesters from keystore
-      const { extractAttesterDataWithPublisher } = await import(
-        "../../core/utils/keystoreOperations.js"
-      );
-      const attesterData = extractAttesterDataWithPublisher([keystore]);
-
-      // Add new attesters (avoid duplicates)
-      const existingAttesterAddrs = new Set(
-        scraperConfig.attesters.map((a) => a.address.toLowerCase()),
-      );
-      const newAttesters = attesterData
-        .filter(
-          (data) => !existingAttesterAddrs.has(data.address.toLowerCase()),
-        )
-        .map((data) => ({
-          address: data.address,
-          coinbase:
-            data.coinbase || "0x0000000000000000000000000000000000000000",
-          publisher: data.publisher,
-        }));
-
-      if (newAttesters.length === 0) {
-        console.log("⚠️  All attesters already in config");
-      } else {
-        scraperConfig.attesters.push(...newAttesters);
-        scraperConfig.lastUpdated = new Date().toISOString();
-
-        await saveScraperConfig(scraperConfig);
-        console.log(`✅ Updated scraper config:`);
-        console.log(`   Added ${newAttesters.length} new attester(s)`);
-        console.log(`   Total publishers: ${scraperConfig.publishers.length}`);
-      }
-    } catch (error) {
-      console.warn(
-        `\n⚠️  Could not update scraper config: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      console.warn(
-        "   You may need to manually update your cached attesters file.",
-      );
-    }
-  }
 
   console.warn(
     "\n⚠️  Note: Automatic multisig proposal is not yet implemented.",

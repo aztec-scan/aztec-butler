@@ -6,6 +6,7 @@
 
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
+import { loadAttestersForCLI } from "../utils/loadAttesters.js";
 
 interface GetQueueStatsOptions {
   network: string;
@@ -138,32 +139,36 @@ const command = async (
     if (stakingProviderData) {
       providerId = stakingProviderData.providerId;
 
-      // Load cached attesters to find YOUR attesters in the entry queue
-      const { loadCachedAttesters } = await import(
-        "../../core/utils/cachedAttestersOperations.js"
-      );
-      let cachedAttesters;
+      // Load attesters from keys files
+      let attestersData;
       try {
-        cachedAttesters = await loadCachedAttesters(options.network);
+        attestersData = await loadAttestersForCLI(options.network);
       } catch (error) {
         console.warn(
-          "Warning: Could not load cached attesters. Run scrape-attester-status first.",
+          "Warning: Could not load attesters from keys files:",
+          error instanceof Error ? error.message : String(error),
         );
-        cachedAttesters = null;
+        attestersData = null;
       }
 
       // Find YOUR attesters in global entry queue with positions
-      const providerAttestersInQueue = cachedAttesters
-        ? cachedAttesters.attesters
-          .map((attester) => ({
-            address: attester.address,
-            position: globalQueue.findIndex(
-              (addr) => addr.toLowerCase() === attester.address.toLowerCase(),
-            ),
-            coinbase: attester.coinbase,
-          }))
-          .filter((item) => item.position !== -1) // Only those actually in entry queue
-          .sort((a, b) => a.position - b.position)
+      const providerAttestersInQueue = attestersData
+        ? attestersData.addresses
+            .map((address) => {
+              const position = globalQueue.findIndex(
+                (addr) => addr.toLowerCase() === address.toLowerCase(),
+              );
+              const coinbaseInfo = attestersData.attestersWithCoinbase.find(
+                (a) => a.address.toLowerCase() === address.toLowerCase(),
+              );
+              return {
+                address,
+                position,
+                coinbase: coinbaseInfo?.coinbase,
+              };
+            })
+            .filter((item) => item.position !== -1) // Only those actually in entry queue
+            .sort((a, b) => a.position - b.position)
         : [];
 
       providerQueueCount = providerAttestersInQueue.length;
@@ -183,7 +188,7 @@ const command = async (
           currentTimestamp +
           Math.floor(lastAttester.position * timePerAttester);
 
-        // Find next attester missing coinbase (now using coinbase from cached data)
+        // Find next attester missing coinbase (now using coinbase from keys files)
         const nextMissingCoinbase = providerAttestersInQueue.find(
           (item) => !item.coinbase,
         );
@@ -219,9 +224,9 @@ const command = async (
         nextArrivalTimestamp: providerNextAttesterArrivalTimestamp,
         nextMissingCoinbase: providerNextMissingCoinbaseArrivalTimestamp
           ? {
-            timestamp: providerNextMissingCoinbaseArrivalTimestamp,
-            address: providerNextMissingCoinbaseAddress,
-          }
+              timestamp: providerNextMissingCoinbaseArrivalTimestamp,
+              address: providerNextMissingCoinbaseAddress,
+            }
           : null,
         lastArrivalTimestamp: providerLastAttesterArrivalTimestamp,
       },

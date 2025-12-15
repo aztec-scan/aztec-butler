@@ -4,13 +4,12 @@ import {
   CoinbaseScraperError,
 } from "../../core/components/CoinbaseScraper.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-import { loadScraperConfig } from "../../core/utils/scraperConfigOperations.js";
+import { loadAndMergeKeysFiles } from "../../core/utils/keysFileOperations.js";
 
 interface ScrapeCoinbasesOptions {
   network: string;
   fromBlock?: bigint;
   fullRescrape?: boolean;
-  configPath?: string;
   outputPath?: string;
 }
 
@@ -27,36 +26,51 @@ const command = async (
 ) => {
   console.log("\n=== Scraping Coinbase Addresses ===\n");
 
-  // 1. Load scraper config
-  console.log("Loading scraper configuration...");
-  const scraperConfig = await loadScraperConfig(
+  // Load keys files to get attester addresses
+  console.log("Loading keys files...");
+  const { attesters, filesLoaded } = await loadAndMergeKeysFiles(
     options.network,
-    options.configPath,
   );
 
-  console.log(`✅ Loaded config for network: ${scraperConfig.network}`);
-  console.log(`✅ Provider ID: ${scraperConfig.stakingProviderId}`);
+  if (filesLoaded.length === 0) {
+    throw new Error(
+      `No keys files found for network "${options.network}".\n` +
+        `Expected pattern: ${options.network}-keys-*.json in data directory.`,
+    );
+  }
+
   console.log(
-    `✅ Found ${scraperConfig.attesters.length} attester(s) in config`,
+    `✅ Found ${attesters.length} attester(s) from ${filesLoaded.length} file(s)`,
   );
 
-  // Extract attester addresses from config
-  const attesterAddresses = scraperConfig.attesters.map((a) => a.address);
+  // Get provider ID from config (must be set in .env)
+  if (!config.STAKING_PROVIDER_ID) {
+    throw new Error(
+      `STAKING_PROVIDER_ID not configured for network "${options.network}".\n` +
+        `Add STAKING_PROVIDER_ID to your ${options.network}-base.env file.`,
+    );
+  }
 
-  // 2. Determine scrape mode and start block
+  const providerId = BigInt(config.STAKING_PROVIDER_ID);
+  console.log(`✅ Provider ID: ${providerId}`);
+
+  // Extract attester addresses
+  const attesterAddresses = attesters.map((a) => a.address);
+
+  // Determine scrape mode and start block
   const defaultStartBlock = DEFAULT_START_BLOCKS[options.network] ?? 0n;
 
-  // 3. Initialize CoinbaseScraper
+  // Initialize CoinbaseScraper
   const scraper = new CoinbaseScraper({
     network: options.network,
     ethClient,
-    providerId: scraperConfig.stakingProviderId,
+    providerId,
     attesterAddresses,
     defaultStartBlock,
     ...(options.outputPath ? { outputPath: options.outputPath } : {}),
   });
 
-  // 4. Perform scraping based on mode
+  // Perform scraping based on mode
   let result;
 
   try {
@@ -94,7 +108,7 @@ const command = async (
     throw error;
   }
 
-  // 5. Check for missing attesters
+  // Check for missing attesters
   const mappedAttesters = new Set(
     result.mappings.map((m) => m.attesterAddress.toLowerCase()),
   );
@@ -109,10 +123,10 @@ const command = async (
     missingAttesters.forEach((addr) => console.log(`  - ${addr}`));
   }
 
-  // 6. Print summary
+  // Print summary
   console.log(`\nSummary:`);
   console.log(`  Network: ${options.network}`);
-  console.log(`  Provider ID: ${scraperConfig.stakingProviderId}`);
+  console.log(`  Provider ID: ${providerId}`);
   console.log(`  Start block: ${result.startBlock}`);
   console.log(`  End block: ${result.endBlock}`);
   console.log(`  Blocks scraped: ${result.endBlock - result.startBlock + 1n}`);

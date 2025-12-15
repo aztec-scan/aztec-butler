@@ -90,6 +90,10 @@ function buildConfig(network: string) {
       .bigint()
       .optional()
       .parse(process.env.AZTEC_STAKING_PROVIDER_ID),
+    STAKING_PROVIDER_ID: z
+      .string()
+      .optional()
+      .parse(process.env.STAKING_PROVIDER_ID),
     AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS: z
       .string()
       .startsWith("0x")

@@ -1,13 +1,7 @@
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-import {
-  AttesterOnChainStatus,
-  type ScraperAttester,
-} from "../../types/index.js";
-import {
-  loadCachedAttesters,
-  saveCachedAttesters,
-} from "../../core/utils/cachedAttestersOperations.js";
+import { AttesterOnChainStatus } from "../../types/index.js";
+import { loadAttestersForCLI } from "../utils/loadAttesters.js";
 
 interface ScrapeAttesterStatusOptions {
   allActive?: boolean;
@@ -23,13 +17,12 @@ interface ScrapeAttesterStatusOptions {
  * Determine the new state for an attester based on on-chain status
  */
 function determineNewState(
-  attester: ScraperAttester,
+  hasCoinbase: boolean,
   isInQueue: boolean,
   isInProviderQueue: boolean,
   onChainStatus: AttesterOnChainStatus | null,
+  existingState?: string,
 ): string | undefined {
-  const hasCoinbase = attester.coinbase != null;
-
   // Check provider queue FIRST (before entry queue)
   // This is because attesters move from provider queue -> entry queue -> active
   if (isInProviderQueue) {
@@ -65,10 +58,10 @@ function determineNewState(
       return "NO_LONGER_ACTIVE";
     }
     // For attesters without coinbase, don't change state
-    return attester.lastSeenState; // Keep existing state
+    return existingState; // Keep existing state
   }
 
-  return attester.lastSeenState; // Default: keep existing
+  return existingState; // Default: keep existing
 }
 
 const command = async (
@@ -113,11 +106,7 @@ const command = async (
     return date.toISOString();
   };
 
-  const displayAttester = async (
-    address: string,
-    showConfigInfo: boolean = false,
-    configAttester?: ScraperAttester,
-  ) => {
+  const displayAttester = async (address: string, coinbase?: string) => {
     console.log(`\nAttester: ${address}`);
     const view = await ethClient.getAttesterView(address);
 
@@ -130,8 +119,8 @@ const command = async (
     console.log(`  Balance: ${formatBalance(view.effectiveBalance)}`);
     console.log(`  Withdrawer: ${view.config.withdrawer}`);
 
-    if (showConfigInfo && configAttester) {
-      console.log(`  Cached Coinbase: ${configAttester.coinbase || "Not set"}`);
+    if (coinbase) {
+      console.log(`  Coinbase: ${coinbase}`);
     }
 
     if (view.exit.exists) {
@@ -148,31 +137,7 @@ const command = async (
     return view;
   };
 
-  // Load cached attesters (if exists) - will be used/updated if available
-  let cachedAttesters: ScraperAttester[] = [];
-  let cacheExists = false;
-  try {
-    const cache = await loadCachedAttesters(options.network);
-    cachedAttesters = cache.attesters;
-    cacheExists = true;
-  } catch (error) {
-    // Cache doesn't exist yet - try to load from old scraper config as fallback
-    try {
-      const { loadScraperConfig } = await import(
-        "../../core/utils/scraperConfigOperations.js"
-      );
-      const scraperConfig = await loadScraperConfig(options.network);
-      cachedAttesters = scraperConfig.attesters;
-      cacheExists = true;
-      console.log(
-        "⚠️  Loaded attesters from old scraper config - will migrate to new cache format\n",
-      );
-    } catch (scraperConfigError) {
-      cacheExists = false;
-    }
-  }
-
-  // --all-active: Show all active attesters from on-chain and update cache
+  // --all-active: Show all active attesters from on-chain
   if (options.allActive) {
     console.log("Fetching all active attesters from on-chain...\n");
     const activeAttesters = await ethClient.getAllActiveAttesters();
@@ -182,28 +147,9 @@ const command = async (
       console.log("  No active attesters found\n");
     } else {
       for (const attester of activeAttesters) {
-        await displayAttester(attester, false);
+        await displayAttester(attester);
       }
       console.log();
-    }
-
-    // Update cache with all active attesters
-    if (activeAttesters.length > 0) {
-      console.log("Updating attester cache...");
-      const updatedAttesters = activeAttesters.map(
-        (address): ScraperAttester => {
-          const existing = cachedAttesters.find(
-            (a) => a.address.toLowerCase() === address.toLowerCase(),
-          );
-          return existing || { address, lastSeenState: "ACTIVE" };
-        },
-      );
-
-      const savedPath = await saveCachedAttesters(
-        options.network,
-        updatedAttesters,
-      );
-      console.log(`✅ Attester cache updated: ${savedPath}\n`);
     }
 
     return;
@@ -232,39 +178,24 @@ const command = async (
     console.log("Fetching specific attester status...\n");
 
     for (const address of options.addresses) {
-      await displayAttester(address, false);
+      await displayAttester(address);
     }
 
     console.log();
     return;
   }
 
-  // Default behavior: automatically update cache if it exists, or show help if it doesn't
-  if (!cacheExists) {
-    console.log(
-      "No cached attesters found. This is normal if you haven't run this command before.",
-    );
-    console.log("\nTo populate the cache, use one of the following options:");
-    console.log("  --all-active    : Scrape all active attesters on-chain");
-    console.log("  --all-queued    : Scrape all queued attesters on-chain");
-    console.log(
-      "  --address <addr>: Scrape specific attester(s) (can specify multiple times)",
-    );
-    console.log("\nExamples:");
-    console.log("  aztec-butler scrape-attester-status --all-active");
-    console.log("  aztec-butler scrape-attester-status --all-queued");
-    console.log(
-      "  aztec-butler scrape-attester-status --address 0x123... --address 0x456...",
-    );
-    return;
-  }
+  // Default behavior: Load from keys files and show status
+  console.log("Loading attesters from keys files...");
+  const { addresses, attestersWithCoinbase, filesLoaded } =
+    await loadAttestersForCLI(options.network);
 
-  // Cache exists - automatically update it with current states
-  console.log("Loading cached attesters...");
-  console.log(`✅ Loaded ${cachedAttesters.length} attesters from cache\n`);
+  console.log(
+    `✅ Loaded ${addresses.length} attester(s) from ${filesLoaded.length} file(s)\n`,
+  );
 
-  if (cachedAttesters.length === 0) {
-    console.log("No attesters found in cache.\n");
+  if (addresses.length === 0) {
+    console.log("No attesters found in keys files.\n");
     return;
   }
 
@@ -298,6 +229,12 @@ const command = async (
     onChainProviderQueue.map((a) => a.toLowerCase()),
   );
 
+  // Create coinbase map
+  const coinbaseMap = new Map<string, string>();
+  for (const attester of attestersWithCoinbase) {
+    coinbaseMap.set(attester.address.toLowerCase(), attester.coinbase);
+  }
+
   // Create map of on-chain views
   const onChainViews = new Map<string, AttesterOnChainStatus>();
   for (const activeAddress of onChainActive) {
@@ -309,72 +246,40 @@ const command = async (
 
   console.log("Analyzing attester states...\n");
 
-  interface StateChange {
-    address: string;
-    oldState: string | undefined;
-    newState: string | undefined;
-  }
-
-  const changes: StateChange[] = [];
   const stateBreakdown = new Map<string, number>();
 
-  // Iterate through all attesters in cache
-  for (const attester of cachedAttesters) {
-    const addressLower = attester.address.toLowerCase();
+  // Iterate through all attesters
+  for (const address of addresses) {
+    const addressLower = address.toLowerCase();
     const isInQueue = queuedAddressSet.has(addressLower);
     const isInProviderQueue = providerQueueSet.has(addressLower);
     const onChainStatus = onChainViews.get(addressLower) ?? null;
+    const hasCoinbase = coinbaseMap.has(addressLower);
 
-    const newState = determineNewState(
-      attester,
+    const state = determineNewState(
+      hasCoinbase,
       isInQueue,
       isInProviderQueue,
       onChainStatus,
     );
 
-    if (newState !== attester.lastSeenState) {
-      changes.push({
-        address: attester.address,
-        oldState: attester.lastSeenState,
-        newState,
-      });
-      attester.lastSeenState = newState as any;
-    }
-
     // Track state breakdown
-    const currentState = attester.lastSeenState || "NEW";
+    const currentState = state || "NEW";
     stateBreakdown.set(
       currentState,
       (stateBreakdown.get(currentState) || 0) + 1,
     );
   }
 
-  // Display state changes
-  if (changes.length > 0) {
-    console.log("State Changes:");
-    for (const change of changes) {
-      console.log(
-        `  ${change.address}: ${change.oldState || "undefined"} → ${change.newState || "undefined"}`,
-      );
-    }
-    console.log();
-  }
-
   // Display summary
   console.log("Summary:");
-  console.log(`  Total attesters: ${cachedAttesters.length}`);
-  console.log(`  State changes: ${changes.length}`);
-  console.log(`  No changes: ${cachedAttesters.length - changes.length}\n`);
+  console.log(`  Total attesters: ${addresses.length}\n`);
 
   console.log("State breakdown:");
   for (const [state, count] of Array.from(stateBreakdown.entries()).sort()) {
     console.log(`  ${state}: ${count}`);
   }
   console.log();
-
-  // Save updated cache (always save, even if no changes - updates timestamp)
-  const savedPath = await saveCachedAttesters(options.network, cachedAttesters);
-  console.log(`✅ Attester cache updated: ${savedPath}\n`);
 
   // Determine which attesters to show based on flags
   const anyFlagProvided =
@@ -392,78 +297,48 @@ const command = async (
   if (shouldShowActive || shouldShowQueued || shouldShowProviderQueue) {
     console.log("Fetching detailed attester information...\n");
 
-    const cachedAddressSet = new Set(
-      cachedAttesters.map((a) => a.address.toLowerCase()),
-    );
+    const attesterAddressSet = new Set(addresses.map((a) => a.toLowerCase()));
 
     // Active attesters
     if (shouldShowActive) {
-      const activeAttestersData: Array<{
-        address: string;
-        config: ScraperAttester;
-      }> = [];
-
-      for (const activeAddress of onChainActive) {
-        if (cachedAddressSet.has(activeAddress.toLowerCase())) {
-          const cachedAttester = cachedAttesters.find(
-            (a) => a.address.toLowerCase() === activeAddress.toLowerCase(),
-          )!;
-          activeAttestersData.push({
-            address: activeAddress,
-            config: cachedAttester,
-          });
-        }
-      }
+      const activeAttestersData = onChainActive.filter((addr) =>
+        attesterAddressSet.has(addr.toLowerCase()),
+      );
 
       if (activeAttestersData.length > 0) {
         console.log(
-          `Active Attesters from Cache (${activeAttestersData.length} total):`,
+          `Active Attesters from Keys Files (${activeAttestersData.length} total):`,
         );
-        for (const attesterData of activeAttestersData) {
+        for (const address of activeAttestersData) {
           await displayAttester(
-            attesterData.address,
-            true,
-            attesterData.config,
+            address,
+            coinbaseMap.get(address.toLowerCase()),
           );
         }
         console.log();
       } else {
-        console.log("No active attesters found in cache.\n");
+        console.log("No active attesters found in keys files.\n");
       }
     }
 
     // Queued attesters
     if (shouldShowQueued) {
-      const queuedAttestersData: Array<{
-        address: string;
-        config: ScraperAttester;
-      }> = [];
-
-      for (const queuedAddress of onChainQueued) {
-        if (cachedAddressSet.has(queuedAddress.toLowerCase())) {
-          const cachedAttester = cachedAttesters.find(
-            (a) => a.address.toLowerCase() === queuedAddress.toLowerCase(),
-          )!;
-          queuedAttestersData.push({
-            address: queuedAddress,
-            config: cachedAttester,
-          });
-        }
-      }
+      const queuedAttestersData = onChainQueued.filter((addr) =>
+        attesterAddressSet.has(addr.toLowerCase()),
+      );
 
       if (queuedAttestersData.length > 0) {
         console.log(
-          `Queued Attesters from Cache (${queuedAttestersData.length} total):`,
+          `Queued Attesters from Keys Files (${queuedAttestersData.length} total):`,
         );
-        queuedAttestersData.forEach((attesterData, index) => {
-          console.log(`  [${index}] ${attesterData.address}`);
-          console.log(
-            `    Cached Coinbase: ${attesterData.config.coinbase || "Not set"}`,
-          );
+        queuedAttestersData.forEach((address, index) => {
+          console.log(`  [${index}] ${address}`);
+          const coinbase = coinbaseMap.get(address.toLowerCase());
+          console.log(`    Coinbase: ${coinbase || "Not set"}`);
         });
         console.log();
       } else {
-        console.log("No queued attesters found in cache.\n");
+        console.log("No queued attesters found in keys files.\n");
       }
     }
 
@@ -479,40 +354,22 @@ const command = async (
         return;
       }
 
-      const providerQueueAttestersData: Array<{
-        address: string;
-        config: ScraperAttester;
-      }> = [];
-
-      for (const providerQueueAddress of onChainProviderQueue) {
-        if (cachedAddressSet.has(providerQueueAddress.toLowerCase())) {
-          const cachedAttester = cachedAttesters.find(
-            (a) =>
-              a.address.toLowerCase() === providerQueueAddress.toLowerCase(),
-          )!;
-          providerQueueAttestersData.push({
-            address: providerQueueAddress,
-            config: cachedAttester,
-          });
-        }
-      }
+      const providerQueueAttestersData = onChainProviderQueue.filter((addr) =>
+        attesterAddressSet.has(addr.toLowerCase()),
+      );
 
       if (providerQueueAttestersData.length > 0) {
         console.log(
-          `Provider Queue Attesters from Cache (${providerQueueAttestersData.length} total):`,
+          `Provider Queue Attesters from Keys Files (${providerQueueAttestersData.length} total):`,
         );
-        providerQueueAttestersData.forEach((attesterData, index) => {
-          console.log(`  [${index}] ${attesterData.address}`);
-          console.log(
-            `    Cached Coinbase: ${attesterData.config.coinbase || "Not set"}`,
-          );
-          console.log(
-            `    Last Seen State: ${attesterData.config.lastSeenState || "Not set"}`,
-          );
+        providerQueueAttestersData.forEach((address, index) => {
+          console.log(`  [${index}] ${address}`);
+          const coinbase = coinbaseMap.get(address.toLowerCase());
+          console.log(`    Coinbase: ${coinbase || "Not set"}`);
         });
         console.log();
       } else {
-        console.log("No provider queue attesters found in cache.\n");
+        console.log("No provider queue attesters found in keys files.\n");
       }
     }
   }

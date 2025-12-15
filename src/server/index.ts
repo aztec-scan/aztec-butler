@@ -1,3 +1,4 @@
+import path from "path";
 import { loadAllAvailableNetworkConfigs } from "../core/config/index.js";
 import type { ButlerConfig } from "../core/config/index.js";
 import {
@@ -27,6 +28,8 @@ import {
 import { AztecClient } from "../core/components/AztecClient.js";
 import { SafeGlobalClient } from "../core/components/SafeGlobalClient.js";
 import { loadAndMergeKeysFiles } from "../core/utils/keysFileOperations.js";
+import { KeysFileWatcher } from "./file-watcher.js";
+import { ConfigReloader } from "./config-reloader.js";
 
 let logCounter = 0;
 
@@ -45,6 +48,8 @@ async function initializeNetwork(
 ): Promise<{
   safeClient: SafeGlobalClient | null;
   stakingProviderScraper: StakingProviderScraper;
+  fileWatcher: KeysFileWatcher;
+  configReloader: ConfigReloader;
 }> {
   console.log(`\n--- Initializing network: ${network} ---`);
 
@@ -87,6 +92,31 @@ async function initializeNetwork(
   // Extract just publisher addresses for PublisherScraper
   const publisherAddresses = publishers.map((p) => p.address);
   updatePublishersState(network, publisherAddresses);
+
+  // Initialize config reloader
+  const configReloader = new ConfigReloader(network);
+
+  // Initialize file watcher
+  const fileWatcher = new KeysFileWatcher({
+    network,
+    onKeysFileChange: async (eventType, filePath) => {
+      console.log(
+        `[${network}] Keys file ${eventType}: ${path.basename(filePath)}`,
+      );
+
+      // Debounce: wait a bit for multiple file changes
+      setTimeout(async () => {
+        const result = await configReloader.reload();
+        if (result.success) {
+          console.log(`[${network}] Config reloaded successfully`);
+        } else {
+          console.error(`[${network}] Config reload failed: ${result.error}`);
+        }
+      }, 1000);
+    },
+  });
+
+  fileWatcher.start();
 
   // Register rollup scraper (60 second interval)
   console.log(`[${network}] Registering rollup scraper...`);
@@ -171,7 +201,7 @@ async function initializeNetwork(
     safeClient,
   });
 
-  return { safeClient, stakingProviderScraper };
+  return { safeClient, stakingProviderScraper, fileWatcher, configReloader };
 }
 
 /**
@@ -262,14 +292,15 @@ export const startServer = async (specificNetwork?: string) => {
   // Create a single scraper manager for all networks
   const scraperManager = new ScraperManager();
 
-  // Track Safe clients per network for cleanup
+  // Track Safe clients and file watchers per network for cleanup
   const safeClients = new Map<string, SafeGlobalClient>();
+  const fileWatchers = new Map<string, KeysFileWatcher>();
 
   // Initialize each network
   initLog("Initializing all networks...");
   for (const [network, config] of networkConfigs.entries()) {
     try {
-      const { safeClient } = await initializeNetwork(
+      const { safeClient, fileWatcher } = await initializeNetwork(
         network,
         config,
         scraperManager,
@@ -278,6 +309,7 @@ export const startServer = async (specificNetwork?: string) => {
       if (safeClient) {
         safeClients.set(network, safeClient);
       }
+      fileWatchers.set(network, fileWatcher);
 
       console.log(`[${network}] Network initialization complete`);
     } catch (error) {
@@ -305,6 +337,14 @@ export const startServer = async (specificNetwork?: string) => {
 
     console.log("\n\n=== Shutting down gracefully ===");
     try {
+      // Shutdown file watchers
+      console.log("Shutting down file watchers...");
+      for (const [network, watcher] of fileWatchers.entries()) {
+        console.log(`[${network}] Stopping file watcher...`);
+        watcher.stop();
+      }
+      console.log("File watchers shut down");
+
       // Shutdown handlers for all networks
       console.log("Shutting down handlers...");
       await shutdownHandlers();

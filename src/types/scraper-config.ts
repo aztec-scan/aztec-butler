@@ -60,16 +60,6 @@ export const ScraperConfigSchema = z
 export type ScraperConfig = z.infer<typeof ScraperConfigSchema>;
 export type ScraperAttester = z.infer<typeof ScraperAttesterSchema>;
 
-// Cached Attesters Schema (v2.0)
-
-export const CachedAttestersSchema = z.object({
-  attesters: z.array(ScraperAttesterSchema),
-  lastUpdated: z.string().datetime(),
-  version: z.literal("2.0"),
-});
-
-export type CachedAttesters = z.infer<typeof CachedAttestersSchema>;
-
 // Coinbase Mapping Cache Schemas
 
 export const MappedCoinbaseSchema = z.object({
