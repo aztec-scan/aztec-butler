@@ -6,16 +6,16 @@ import readline from "node:readline/promises";
 import { strict as assert } from "node:assert";
 import z from "zod";
 
-assert(
-  process.env.npm_package_version !== undefined,
-  "npm package version is undefined",
-);
-export const PACKAGE_VERSION = process.env.npm_package_version!;
-assert(
-  process.env.npm_package_name !== undefined,
-  "npm package name is undefined",
-);
-export const PACKAGE_NAME = process.env.npm_package_name!;
+// Allow environment variable override for npm_package_version/name (useful when running via ts-node)
+const packageVersion =
+  process.env.npm_package_version || process.env.NPM_PACKAGE_VERSION || "2.0.0";
+const packageName =
+  process.env.npm_package_name ||
+  process.env.NPM_PACKAGE_NAME ||
+  "aztec-butler";
+
+export const PACKAGE_VERSION = packageVersion;
+export const PACKAGE_NAME = packageName;
 
 const getConfigDir = (): string => {
   return envPath(PACKAGE_NAME, { suffix: "" }).config;

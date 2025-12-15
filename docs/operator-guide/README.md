@@ -52,15 +52,14 @@ aztec-butler prepare-deployment \
   --network mainnet
 
 # Phase 3b: Fill coinbase addresses (if needed)
-aztec-butler scrape-coinbases --network mainnet
-aztec-butler fill-coinbases --network mainnet --keys-file mainnet-keys-A-v1.json
+aztec-butler --network mainnet scrape-coinbases
+aztec-butler --network mainnet fill-coinbases --keys-file mainnet-keys-A-v1.json
 
 # Phase 4: Deploy to servers (manual/scripted)
 # See phase-4.md for details
 
 # Phase 5: Register on-chain
-aztec-butler get-add-keys-to-staking-provider-calldata \
-  --keystore-paths prod-keyfile.json
+aztec-butler add-keys prod-keyfile.json
 # Then submit the calldata to your multisig
 ```
 

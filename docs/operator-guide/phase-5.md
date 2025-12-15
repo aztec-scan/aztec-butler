@@ -6,7 +6,7 @@ Register the new validators with the staking provider contract on-chain.
 
 ```mermaid
 flowchart TD
-    A[Updated Keyfile<br/>on Nodes] --> B[aztec-butler<br/>get-add-keys-to-staking-provider-calldata]
+    A[Updated Keyfile<br/>on Nodes] --> B[aztec-butler<br/>add-keys]
     B --> C[Generate Calldata]
     C --> D[Submit to Multisig]
     D --> E[Execute Transaction]
@@ -33,8 +33,7 @@ flowchart TD
 ### 1. Generate Registration Calldata
 
 ```bash
-aztec-butler get-add-keys-to-staking-provider-calldata \
-  --keystore-paths prod-testnet-keyfile.json
+aztec-butler add-keys prod-testnet-keyfile.json
 ```
 
 **What this does:**
@@ -52,9 +51,7 @@ aztec-butler get-add-keys-to-staking-provider-calldata \
 
 ```bash
 # Use network-specific config
-aztec-butler get-add-keys-to-staking-provider-calldata \
-  --keystore-paths prod-testnet-keyfile.json \
-  --network mainnet
+aztec-butler --network mainnet add-keys prod-keyfile.json
 ```
 
 ### 2. Review Output
@@ -190,7 +187,7 @@ mv public-new-private-keys.json archive/$(date +%Y-%m-%d)/
 
 ## Checklist
 
-- [ ] Generated calldata with `get-add-keys-to-staking-provider-calldata`
+- [ ] Generated calldata with `add-keys`
 - [ ] Reviewed validator list is correct
 - [ ] Submitted transaction to multisig
 - [ ] Transaction approved by required signers

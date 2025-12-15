@@ -87,9 +87,11 @@ This shows how many validators are currently configured.
 
 ### Verify Publisher Funding
 
+**Note**: This command requires keystores to be in the `keystores/**/*.json` directory structure. To check specific publishers, you'll need to create temporary keystore files or check balances manually via an Ethereum explorer.
+
 ```bash
-aztec-butler get-publisher-eth \
-  --publishers available_publisher_addresses.json
+# Check publisher balances from keystores
+aztec-butler check-publisher-eth
 ```
 
 Ensure all publishers have sufficient ETH balance (at least `MIN_ETH_PER_ATTESTER` per attester).

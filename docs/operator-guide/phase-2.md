@@ -150,8 +150,8 @@ Validator Nodes:
 
 1. Identify which attesters are duplicates:
    ```bash
-   aztec-butler get-add-keys-to-staking-provider-calldata \
-     --keystore-paths new-private-keys.json --check-only
+   # Check which attesters are duplicates (manually review error message)
+   aztec-butler add-keys new-private-keys.json
    ```
 2. Remove duplicates from `new-private-keys.json`
 3. Re-run process command

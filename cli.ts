@@ -137,8 +137,7 @@ program
 program
   .command("add-keys <keystore-path>")
   .description("Generate calldata to add keys to staking provider")
-  .option("--update-config", "Update scraper config with new keys", false)
-  .action(async (keystorePath: string, options: { updateConfig: boolean }) => {
+  .action(async (keystorePath: string) => {
     const globalOpts = program.opts();
     const config = await initConfig({ network: globalOpts.network });
     const ethClient = await initEthClient(config);
@@ -146,7 +145,6 @@ program
     await command.getAddKeysToStakingProviderCalldata(ethClient, config, {
       keystorePath,
       network: config.NETWORK,
-      updateConfig: options.updateConfig,
     });
   });
 
