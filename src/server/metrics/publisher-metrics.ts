@@ -16,8 +16,6 @@ import { formatEther } from "viem";
 // Metrics instances
 let publisherLoadGauge: ObservableGauge | null = null;
 let publisherEthBalanceGauge: ObservableGauge | null = null;
-let publisherCapacityRatioGauge: ObservableGauge | null = null;
-let publisherRequiredTopupGauge: ObservableGauge | null = null;
 
 /**
  * Initialize publisher metrics that expose publisher ETH balance and load data
@@ -53,9 +51,18 @@ export const initPublisherMetrics = () => {
       const attestersPerPublisher = Math.ceil(attesterCount / publisherCount);
 
       for (const [_privKey, publisherData] of data.entries()) {
+        // Find the server ID for this publisher from the scraper config
+        const publisherConfig = scraperConfig.publishers.find(
+          (p) =>
+            p.address.toLowerCase() ===
+            publisherData.publisherAddress.toLowerCase(),
+        );
+        const serverId = publisherConfig?.serverId || "unknown";
+
         observableResult.observe(attestersPerPublisher, {
           network,
           publisher_address: publisherData.publisherAddress,
+          server: serverId,
         });
       }
     }
@@ -71,12 +78,25 @@ export const initPublisherMetrics = () => {
 
     for (const [network, _state] of networkStates.entries()) {
       const data = getPublisherData(network);
+      const scraperConfig = getScraperConfig(network);
 
       if (!data) {
         continue;
       }
 
+      if (!scraperConfig) {
+        continue;
+      }
+
       for (const [_privKey, publisherData] of data.entries()) {
+        // Find the server ID for this publisher from the scraper config
+        const publisherConfig = scraperConfig.publishers.find(
+          (p) =>
+            p.address.toLowerCase() ===
+            publisherData.publisherAddress.toLowerCase(),
+        );
+        const serverId = publisherConfig?.serverId || "unknown";
+
         // Convert wei to ether for human-readable metrics
         const balanceInEther = parseFloat(
           formatEther(publisherData.currentBalance),
@@ -84,77 +104,7 @@ export const initPublisherMetrics = () => {
         observableResult.observe(balanceInEther, {
           network,
           publisher_address: publisherData.publisherAddress,
-        });
-      }
-    }
-  });
-
-  // Create observable gauge for publisher capacity ratio (0.0 to 1.0+)
-  publisherCapacityRatioGauge = createObservableGauge(
-    "publisher_capacity_ratio",
-    {
-      description:
-        "Publisher funding level as a ratio (1.0 = fully funded, <1.0 = underfunded, >1.0 = overfunded)",
-    },
-  );
-
-  publisherCapacityRatioGauge.addCallback((observableResult) => {
-    const networkStates = getAllNetworkStates();
-
-    for (const [network, _state] of networkStates.entries()) {
-      const data = getPublisherData(network);
-
-      if (!data) {
-        continue;
-      }
-
-      for (const [_privKey, publisherData] of data.entries()) {
-        // Calculate required full balance
-        const requiredBalance =
-          publisherData.currentBalance + publisherData.requiredTopup;
-
-        // Calculate ratio (avoid division by zero)
-        const ratio =
-          requiredBalance > 0n
-            ? parseFloat(formatEther(publisherData.currentBalance)) /
-              parseFloat(formatEther(requiredBalance))
-            : 1.0;
-
-        observableResult.observe(ratio, {
-          network,
-          publisher_address: publisherData.publisherAddress,
-        });
-      }
-    }
-  });
-
-  // Create observable gauge for required ETH top-up (in ether)
-  publisherRequiredTopupGauge = createObservableGauge(
-    "publisher_required_topup",
-    {
-      description:
-        "ETH required to reach recommended balance (0 if already sufficient, in ether)",
-    },
-  );
-
-  publisherRequiredTopupGauge.addCallback((observableResult) => {
-    const networkStates = getAllNetworkStates();
-
-    for (const [network, _state] of networkStates.entries()) {
-      const data = getPublisherData(network);
-
-      if (!data) {
-        continue;
-      }
-
-      for (const [_privKey, publisherData] of data.entries()) {
-        // Convert wei to ether for human-readable metrics
-        const topupInEther = parseFloat(
-          formatEther(publisherData.requiredTopup),
-        );
-        observableResult.observe(topupInEther, {
-          network,
-          publisher_address: publisherData.publisherAddress,
+          server: serverId,
         });
       }
     }

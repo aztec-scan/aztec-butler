@@ -7,6 +7,7 @@
 import type { ObservableGauge } from "@opentelemetry/api";
 import {
   countAttestersByState,
+  countAttestersByOnChainStatus,
   getAttesterCoinbaseInfo,
   getAttestersByState,
   getAttesterStates,
@@ -17,9 +18,8 @@ import { createObservableGauge } from "./registry.js";
 import { AttesterOnChainStatus } from "../../types/index.js";
 
 // Metrics instances
-let attesterInfoGauge: ObservableGauge | null = null;
 let nbrofAttestersInStateGauge: ObservableGauge | null = null;
-let attesterOnChainStatusGauge: ObservableGauge | null = null;
+let attesterOnChainStatusCountGauge: ObservableGauge | null = null;
 let attestersMissingCoinbaseGauge: ObservableGauge | null = null;
 // TODO: add gauge for proposer ETH balance
 
@@ -27,35 +27,12 @@ let attestersMissingCoinbaseGauge: ObservableGauge | null = null;
  * Initialize attester metrics that expose attester state and metadata
  */
 export const initAttesterMetrics = () => {
-  attesterInfoGauge = createObservableGauge("attester_info", {
-    description:
-      "Attester address, coinbase address and (TODO) publisher address (value=1)",
-  });
-
   nbrofAttestersInStateGauge = createObservableGauge(
     "nbrof_attesters_in_state",
     {
       description: "Number of attesters in each state",
     },
   );
-
-  attesterInfoGauge.addCallback((observableResult) => {
-    const networkStates = getAllNetworkStates();
-
-    for (const [network, _state] of networkStates.entries()) {
-      const coinbaseInfo = getAttesterCoinbaseInfo(network);
-
-      for (const [attester, coinbase] of coinbaseInfo.entries()) {
-        if (coinbase) {
-          observableResult.observe(1, {
-            network,
-            attester_address: attester,
-            coinbase_address: coinbase,
-          });
-        }
-      }
-    }
-  });
 
   nbrofAttestersInStateGauge.addCallback((observableResult) => {
     const networkStates = getAllNetworkStates();
@@ -69,29 +46,24 @@ export const initAttesterMetrics = () => {
     }
   });
 
-  attesterOnChainStatusGauge = createObservableGauge(
-    "attester_on_chain_status",
+  attesterOnChainStatusCountGauge = createObservableGauge(
+    "attester_on_chain_status_count",
     {
-      description:
-        "On-chain status of attesters: NONE=0, VALIDATING=1, ZOMBIE=2, EXITING=3",
+      description: "Count of attesters in each on-chain status",
     },
   );
 
-  attesterOnChainStatusGauge.addCallback((observableResult) => {
+  attesterOnChainStatusCountGauge.addCallback((observableResult) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, _state] of networkStates.entries()) {
-      const allAttesterStates = getAttesterStates(network);
+      const statusCounts = countAttestersByOnChainStatus(network);
 
-      for (const [address, entry] of allAttesterStates.entries()) {
-        if (entry.onChainView) {
-          // Export the on-chain status as a metric
-          observableResult.observe(entry.onChainView.status, {
-            network,
-            attester_address: address,
-            status: AttesterOnChainStatus[entry.onChainView.status],
-          });
-        }
+      for (const [status, count] of statusCounts.entries()) {
+        observableResult.observe(count, {
+          network,
+          status: AttesterOnChainStatus[status],
+        });
       }
     }
   });

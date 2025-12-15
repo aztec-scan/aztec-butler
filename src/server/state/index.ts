@@ -738,6 +738,32 @@ export const countAttestersByState = (
 };
 
 /**
+ * Count attesters by on-chain status for a network
+ */
+export const countAttestersByOnChainStatus = (
+  network: string,
+): Map<number, number> => {
+  const state = getNetworkState(network);
+  const counts = new Map<number, number>();
+
+  // Initialize all statuses to 0
+  counts.set(0, 0); // NONE
+  counts.set(1, 0); // VALIDATING
+  counts.set(2, 0); // ZOMBIE
+  counts.set(3, 0); // EXITING
+
+  // Count each attester
+  for (const entry of state.attesterStates.values()) {
+    if (entry.onChainView) {
+      const status = entry.onChainView.status;
+      counts.set(status, (counts.get(status) || 0) + 1);
+    }
+  }
+
+  return counts;
+};
+
+/**
  * Get attesters in a specific state
  */
 export const getAttestersByState = (
