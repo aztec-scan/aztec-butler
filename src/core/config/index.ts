@@ -69,6 +69,10 @@ ${Object.entries(config)
 function buildConfig(network: string) {
   return {
     NETWORK: z.string().parse(network),
+    SERVER_ID: z
+      .string()
+      .optional()
+      .parse(process.env.SERVER_ID || "server-01"),
     ETHEREUM_CHAIN_ID: z.coerce
       .number()
       .int()
