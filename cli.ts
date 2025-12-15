@@ -296,6 +296,30 @@ program
     },
   );
 
+// Command: fill-coinbases
+program
+  .command("fill-coinbases")
+  .description("Fill coinbase addresses into a keys file from cache")
+  .requiredOption("--keys-file <path>", "Path to keys file to update")
+  .option(
+    "--increment-version",
+    "Create a new version instead of overwriting",
+    false,
+  )
+  .action(async (options: { keysFile: string; incrementVersion?: boolean }) => {
+    const globalOpts = program.opts();
+    const config = await initConfig({ network: globalOpts.network });
+    const ethClient = await initEthClient(config);
+
+    await command.fillCoinbases(ethClient, config, {
+      network: config.NETWORK,
+      keysFile: options.keysFile,
+      ...(options.incrementVersion
+        ? { incrementVersion: options.incrementVersion }
+        : {}),
+    });
+  });
+
 // Command: get-queue-stats
 program
   .command("get-queue-stats")

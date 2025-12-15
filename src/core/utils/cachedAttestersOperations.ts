@@ -14,6 +14,10 @@ const getDataDir = (): string => {
 
 /**
  * Load cached attesters for a specific network
+ *
+ * NOTE: This file format is DEPRECATED for server use.
+ * The server now uses the unified keys file format (see keysFileOperations.ts).
+ * This function is kept for CLI command compatibility only.
  */
 export async function loadCachedAttesters(
   network: string,
@@ -76,6 +80,10 @@ export function validateCachedAttesters(data: unknown): CachedAttesters {
 /**
  * Available Publishers type
  * Maps server names to arrays of publisher addresses
+ *
+ * NOTE: This file format is DEPRECATED for server use.
+ * The server now uses the unified keys file format (see keysFileOperations.ts).
+ * These functions are kept for CLI command compatibility only.
  */
 export interface AvailablePublishers {
   [server: string]: string[];

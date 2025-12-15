@@ -26,10 +26,7 @@ import {
 } from "./state/index.js";
 import { AztecClient } from "../core/components/AztecClient.js";
 import { SafeGlobalClient } from "../core/components/SafeGlobalClient.js";
-import {
-  loadCachedAttesters,
-  loadAvailablePublishers,
-} from "../core/utils/cachedAttestersOperations.js";
+import { loadAndMergeKeysFiles } from "../core/utils/keysFileOperations.js";
 
 let logCounter = 0;
 
@@ -54,42 +51,42 @@ async function initializeNetwork(
   // Initialize state for this network
   await initNetworkState(network);
 
-  // Load cached attesters (optional)
-  let cachedAttesters: Array<{
-    address: string;
-    coinbase?: string | undefined;
-    lastSeenState?: string | undefined;
-  }> = [];
-  try {
-    const cache = await loadCachedAttesters(network);
-    cachedAttesters = cache.attesters;
-    console.log(
-      `[${network}] Loaded cached attesters: ${cachedAttesters.length} attester(s)`,
-    );
-  } catch (error) {
+  // Load keys files (new unified approach)
+  console.log(`[${network}] Auto-discovering keys files...`);
+  const { attesters, publishers, filesLoaded } =
+    await loadAndMergeKeysFiles(network);
+
+  if (filesLoaded.length === 0) {
     console.warn(
-      `[${network}] No cached attesters found, starting with empty attester list`,
+      `[${network}] No keys files found. Server will start with empty attester/publisher lists.\n` +
+        `Expected file pattern: ${network}-keys-*.json in data directory.`,
+    );
+  } else {
+    console.log(
+      `[${network}] Loaded and merged ${filesLoaded.length} keys file(s):`,
+    );
+    filesLoaded.forEach((f) => console.log(`  - ${f}`));
+    console.log(
+      `[${network}] Total: ${attesters.length} attester(s), ${publishers.length} publisher(s)`,
     );
   }
 
-  // Load available publishers (optional)
-  let publishers: string[] = [];
-  try {
-    const pubData = await loadAvailablePublishers(network);
-    publishers = Object.values(pubData).flat();
-    console.log(
-      `[${network}] Loaded available publishers: ${publishers.length} publisher(s)`,
-    );
-  } catch (error) {
+  // Check for attesters missing coinbase
+  const missingCoinbase = attesters.filter((a) => !a.coinbase);
+  if (missingCoinbase.length > 0) {
     console.warn(
-      `[${network}] No publisher config found, starting with empty publisher list`,
+      `[${network}] Warning: ${missingCoinbase.length} attester(s) missing coinbase addresses.` +
+        `\nRun 'aztec-butler fill-coinbases' to populate them.`,
     );
   }
 
-  // Initialize state from cache
-  console.log(`[${network}] Initializing state from cache...`);
-  initAttesterStatesFromCache(network, cachedAttesters);
-  updatePublishersState(network, publishers);
+  // Initialize state from loaded data
+  console.log(`[${network}] Initializing state...`);
+  initAttesterStatesFromCache(network, attesters);
+
+  // Extract just publisher addresses for PublisherScraper
+  const publisherAddresses = publishers.map((p) => p.address);
+  updatePublishersState(network, publisherAddresses);
 
   // Register rollup scraper (60 second interval)
   console.log(`[${network}] Registering rollup scraper...`);
@@ -103,7 +100,11 @@ async function initializeNetwork(
 
   // Register publisher scraper (30 second interval)
   console.log(`[${network}] Registering publisher scraper...`);
-  const publisherScraper = new PublisherScraper(network, config, publishers);
+  const publisherScraper = new PublisherScraper(
+    network,
+    config,
+    publisherAddresses,
+  );
   scraperManager.register(publisherScraper, 30_000);
 
   // Register staking rewards scraper (default hourly interval)

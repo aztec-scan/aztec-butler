@@ -48,7 +48,12 @@ aztec-butler process-private-keys new-private-keys.json
 aztec-butler prepare-deployment \
   --production-keys prod-keyfile.json \
   --new-public-keys public-new-private-keys.json \
-  --available-publishers available_publisher_addresses.json
+  --available-publishers available_publisher_addresses.json \
+  --network mainnet
+
+# Phase 3b: Fill coinbase addresses (if needed)
+aztec-butler scrape-coinbases --network mainnet
+aztec-butler fill-coinbases --network mainnet --keys-file mainnet-keys-A-v1.json
 
 # Phase 4: Deploy to servers (manual/scripted)
 # See phase-4.md for details
@@ -82,15 +87,23 @@ Publishers are now managed per-server in `available_publisher_addresses.json`:
 
 ```json
 {
-  "server1": ["0x1111...", "0x2222..."],
-  "server2": ["0x3333...", "0x4444..."],
-  "server3": ["0x5555..."]
+  "A": ["0x1111...", "0x2222..."],
+  "B": ["0x3333...", "0x4444..."],
+  "C": ["0x5555..."]
 }
 ```
 
 - Server "A" is used for single-server deployments
 - Server A/B/C/etc. are used for HA deployments
 - **No publisher address can appear in multiple server arrays**
+
+### Unified Keys File Format
+
+Starting with this version, Aztec Butler uses a unified configuration format for deployment. Keys files are automatically named using the pattern: `[network]-keys-[serverId]-v[version].json`
+
+For example: `mainnet-keys-A-v1.json`, `mainnet-keys-B-v2.json`
+
+The monitoring server automatically discovers and loads all keys files for the configured network. See the [main README](../../README.md#configuration) for details about the unified configuration format.
 
 ## File Organization
 
@@ -101,9 +114,9 @@ Throughout the process, you'll work with these file types:
 | Private keys        | `.json`   | Private keys, public keys      | 🔴 **CRITICAL** |
 | Public keys         | `.json`   | Public keys only               | 🟡 Sensitive    |
 | Production keyfile  | `.json`   | Public keys + web3signer URL   | 🟢 Safe         |
-| Deployment files    | `.json`   | Ready-to-deploy keyfile        | 🟢 Safe         |
+| Keys files          | `.json`   | `[network]-keys-[server]-v[N]` | 🟢 Safe         |
 | Publisher addresses | `.json`   | Publisher addresses per server | 🟢 Safe         |
-| Cached attesters    | `.json`   | Cached attester data           | 🟢 Safe         |
+| Coinbase cache      | `.json`   | Cached coinbase mappings       | 🟢 Safe         |
 
 ## Getting Help
 

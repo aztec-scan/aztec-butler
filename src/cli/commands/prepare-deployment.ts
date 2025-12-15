@@ -1,9 +1,11 @@
-import assert from "assert";
 import fs from "fs/promises";
 import path from "path";
 import { formatEther } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
+import type { Keystore, KeystoreValidator } from "../../types/keystore.js";
+import { generateVersionedFilename } from "../../core/utils/keysFileOperations.js";
+import { loadCoinbaseCache } from "../../core/utils/scraperConfigOperations.js";
 
 interface PrepareDeploymentOptions {
   productionKeys: string;
@@ -11,22 +13,6 @@ interface PrepareDeploymentOptions {
   availablePublishers: string;
   outputPath?: string;
   network: string;
-}
-
-interface KeystoreValidator {
-  attester: {
-    eth: string;
-    bls: string;
-  };
-  publisher?: string | string[];
-  coinbase?: string;
-  feeRecipient: string;
-}
-
-interface KeystoreFile {
-  schemaVersion?: number;
-  remoteSigner?: string;
-  validators: KeystoreValidator[];
 }
 
 interface ServerPublishers {
@@ -45,7 +31,7 @@ const command = async (
   // 1. Load and validate input files
   console.log("Loading input files...");
 
-  let productionData: KeystoreFile;
+  let productionData: Keystore;
   try {
     const content = await fs.readFile(options.productionKeys, "utf-8");
     productionData = JSON.parse(content);
@@ -71,7 +57,7 @@ const command = async (
     `✅ Loaded ${productionData.validators.length} existing validator(s) from production keys`,
   );
 
-  let newPublicKeysData: KeystoreFile;
+  let newPublicKeysData: Keystore;
   try {
     const content = await fs.readFile(options.newPublicKeys, "utf-8");
     newPublicKeysData = JSON.parse(content);
@@ -266,79 +252,71 @@ const command = async (
     `✅ Found ${serverIds.length} server(s): ${serverIds.join(", ")}`,
   );
 
-  // 6. Generate output file(s)
+  // 6. Load coinbase cache (optional)
+  console.log("\nLoading coinbase cache...");
+
+  const coinbaseMap = new Map<string, string>();
+  try {
+    const coinbaseCache = await loadCoinbaseCache(options.network);
+    if (coinbaseCache) {
+      for (const mapping of coinbaseCache.mappings) {
+        coinbaseMap.set(
+          mapping.attesterAddress.toLowerCase(),
+          mapping.coinbaseAddress,
+        );
+      }
+      console.log(
+        `✅ Loaded ${coinbaseMap.size} coinbase mapping(s) from cache`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `⚠️  No coinbase cache found for network "${options.network}". Validators will be created without coinbase addresses.`,
+    );
+    console.warn(
+      `   Run 'aztec-butler scrape-coinbases --network ${options.network}' to create the cache, then use 'fill-coinbases' to add them.`,
+    );
+  }
+
+  // 7. Generate output file(s)
   console.log("\nGenerating output file(s)...");
 
-  const outputBasePath =
-    options.outputPath || path.basename(options.productionKeys);
   const outputDir = path.dirname(options.outputPath || options.productionKeys);
 
-  // Helper function to find highest existing version for a server
-  const findHighestVersion = async (
-    baseWithoutExt: string,
-    serverId: string,
-    dir: string,
-  ): Promise<number> => {
-    const files = await fs.readdir(dir).catch(() => []);
+  // Merge all validators (without publishers yet)
+  // Helper to create validator entry with optional coinbase
+  const createValidatorEntry = (
+    attester: { eth: string; bls: string },
+    feeRecipient: string,
+    existingCoinbase?: string,
+  ): Omit<KeystoreValidator, "publisher"> => {
+    const entry: Omit<KeystoreValidator, "publisher"> = {
+      attester,
+      feeRecipient,
+    };
 
-    let highestVersion = 0;
-    const regex = new RegExp(
-      `^${baseWithoutExt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}_${serverId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}_v(\\d+)\\.json$`,
-    );
-
-    for (const file of files) {
-      const match = file.match(regex);
-      if (match && match[1]) {
-        const version = parseInt(match[1], 10);
-        if (version > highestVersion) {
-          highestVersion = version;
-        }
-      }
+    // Use existing coinbase from production, or lookup in cache
+    const coinbase =
+      existingCoinbase || coinbaseMap.get(attester.eth.toLowerCase());
+    if (coinbase) {
+      entry.coinbase = coinbase;
     }
 
-    return highestVersion;
+    return entry;
   };
 
-  // Helper function to generate versioned filename
-  const generateVersionedFilename = async (
-    basePath: string,
-    serverId: string,
-    dir: string,
-  ): Promise<string> => {
-    // Remove .json extension if present
-    const baseWithoutExt = basePath.endsWith(".json")
-      ? basePath.slice(0, -5)
-      : basePath;
-
-    // Find highest existing version and increment
-    const highestVersion = await findHighestVersion(
-      baseWithoutExt,
-      serverId,
-      dir,
-    );
-    const nextVersion = highestVersion + 1;
-
-    const filename = `${baseWithoutExt}_${serverId}_v${nextVersion}.json`;
-    return path.join(dir, filename);
-  };
-
-  // Merge all validators (without publishers yet)
-  const mergedValidators: KeystoreValidator[] = [
-    ...productionData.validators.map((v) => ({
-      attester: v.attester,
-      coinbase: v.coinbase,
-      feeRecipient: v.feeRecipient,
-    })),
-    ...newPublicKeysData.validators.map((v) => ({
-      attester: v.attester,
-      feeRecipient: v.feeRecipient,
-      // No coinbase for new validators
-    })),
+  const mergedValidators: Omit<KeystoreValidator, "publisher">[] = [
+    ...productionData.validators.map((v) =>
+      createValidatorEntry(v.attester, v.feeRecipient, v.coinbase),
+    ),
+    ...newPublicKeysData.validators.map((v) =>
+      createValidatorEntry(v.attester, v.feeRecipient),
+    ),
   ];
 
   // Function to assign publishers using round-robin
   const assignPublishers = (
-    validators: KeystoreValidator[],
+    validators: Omit<KeystoreValidator, "publisher">[],
     publishers: string[],
   ): KeystoreValidator[] => {
     return validators.map((v, i) => ({
@@ -347,7 +325,7 @@ const command = async (
     }));
   };
 
-  const outputFiles: { filename: string; data: KeystoreFile }[] = [];
+  const outputFiles: { filename: string; data: Keystore }[] = [];
 
   // Generate one file per server
   for (const serverId of serverIds) {
@@ -359,7 +337,7 @@ const command = async (
     }
 
     const outputPath = await generateVersionedFilename(
-      outputBasePath,
+      options.network,
       serverId,
       outputDir,
     );
@@ -395,11 +373,22 @@ const command = async (
     console.log(`✅ Created ${filename}`);
   }
 
+  // Count validators with/without coinbase
+  const validatorsWithCoinbase = mergedValidators.filter(
+    (v) => v.coinbase,
+  ).length;
+  const validatorsWithoutCoinbase =
+    mergedValidators.length - validatorsWithCoinbase;
+
   // Summary
   console.log("\n=== Summary ===");
   console.log(
     `Total validators: ${mergedValidators.length} (${productionData.validators.length} existing + ${newPublicKeysData.validators.length} new)`,
   );
+  console.log(`Validators with coinbase: ${validatorsWithCoinbase}`);
+  if (validatorsWithoutCoinbase > 0) {
+    console.log(`Validators without coinbase: ${validatorsWithoutCoinbase}`);
+  }
 
   // Show publishers per server
   console.log(`Servers detected: ${serverIds.length}`);
@@ -412,6 +401,23 @@ const command = async (
   for (const { filename } of outputFiles) {
     console.log(`  - ${path.basename(filename)}`);
   }
+
+  if (validatorsWithoutCoinbase > 0) {
+    console.log(
+      `\n⚠️  Warning: ${validatorsWithoutCoinbase} validator(s) do not have coinbase addresses set.`,
+    );
+    console.log(`   To populate them:`);
+    console.log(
+      `   1. Run: aztec-butler scrape-coinbases --network ${options.network}`,
+    );
+    console.log(`   2. Then run fill-coinbases on each keys file:`);
+    for (const { filename } of outputFiles) {
+      console.log(
+        `      aztec-butler fill-coinbases --network ${options.network} --keys-file ${path.basename(filename)}`,
+      );
+    }
+  }
+
   console.log("\n✅ Deployment preparation complete!");
 };
 

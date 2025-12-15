@@ -1,4 +1,5 @@
 export { default as depositCalldata } from "./deposit-calldata.js";
+export { default as fillCoinbases } from "./fill-coinbases.js";
 export { default as getPublisherEth } from "./get-publisher-eth.js";
 export { default as getProviderId } from "./get-provider-id.js";
 export { default as getCreateStakingProviderCallData } from "./get-create-staking-provider-calldata.js";
