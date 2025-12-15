@@ -334,6 +334,27 @@ program
     });
   });
 
+// Command: check-hosts
+program
+  .command("check-hosts")
+  .description("Check host connection status and service availability")
+  .option("--config <path>", "Path to hosts config file")
+  .option("--host <name>", "Check specific host only")
+  .option("--check <type>", "Check specific type (dns, p2p, rpc, all)")
+  .option("--json", "Output as JSON", false)
+  .action(
+    async (options: {
+      config?: string;
+      host?: string;
+      check?: "dns" | "p2p" | "rpc" | "all";
+      json: boolean;
+    }) => {
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
+      await command.checkHosts(config, options);
+    },
+  );
+
 // Parse and handle errors
 program.parseAsync(process.argv).catch((error) => {
   console.error("❌ Error:\n");

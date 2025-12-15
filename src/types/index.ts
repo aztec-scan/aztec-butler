@@ -8,3 +8,4 @@ export * from "./staking-registry-abi.js";
 export * from "./staking-rewards.js";
 export * from "./scraper-config.js";
 export * from "./entry-queue.js";
+export * from "./host-check.js";
