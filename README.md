@@ -127,7 +127,4 @@ To run aztec-butler as a systemd service, see the [daemon setup guide](./daemon/
 
 ### Roadmap
 
-1. replace need for aztecmonitor
-   - P2P connection status
-   - chain tips
 1. merge attester-scraper and entry-queue stats scraper. (they both scrape from the same resource and can be done in one go)
