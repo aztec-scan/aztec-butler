@@ -5,21 +5,19 @@
  */
 
 import type {
-  UpDownCounter,
   Histogram,
   ObservableGauge,
 } from "@opentelemetry/api";
 import {
-  createUpDownCounter,
   createHistogram,
   createObservableGauge,
 } from "./registry.js";
 
 // Status metrics (1 = up, 0 = down)
-let hostDnsStatusCounter: UpDownCounter | null = null;
-let hostP2PStatusCounter: UpDownCounter | null = null;
-let hostRpcHttpsStatusCounter: UpDownCounter | null = null;
-let hostRpcIpStatusCounter: UpDownCounter | null = null;
+let hostDnsStatusGauge: ObservableGauge | null = null;
+let hostP2PStatusGauge: ObservableGauge | null = null;
+let hostRpcHttpsStatusGauge: ObservableGauge | null = null;
+let hostRpcIpStatusGauge: ObservableGauge | null = null;
 
 // Latency metrics (in milliseconds)
 let hostP2PLatencyHistogram: Histogram | null = null;
@@ -41,25 +39,60 @@ const hostInfoCache = new Map<
   }
 >();
 
+// Cache for storing status metrics for observable gauges
+interface StatusCacheEntry {
+  status: boolean;
+  labels: Record<string, string>;
+}
+
+const dnsStatusCache = new Map<string, StatusCacheEntry>();
+const p2pStatusCache = new Map<string, StatusCacheEntry>();
+const rpcHttpsStatusCache = new Map<string, StatusCacheEntry>();
+const rpcIpStatusCache = new Map<string, StatusCacheEntry>();
+
 /**
  * Initialize host metrics
  */
 export const initHostMetrics = () => {
-  // Status metrics - using UpDownCounter to track current state (1 = up, 0 = down)
-  hostDnsStatusCounter = createUpDownCounter("host_dns_status", {
+  // Status metrics - using ObservableGauge to track current state (1 = up, 0 = down)
+  hostDnsStatusGauge = createObservableGauge("host_dns_status", {
     description: "DNS resolution status (1 = up, 0 = down)",
   });
 
-  hostP2PStatusCounter = createUpDownCounter("host_p2p_status", {
+  hostDnsStatusGauge.addCallback((observableResult) => {
+    for (const entry of dnsStatusCache.values()) {
+      observableResult.observe(entry.status ? 1 : 0, entry.labels);
+    }
+  });
+
+  hostP2PStatusGauge = createObservableGauge("host_p2p_status", {
     description: "P2P connection status (1 = up, 0 = down)",
   });
 
-  hostRpcHttpsStatusCounter = createUpDownCounter("host_rpc_https_status", {
+  hostP2PStatusGauge.addCallback((observableResult) => {
+    for (const entry of p2pStatusCache.values()) {
+      observableResult.observe(entry.status ? 1 : 0, entry.labels);
+    }
+  });
+
+  hostRpcHttpsStatusGauge = createObservableGauge("host_rpc_https_status", {
     description: "RPC HTTPS status (1 = up, 0 = down)",
   });
 
-  hostRpcIpStatusCounter = createUpDownCounter("host_rpc_ip_status", {
+  hostRpcHttpsStatusGauge.addCallback((observableResult) => {
+    for (const entry of rpcHttpsStatusCache.values()) {
+      observableResult.observe(entry.status ? 1 : 0, entry.labels);
+    }
+  });
+
+  hostRpcIpStatusGauge = createObservableGauge("host_rpc_ip_status", {
     description: "RPC IP+port status (1 = up, 0 = down)",
+  });
+
+  hostRpcIpStatusGauge.addCallback((observableResult) => {
+    for (const entry of rpcIpStatusCache.values()) {
+      observableResult.observe(entry.status ? 1 : 0, entry.labels);
+    }
   });
 
   // Latency metrics - using Histogram for distribution analysis
@@ -113,7 +146,7 @@ export const updateDnsStatus = (
   expectedIp: string,
   status: boolean,
 ) => {
-  if (!hostDnsStatusCounter) return;
+  if (!hostDnsStatusGauge) return;
 
   const labels = {
     network,
@@ -122,9 +155,11 @@ export const updateDnsStatus = (
     expected_ip: expectedIp,
   };
 
-  // Set to 1 if up, 0 if down
-  // We need to manage the state ourselves by tracking previous values
-  hostDnsStatusCounter.add(status ? 1 : 0, labels);
+  // Create unique key for this metric
+  const key = `${network}:${host}:${domain}:${expectedIp}`;
+  
+  // Update cache - gauge callback will report current status
+  dnsStatusCache.set(key, { status, labels });
 };
 
 /**
@@ -138,7 +173,7 @@ export const updateP2PStatus = (
   status: boolean,
   latency?: number,
 ) => {
-  if (!hostP2PStatusCounter) return;
+  if (!hostP2PStatusGauge) return;
 
   const labels = {
     network,
@@ -147,8 +182,11 @@ export const updateP2PStatus = (
     port: port.toString(),
   };
 
-  // Update status
-  hostP2PStatusCounter.add(status ? 1 : 0, labels);
+  // Create unique key for this metric
+  const key = `${network}:${host}:${ip}:${port}`;
+  
+  // Update cache - gauge callback will report current status
+  p2pStatusCache.set(key, { status, labels });
 
   // Update latency if available
   if (status && latency !== undefined && hostP2PLatencyHistogram) {
@@ -167,7 +205,7 @@ export const updateRpcHttpsStatus = (
   latency?: number,
   nodeVersion?: string,
 ) => {
-  if (!hostRpcHttpsStatusCounter) return;
+  if (!hostRpcHttpsStatusGauge) return;
 
   const labels = {
     network,
@@ -176,8 +214,11 @@ export const updateRpcHttpsStatus = (
     ...(nodeVersion ? { node_version: nodeVersion } : {}),
   };
 
-  // Update status
-  hostRpcHttpsStatusCounter.add(status ? 1 : 0, labels);
+  // Create unique key for this metric
+  const key = `${network}:${host}:${url}${nodeVersion ? `:${nodeVersion}` : ''}`;
+  
+  // Update cache - gauge callback will report current status
+  rpcHttpsStatusCache.set(key, { status, labels });
 
   // Update latency if available
   if (status && latency !== undefined && hostRpcHttpsLatencyHistogram) {
@@ -197,7 +238,7 @@ export const updateRpcIpStatus = (
   latency?: number,
   nodeVersion?: string,
 ) => {
-  if (!hostRpcIpStatusCounter) return;
+  if (!hostRpcIpStatusGauge) return;
 
   const labels = {
     network,
@@ -207,8 +248,11 @@ export const updateRpcIpStatus = (
     ...(nodeVersion ? { node_version: nodeVersion } : {}),
   };
 
-  // Update status
-  hostRpcIpStatusCounter.add(status ? 1 : 0, labels);
+  // Create unique key for this metric
+  const key = `${network}:${host}:${ip}:${port}${nodeVersion ? `:${nodeVersion}` : ''}`;
+  
+  // Update cache - gauge callback will report current status
+  rpcIpStatusCache.set(key, { status, labels });
 
   // Update latency if available
   if (status && latency !== undefined && hostRpcIpLatencyHistogram) {
@@ -253,4 +297,92 @@ export const updateHostInfo = (
 export const clearHostInfo = (network: string, host: string) => {
   const key = `${network}:${host}`;
   hostInfoCache.delete(key);
+};
+
+/**
+ * Clear DNS status from cache
+ */
+export const clearDnsStatus = (
+  network: string,
+  host: string,
+  domain: string,
+  expectedIp: string,
+) => {
+  const key = `${network}:${host}:${domain}:${expectedIp}`;
+  dnsStatusCache.delete(key);
+};
+
+/**
+ * Clear P2P status from cache
+ */
+export const clearP2PStatus = (
+  network: string,
+  host: string,
+  ip: string,
+  port: number,
+) => {
+  const key = `${network}:${host}:${ip}:${port}`;
+  p2pStatusCache.delete(key);
+};
+
+/**
+ * Clear RPC HTTPS status from cache
+ */
+export const clearRpcHttpsStatus = (
+  network: string,
+  host: string,
+  url: string,
+  nodeVersion?: string,
+) => {
+  const key = `${network}:${host}:${url}${nodeVersion ? `:${nodeVersion}` : ''}`;
+  rpcHttpsStatusCache.delete(key);
+};
+
+/**
+ * Clear RPC IP status from cache
+ */
+export const clearRpcIpStatus = (
+  network: string,
+  host: string,
+  ip: string,
+  port: number,
+  nodeVersion?: string,
+) => {
+  const key = `${network}:${host}:${ip}:${port}${nodeVersion ? `:${nodeVersion}` : ''}`;
+  rpcIpStatusCache.delete(key);
+};
+
+/**
+ * Clear all status metrics for a specific host
+ */
+export const clearAllHostStatus = (network: string, host: string) => {
+  // Clear all status caches for this host
+  const prefix = `${network}:${host}:`;
+  
+  for (const key of dnsStatusCache.keys()) {
+    if (key.startsWith(prefix)) {
+      dnsStatusCache.delete(key);
+    }
+  }
+  
+  for (const key of p2pStatusCache.keys()) {
+    if (key.startsWith(prefix)) {
+      p2pStatusCache.delete(key);
+    }
+  }
+  
+  for (const key of rpcHttpsStatusCache.keys()) {
+    if (key.startsWith(prefix)) {
+      rpcHttpsStatusCache.delete(key);
+    }
+  }
+  
+  for (const key of rpcIpStatusCache.keys()) {
+    if (key.startsWith(prefix)) {
+      rpcIpStatusCache.delete(key);
+    }
+  }
+  
+  // Also clear host info
+  clearHostInfo(network, host);
 };
