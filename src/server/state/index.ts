@@ -161,13 +161,16 @@ const networkStatePaths = new Map<
   {
     attesterStateFilePath: string;
     stakingRewardsHistoryFilePath: string;
+    entryQueueStatsFilePath: string;
     attesterSaveTimer: NodeJS.Timeout | null;
     rewardsSaveTimer: NodeJS.Timeout | null;
+    entryQueueSaveTimer: NodeJS.Timeout | null;
   }
 >();
 
 const SAVE_DEBOUNCE_MS = 5000; // Save at most once every 5 seconds
 const STAKING_HISTORY_SAVE_DEBOUNCE_MS = 5000;
+const ENTRY_QUEUE_SAVE_DEBOUNCE_MS = 5000;
 
 /**
  * Initialize state management with persistence
@@ -196,12 +199,18 @@ export const initNetworkState = async (network: string) => {
     dataDir,
     `${network}-staking-rewards-history.json`,
   );
+  const entryQueueStatsFilePath = path.join(
+    dataDir,
+    `${network}-entry-queue-stats.json`,
+  );
 
   networkStatePaths.set(network, {
     attesterStateFilePath,
     stakingRewardsHistoryFilePath,
+    entryQueueStatsFilePath,
     attesterSaveTimer: null,
     rewardsSaveTimer: null,
+    entryQueueSaveTimer: null,
   });
 
   console.log(
@@ -210,10 +219,14 @@ export const initNetworkState = async (network: string) => {
   console.log(
     `[State/${network}] Staking rewards history file: ${stakingRewardsHistoryFilePath}`,
   );
+  console.log(
+    `[State/${network}] Entry queue stats file: ${entryQueueStatsFilePath}`,
+  );
 
   // Load state from files if they exist
   await loadAttesterStatesFromFile(network);
   await loadStakingRewardsHistoryFromFile(network);
+  await loadEntryQueueStatsFromFile(network);
 };
 
 /**
@@ -451,6 +464,111 @@ const loadStakingRewardsHistoryFromFile = async (
   }
 };
 
+type SerializedEntryQueueStats = {
+  totalQueueLength: string;
+  currentEpoch: string;
+  epochDuration: string;
+  flushSize: string;
+  availableFlushes: string;
+  nextFlushableEpoch: string;
+  isBootstrapped: boolean;
+  timePerAttester: number;
+  lastAttesterEstimatedEntryTimestamp: number;
+  providerId: string | null;
+  providerQueueCount: number;
+  providerNextAttesterArrivalTimestamp: number | null;
+  providerNextMissingCoinbaseArrivalTimestamp: number | null;
+  providerNextMissingCoinbaseAddress: string | null;
+  providerLastAttesterArrivalTimestamp: number | null;
+  lastUpdated: string;
+};
+
+const serializeEntryQueueStats = (
+  stats: EntryQueueStats,
+): SerializedEntryQueueStats => {
+  return {
+    totalQueueLength: stats.totalQueueLength.toString(),
+    currentEpoch: stats.currentEpoch.toString(),
+    epochDuration: stats.epochDuration.toString(),
+    flushSize: stats.flushSize.toString(),
+    availableFlushes: stats.availableFlushes.toString(),
+    nextFlushableEpoch: stats.nextFlushableEpoch.toString(),
+    isBootstrapped: stats.isBootstrapped,
+    timePerAttester: stats.timePerAttester,
+    lastAttesterEstimatedEntryTimestamp:
+      stats.lastAttesterEstimatedEntryTimestamp,
+    providerId: stats.providerId ? stats.providerId.toString() : null,
+    providerQueueCount: stats.providerQueueCount,
+    providerNextAttesterArrivalTimestamp:
+      stats.providerNextAttesterArrivalTimestamp,
+    providerNextMissingCoinbaseArrivalTimestamp:
+      stats.providerNextMissingCoinbaseArrivalTimestamp,
+    providerNextMissingCoinbaseAddress:
+      stats.providerNextMissingCoinbaseAddress,
+    providerLastAttesterArrivalTimestamp:
+      stats.providerLastAttesterArrivalTimestamp,
+    lastUpdated: stats.lastUpdated.toISOString(),
+  };
+};
+
+const deserializeEntryQueueStats = (
+  data: SerializedEntryQueueStats,
+): EntryQueueStats => {
+  return {
+    totalQueueLength: BigInt(data.totalQueueLength),
+    currentEpoch: BigInt(data.currentEpoch),
+    epochDuration: BigInt(data.epochDuration),
+    flushSize: BigInt(data.flushSize),
+    availableFlushes: BigInt(data.availableFlushes),
+    nextFlushableEpoch: BigInt(data.nextFlushableEpoch),
+    isBootstrapped: data.isBootstrapped,
+    timePerAttester: data.timePerAttester,
+    lastAttesterEstimatedEntryTimestamp:
+      data.lastAttesterEstimatedEntryTimestamp,
+    providerId: data.providerId ? BigInt(data.providerId) : null,
+    providerQueueCount: data.providerQueueCount,
+    providerNextAttesterArrivalTimestamp:
+      data.providerNextAttesterArrivalTimestamp,
+    providerNextMissingCoinbaseArrivalTimestamp:
+      data.providerNextMissingCoinbaseArrivalTimestamp,
+    providerNextMissingCoinbaseAddress: data.providerNextMissingCoinbaseAddress,
+    providerLastAttesterArrivalTimestamp:
+      data.providerLastAttesterArrivalTimestamp,
+    lastUpdated: new Date(data.lastUpdated),
+  };
+};
+
+const loadEntryQueueStatsFromFile = async (network: string): Promise<void> => {
+  const paths = networkStatePaths.get(network);
+  if (!paths) {
+    return;
+  }
+
+  try {
+    const fileContent = await fs.readFile(
+      paths.entryQueueStatsFilePath,
+      "utf-8",
+    );
+    const data: SerializedEntryQueueStats = JSON.parse(fileContent);
+    const state = getNetworkState(network);
+    state.entryQueueStats = deserializeEntryQueueStats(data);
+    console.log(
+      `[State/${network}] Loaded entry queue stats from file (last updated: ${state.entryQueueStats.lastUpdated.toISOString()})`,
+    );
+  } catch (error: any) {
+    if (error.code === "ENOENT") {
+      console.log(
+        `[State/${network}] No existing entry queue stats file found, starting fresh`,
+      );
+    } else {
+      console.error(
+        `[State/${network}] Error loading entry queue stats from file:`,
+        error,
+      );
+    }
+  }
+};
+
 /**
  * Save attester states to file
  */
@@ -503,6 +621,36 @@ export const saveStakingRewardsHistoryToFile = async (
   }
 };
 
+export const saveEntryQueueStatsToFile = async (
+  network: string,
+): Promise<void> => {
+  const paths = networkStatePaths.get(network);
+  if (!paths) {
+    return;
+  }
+
+  const state = getNetworkState(network);
+  if (!state.entryQueueStats) {
+    return;
+  }
+
+  try {
+    const serialized = serializeEntryQueueStats(state.entryQueueStats);
+    await fs.writeFile(
+      paths.entryQueueStatsFilePath,
+      JSON.stringify(serialized, null, 2),
+    );
+    console.log(
+      `[State/${network}] Saved entry queue stats to file (last updated: ${state.entryQueueStats.lastUpdated.toISOString()})`,
+    );
+  } catch (error) {
+    console.error(
+      `[State/${network}] Error saving entry queue stats to file:`,
+      error,
+    );
+  }
+};
+
 /**
  * Schedule a debounced save to file
  * This prevents excessive file writes when many state updates occur
@@ -539,6 +687,22 @@ const scheduleSaveStakingRewardsHistory = (network: string): void => {
     void saveStakingRewardsHistoryToFile(network);
     paths.rewardsSaveTimer = null;
   }, STAKING_HISTORY_SAVE_DEBOUNCE_MS);
+};
+
+const scheduleSaveEntryQueueStats = (network: string): void => {
+  const paths = networkStatePaths.get(network);
+  if (!paths) {
+    return;
+  }
+
+  if (paths.entryQueueSaveTimer) {
+    clearTimeout(paths.entryQueueSaveTimer);
+  }
+
+  paths.entryQueueSaveTimer = setTimeout(() => {
+    void saveEntryQueueStatsToFile(network);
+    paths.entryQueueSaveTimer = null;
+  }, ENTRY_QUEUE_SAVE_DEBOUNCE_MS);
 };
 
 /**
@@ -1160,6 +1324,11 @@ export const updateEntryQueueStats = (
 ) => {
   const state = getNetworkState(network);
   state.entryQueueStats = stats;
+
+  // Schedule save if stats is not null
+  if (stats !== null) {
+    scheduleSaveEntryQueueStats(network);
+  }
 };
 
 /**
