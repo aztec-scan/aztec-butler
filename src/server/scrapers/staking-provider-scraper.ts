@@ -9,6 +9,7 @@ import {
   getAttesterState,
   getAttesterStates,
   countAttestersByState,
+  getAttesterCoinbaseInfo,
 } from "../state/index.js";
 import { processAttesterState } from "../state/transitions.js";
 
@@ -139,14 +140,15 @@ export class StakingProviderScraper extends AbstractScraper {
 
       // Get attesters from state
       const attesterStates = getAttesterStates(this.network);
+      const coinbaseInfo = getAttesterCoinbaseInfo(this.network);
+
       const attestersToProcess = Array.from(attesterStates.keys()).map(
         (address) => {
-          // Check if attester has coinbase by getting coinbase info from state
-          // For now, we'll need to track this separately or get it from cached attesters
-          // For simplicity, assume no coinbase (will be updated by state transitions)
+          // Check if attester has coinbase by looking up in coinbase info
+          const hasCoinbase = coinbaseInfo.has(address);
           return {
             address,
-            hasCoinbase: false, // This will be determined by state transitions
+            hasCoinbase,
           };
         },
       );
