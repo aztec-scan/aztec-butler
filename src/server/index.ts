@@ -24,6 +24,7 @@ import {
   initNetworkState,
   initAttesterStatesFromCache,
   updatePublishersState,
+  updateScraperConfigState,
 } from "./state/index.js";
 import { AztecClient } from "../core/components/AztecClient.js";
 import { SafeGlobalClient } from "../core/components/SafeGlobalClient.js";
@@ -92,6 +93,31 @@ async function initializeNetwork(
   // Extract just publisher addresses for PublisherScraper
   const publisherAddresses = publishers.map((p) => p.address);
   updatePublishersState(network, publisherAddresses);
+
+  // Populate scraper config state for rollup scraper to use
+  console.log(`[${network}] Populating scraper config state...`);
+
+  // Get node info for l1ChainId
+  const aztecClientForChainId = new AztecClient({
+    nodeUrl: config.AZTEC_NODE_URL,
+  });
+  const nodeInfoForChainId = await aztecClientForChainId.getNodeInfo();
+
+  updateScraperConfigState(network, {
+    network,
+    l1ChainId: nodeInfoForChainId.l1ChainId as 1 | 11155111,
+    stakingProviderId: config.AZTEC_STAKING_PROVIDER_ID ?? 0n,
+    stakingProviderAdmin:
+      config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS ??
+      "0x0000000000000000000000000000000000000000",
+    attesters: attesters.map((a) => ({
+      address: a.address,
+      coinbase: a.coinbase,
+    })),
+    publishers: publisherAddresses,
+    lastUpdated: new Date().toISOString(),
+    version: "1.1",
+  });
 
   // Initialize config reloader
   const configReloader = new ConfigReloader(network);

@@ -30,11 +30,17 @@ async function fetchL2BlockTime(): Promise<number> {
   }
 
   const blockTimeStr = await response.text();
-  const blockTimeMs = Number(JSON.parse(blockTimeStr));
+  // API returns a JSON-encoded string like "84080", parse it then convert to number
+  const parsed = JSON.parse(blockTimeStr);
+  const blockTimeMs = typeof parsed === "string" ? Number(parsed) : parsed;
 
-  if (typeof blockTimeMs !== "number" || blockTimeMs <= 0) {
+  if (
+    typeof blockTimeMs !== "number" ||
+    !isFinite(blockTimeMs) ||
+    blockTimeMs <= 0
+  ) {
     throw new Error(
-      `Invalid block time received from Aztecscan: ${blockTimeStr}`,
+      `Invalid block time received from Aztecscan: ${blockTimeStr} (parsed: ${parsed}, converted: ${blockTimeMs})`,
     );
   }
 

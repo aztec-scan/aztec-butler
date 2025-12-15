@@ -4,6 +4,8 @@ import {
   updatePublishersState,
   getAttesterStates,
   getPublisherData,
+  updateScraperConfigState,
+  getScraperConfig,
 } from "./state/index.js";
 
 export interface ReloadResult {
@@ -107,6 +109,23 @@ export class ConfigReloader {
       // Update publishers list
       const publisherAddresses = publishers.map((p) => p.address);
       updatePublishersState(this.network, publisherAddresses);
+
+      // Update scraper config state with new attesters and publishers
+      const currentScraperConfig = getScraperConfig(this.network);
+      if (currentScraperConfig) {
+        console.log(
+          `[ConfigReloader/${this.network}] Updating scraper config state...`,
+        );
+        updateScraperConfigState(this.network, {
+          ...currentScraperConfig,
+          attesters: attesters.map((a) => ({
+            address: a.address,
+            coinbase: a.coinbase,
+          })),
+          publishers: publisherAddresses,
+          lastUpdated: new Date().toISOString(),
+        });
+      }
 
       // Check for missing coinbases in new attesters
       const missingCoinbase = newAttesters.filter((a) => !a.coinbase);

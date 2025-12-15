@@ -23,10 +23,12 @@ function escapeRegex(str: string): string {
  * Examples:
  *   mainnet-keys-A-v1.json -> "A"
  *   mainnet-keys-validator1-v2.json -> "validator1"
+ *   mainnet-keys-beast-3-v1.json -> "beast-3"
  */
 export function extractServerIdFromFilename(filename: string): string {
   // Pattern: [network]-keys-[serverId]-v[N].json
-  const match = filename.match(/^[^-]+-keys-([^-]+)-v\d+\.json$/);
+  // Server ID can contain dashes, so we match everything between "keys-" and "-v"
+  const match = filename.match(/^[^-]+-keys-(.+)-v\d+\.json$/);
   if (!match?.[1]) {
     throw new Error(`Invalid keys filename format: ${filename}`);
   }
@@ -71,7 +73,7 @@ export async function discoverKeysFiles(network: string): Promise<string[]> {
 
     for (const file of files) {
       const match = file.match(
-        new RegExp(`^${escapeRegex(network)}-keys-([^-]+)-v(\\d+)\\.json$`),
+        new RegExp(`^${escapeRegex(network)}-keys-(.+)-v(\\d+)\\.json$`),
       );
       if (match) {
         const serverId = match[1]!;
