@@ -898,6 +898,12 @@ export const countAttestersByState = (
     counts.set(entry.state, (counts.get(entry.state) || 0) + 1);
   }
 
+  // Log the actual state we're reading from (for debugging)
+  console.log(
+    `[State/${network}] countAttestersByState called - total attesters: ${state.attesterStates.size}, counts:`,
+    Object.fromEntries(counts),
+  );
+
   return counts;
 };
 
@@ -1336,5 +1342,15 @@ export const updateEntryQueueStats = (
  */
 export const getEntryQueueStats = (network: string): EntryQueueStats | null => {
   const state = getNetworkState(network);
-  return state.entryQueueStats;
+  const stats = state.entryQueueStats;
+  
+  if (stats) {
+    console.log(
+      `[State/${network}] getEntryQueueStats called - queue length: ${stats.totalQueueLength}, provider count: ${stats.providerQueueCount}, last updated: ${stats.lastUpdated}`,
+    );
+  } else {
+    console.log(`[State/${network}] getEntryQueueStats called - no stats available`);
+  }
+  
+  return stats;
 };

@@ -17,6 +17,7 @@ let entryQueueProviderNextArrivalTimestampGauge: ObservableGauge | null = null;
 let entryQueueProviderNextMissingCoinbaseTimestampGauge: ObservableGauge | null =
   null;
 let entryQueueProviderLastArrivalTimestampGauge: ObservableGauge | null = null;
+let entryQueueLastScrapedTimestampGauge: ObservableGauge | null = null;
 
 /**
  * Initialize entry queue metrics that expose queue statistics and timing estimates
@@ -28,14 +29,21 @@ export const initEntryQueueMetrics = () => {
   });
 
   entryQueueLengthGauge.addCallback((observableResult) => {
+    const now = new Date().toISOString();
+    console.log(`[Metrics/Callback] entryQueueLengthGauge invoked at ${now}`);
+    
     const networkStates = getAllNetworkStates();
 
     for (const [network, _state] of networkStates.entries()) {
       const stats = getEntryQueueStats(network);
       if (stats) {
-        observableResult.observe(Number(stats.totalQueueLength), {
+        const queueLength = Number(stats.totalQueueLength);
+        console.log(`[Metrics/Callback/${network}] Entry queue length: ${queueLength}, last updated: ${stats.lastUpdated}`);
+        observableResult.observe(queueLength, {
           network,
         });
+      } else {
+        console.log(`[Metrics/Callback/${network}] No entry queue stats available`);
       }
     }
   });
@@ -96,15 +104,21 @@ export const initEntryQueueMetrics = () => {
   );
 
   entryQueueProviderCountGauge.addCallback((observableResult) => {
+    const now = new Date().toISOString();
+    console.log(`[Metrics/Callback] entryQueueProviderCountGauge invoked at ${now}`);
+    
     const networkStates = getAllNetworkStates();
 
     for (const [network, _state] of networkStates.entries()) {
       const stats = getEntryQueueStats(network);
       if (stats && stats.providerId !== null) {
+        console.log(`[Metrics/Callback/${network}] Provider queue count: ${stats.providerQueueCount} (provider ID: ${stats.providerId})`);
         observableResult.observe(stats.providerQueueCount, {
           network,
           staking_provider_id: stats.providerId.toString(),
         });
+      } else {
+        console.log(`[Metrics/Callback/${network}] No provider queue stats available`);
       }
     }
   });
@@ -207,6 +221,28 @@ export const initEntryQueueMetrics = () => {
       }
     },
   );
+
+  // Metric to track when entry queue was last scraped (staleness detection)
+  entryQueueLastScrapedTimestampGauge = createObservableGauge(
+    "entry_queue_last_scraped_timestamp",
+    {
+      description:
+        "Unix timestamp when entry queue was last scraped (for staleness detection)",
+      unit: "seconds",
+    },
+  );
+
+  entryQueueLastScrapedTimestampGauge.addCallback((observableResult) => {
+    const networkStates = getAllNetworkStates();
+
+    for (const [network, _state] of networkStates.entries()) {
+      const stats = getEntryQueueStats(network);
+      if (stats) {
+        const timestamp = Math.floor(stats.lastUpdated.getTime() / 1000);
+        observableResult.observe(timestamp, { network });
+      }
+    }
+  });
 
   console.log("Entry queue metrics initialized successfully");
 };

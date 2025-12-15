@@ -1,5 +1,5 @@
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
-import { MeterProvider } from "@opentelemetry/sdk-metrics";
+import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { PACKAGE_NAME } from "../../core/config/index.js";
@@ -61,6 +61,9 @@ export const initMetricsRegistry = (options: MetricsOptions) => {
 
       // Token is valid, serve metrics
       if (req.url === "/metrics") {
+        const scrapeTime = new Date().toISOString();
+        console.log(`\n[Metrics/Scrape] Prometheus scrape requested at ${scrapeTime}`);
+        console.log(`[Metrics/Scrape] Request from: ${req.socket.remoteAddress}`);
         exporter!.getMetricsRequestHandler(req, res);
       } else {
         res.writeHead(404, { "Content-Type": "text/plain" });

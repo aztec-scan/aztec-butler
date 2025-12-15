@@ -4,6 +4,7 @@ import type { StakingProviderScraper } from "../scrapers/staking-provider-scrape
 
 let stakingProviderQueueLengthGauge: ObservableGauge | null = null;
 let stakingProviderConfigGauge: ObservableGauge | null = null;
+let stakingProviderLastScrapedTimestampGauge: ObservableGauge | null = null;
 const scrapers = new Map<string, StakingProviderScraper>();
 
 /**
@@ -26,14 +27,19 @@ export const initStakingProviderMetrics = (
     );
 
     stakingProviderQueueLengthGauge.addCallback((observableResult) => {
+      const now = new Date().toISOString();
+      console.log(`[Metrics/Callback] stakingProviderQueueLengthGauge invoked at ${now}`);
+      
       for (const [net, scraper] of scrapers.entries()) {
         const data = scraper.getData();
 
         if (!data) {
           // No data available (not configured or staking provider not registered)
+          console.log(`[Metrics/Callback/${net}] No staking provider data available`);
           continue;
         }
 
+        console.log(`[Metrics/Callback/${net}] Staking provider queue length: ${data.queueLength}, last updated: ${data.lastUpdated}`);
         observableResult.observe(Number(data.queueLength), {
           network: net,
           staking_provider_id: data.providerId.toString(),
@@ -64,6 +70,33 @@ export const initStakingProviderMetrics = (
           staking_provider_admin: data.adminAddress,
           staking_provider_id: data.providerId.toString(),
           rewards_recipient: data.rewardsRecipient,
+        });
+      }
+    });
+  }
+
+  if (!stakingProviderLastScrapedTimestampGauge) {
+    stakingProviderLastScrapedTimestampGauge = createObservableGauge(
+      "staking_provider_last_scraped_timestamp",
+      {
+        description:
+          "Unix timestamp when staking provider data was last scraped (for staleness detection)",
+        unit: "seconds",
+      },
+    );
+
+    stakingProviderLastScrapedTimestampGauge.addCallback((observableResult) => {
+      for (const [net, scraper] of scrapers.entries()) {
+        const data = scraper.getData();
+
+        if (!data) {
+          continue;
+        }
+
+        const timestamp = Math.floor(data.lastUpdated.getTime() / 1000);
+        observableResult.observe(timestamp, {
+          network: net,
+          staking_provider_id: data.providerId.toString(),
         });
       }
     });
