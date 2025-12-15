@@ -125,6 +125,7 @@ export class ConfigReloader {
           publishers: publishers.map((p) => ({
             address: p.address,
             serverId: p.serverId,
+            attesterCount: p.attesterCount,
           })),
           lastUpdated: new Date().toISOString(),
         });

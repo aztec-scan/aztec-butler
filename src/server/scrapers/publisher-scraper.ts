@@ -2,7 +2,10 @@ import { AbstractScraper } from "./base-scraper.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import { AztecClient } from "../../core/components/AztecClient.js";
 import { EthereumClient } from "../../core/components/EthereumClient.js";
-import { updatePublisherData, getAttesterStates } from "../state/index.js";
+import {
+  updatePublisherData,
+  getScraperConfig,
+} from "../state/index.js";
 import { parseEther } from "viem";
 import type { HexString, PublisherDataMap } from "../../types/index.js";
 
@@ -78,13 +81,8 @@ export class PublisherScraper extends AbstractScraper {
       // Use unique publishers
       const uniquePublishers = new Set<string>(this.publishers);
 
-      // Calculate attesters per publisher for top-up calculation
-      // Get attester count from state
-      const attesterStates = getAttesterStates(this.network);
-      const attesterCount = attesterStates.size;
-      const publisherCount = uniquePublishers.size;
-      const attestersPerPublisher =
-        publisherCount > 0 ? Math.ceil(attesterCount / publisherCount) : 0;
+      // Get scraper config to find actual attester counts per publisher
+      const scraperConfig = getScraperConfig(this.network);
 
       // Scrape balances for each unique publisher
       for (const publisherAddress of uniquePublishers) {
@@ -92,8 +90,17 @@ export class PublisherScraper extends AbstractScraper {
           address: publisherAddress as `0x${string}`,
         });
 
+        // Get actual attester count for this publisher from config
+        let attestersForPublisher = 0;
+        if (scraperConfig) {
+          const publisherConfig = scraperConfig.publishers.find(
+            (p) => p.address.toLowerCase() === publisherAddress.toLowerCase(),
+          );
+          attestersForPublisher = publisherConfig?.attesterCount || 0;
+        }
+
         const requiredTopUp =
-          BigInt(attestersPerPublisher) * this.recommendedEthPerAttester -
+          BigInt(attestersForPublisher) * this.recommendedEthPerAttester -
           currentBalance;
 
         publisherDataMap.set(publisherAddress as HexString, {

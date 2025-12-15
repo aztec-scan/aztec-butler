@@ -26,6 +26,7 @@ export const ScraperAttesterSchema = z.object({
 export const ScraperPublisherSchema = z.object({
   address: z.string().startsWith("0x").length(42),
   serverId: z.string(),
+  attesterCount: z.number().int().nonnegative().optional().default(0), // Number of attesters using this publisher
 });
 
 export const ScraperConfigSchema = z

@@ -43,23 +43,27 @@ export const initPublisherMetrics = () => {
         continue;
       }
 
-      // Calculate load for each publisher
-      // Since we don't know which attester uses which publisher (varies by server in HA mode),
-      // we assume even distribution for monitoring purposes
-      const attesterCount = scraperConfig.attesters.length;
-      const publisherCount = scraperConfig.publishers.length;
-      const attestersPerPublisher = Math.ceil(attesterCount / publisherCount);
-
+      // Use actual attester count per publisher from config
       for (const [_privKey, publisherData] of data.entries()) {
-        // Find the server ID for this publisher from the scraper config
+        // Find the publisher config to get the actual attester count
         const publisherConfig = scraperConfig.publishers.find(
           (p) =>
             p.address.toLowerCase() ===
             publisherData.publisherAddress.toLowerCase(),
         );
-        const serverId = publisherConfig?.serverId || "unknown";
 
-        observableResult.observe(attestersPerPublisher, {
+        if (!publisherConfig) {
+          console.warn(
+            `[publisher-metrics] Publisher ${publisherData.publisherAddress} not found in config`,
+          );
+          continue;
+        }
+
+        const serverId = publisherConfig.serverId || "unknown";
+        // Use actual attester count from config instead of evenly distributed assumption
+        const attesterCount = publisherConfig.attesterCount || 0;
+
+        observableResult.observe(attesterCount, {
           network,
           publisher_address: publisherData.publisherAddress,
           server: serverId,

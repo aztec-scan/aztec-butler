@@ -120,6 +120,7 @@ async function initializeNetwork(
     publishers: publishers.map((p) => ({
       address: p.address,
       serverId: p.serverId,
+      attesterCount: p.attesterCount,
     })),
     lastUpdated: new Date().toISOString(),
     version: "1.1",

@@ -112,7 +112,7 @@ export async function discoverKeysFiles(network: string): Promise<string[]> {
 
 /**
  * Load all keys files for a network and merge validators
- * Returns: merged attester list with coinbases, merged publisher list with server assignments
+ * Returns: merged attester list with coinbases, merged publisher list with server assignments and load counts
  */
 export async function loadAndMergeKeysFiles(network: string): Promise<{
   attesters: Array<{
@@ -123,6 +123,7 @@ export async function loadAndMergeKeysFiles(network: string): Promise<{
   publishers: Array<{
     address: string;
     serverId: string;
+    attesterCount: number; // Number of attesters using this publisher
   }>;
   filesLoaded: string[];
 }> {
@@ -137,7 +138,10 @@ export async function loadAndMergeKeysFiles(network: string): Promise<{
   keyFiles.forEach((f) => console.log(`  - ${path.basename(f)}`));
 
   const attesterMap = new Map<string, { address: string; coinbase?: string }>();
-  const publisherMap = new Map<string, { address: string; serverId: string }>();
+  const publisherMap = new Map<
+    string,
+    { address: string; serverId: string; attesterCount: number }
+  >();
 
   for (const filePath of keyFiles) {
     const keystore = await loadKeysFile(filePath);
@@ -155,7 +159,7 @@ export async function loadAndMergeKeysFiles(network: string): Promise<{
       }
       attesterMap.set(attesterAddr, attesterEntry);
 
-      // Collect publishers
+      // Collect publishers and count attesters per publisher
       const publisherAddrs = Array.isArray(validator.publisher)
         ? validator.publisher
         : [validator.publisher];
@@ -166,8 +170,12 @@ export async function loadAndMergeKeysFiles(network: string): Promise<{
           publisherMap.set(normalizedPub, {
             address: pubAddr,
             serverId,
+            attesterCount: 0,
           });
         }
+        // Increment attester count for this publisher
+        const pubData = publisherMap.get(normalizedPub)!;
+        pubData.attesterCount++;
       }
     }
   }
