@@ -10,35 +10,42 @@ A tool for helping out with managing multiple aztec nodes with an opinionated wo
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NEW: Operator creates attester-keys
+    [*] --> NEW: Attester keys created
 
     NEW --> IN_STAKING_PROVIDER_QUEUE: isInProviderQueue = true<br/>(attester added to provider queue)
-    NEW --> ROLLUP_ENTRY_QUEUE: hasCoinbase = true<br/>(coinbase configured directly)
 
-    IN_STAKING_PROVIDER_QUEUE --> ROLLUP_ENTRY_QUEUE: hasCoinbase = true<br/>(coinbase address added)
+    IN_STAKING_PROVIDER_QUEUE --> ROLLUP_ENTRY_QUEUE: !isInProviderQueue && onChainView.status = NONE<br/>(left provider queue, now in rollup entry queue)
+    IN_STAKING_PROVIDER_QUEUE --> ACTIVE: !isInProviderQueue && onChainView.status = VALIDATING<br/>(left provider queue, went directly active)
 
-    ROLLUP_ENTRY_QUEUE --> ACTIVE: onChainView.status != NONE<br/>(registered on rollup contract)
+    ROLLUP_ENTRY_QUEUE --> ACTIVE: onChainView.status = VALIDATING<br/>(began validating)
 
-    ACTIVE --> NO_LONGER_ACTIVE: onChainView.status = EXITING<br/>OR onChainView.status = ZOMBIE<br/>(attester withdrawn/slashed)
+    ACTIVE --> NO_LONGER_ACTIVE: onChainView.status = EXITING or ZOMBIE<br/>(attester withdrawn/slashed)
 
     NO_LONGER_ACTIVE --> [*]
 ```
 
 **State Descriptions:**
 
-- **NEW**: Initial state for newly discovered attesters with no configuration
-- **IN_STAKING_PROVIDER_QUEUE**: Attester is in the staking provider's queue waiting for coinbase assignment
-- **ROLLUP_ENTRY_QUEUE**: Attester has coinbase configured and is waiting to be registered on the rollup contract's entry queue
+- **NEW**: Initial state for newly discovered attesters (not yet in any on-chain queue)
+- **IN_STAKING_PROVIDER_QUEUE**: Attester address exists in the staking provider's queue on the staking contract
+- **ROLLUP_ENTRY_QUEUE**: Attester has an on-chain view in the rollup contract with status = NONE (in global entry queue, waiting to become active)
 - **ACTIVE**: Attester is actively validating on the rollup contract (status = VALIDATING)
 - **NO_LONGER_ACTIVE**: Attester has been withdrawn or slashed (terminal state)
 
-**Key Events:**
+**State Transitions (purely on-chain):**
 
-- `hasCoinbase`: Attester has a coinbase address configured in the scraper config
-- `isInProviderQueue`: Attester address exists in the staking provider's queue array
+State transitions are determined exclusively by on-chain data:
+
+- `isInProviderQueue`: Attester address exists in the staking provider's queue array (from staking contract)
+- `onChainView`: Attester data from rollup contract (includes status and other attester info)
 - `onChainView.status`: On-chain status from rollup contract (NONE, VALIDATING, ZOMBIE, EXITING)
 
-**Note:** Tracking of attesters missing coinbase is now handled by the entry queue scraper via `providerNextMissingCoinbaseArrivalTimestamp` and `providerNextMissingCoinbaseAddress`.
+**Coinbase Tracking (separate from state):**
+
+Coinbase addresses are tracked separately for operational awareness but do not affect state transitions. The entry queue scraper reports which attesters are missing coinbase configuration via:
+
+- `providerNextMissingCoinbaseArrivalTimestamp`: When the next attester without coinbase will reach the front of the queue
+- `providerNextMissingCoinbaseAddress`: Address of that attester
 
 See [src/server/state/index.ts](./src/server/state/index.ts) and [src/server/state/transitions.ts](./src/server/state/transitions.ts) for implementation details.
 

@@ -206,7 +206,7 @@ After registration, validators progress through these states:
 ```mermaid
 flowchart LR
     A[NEW] -->|Register| B[IN_STAKING_PROVIDER_QUEUE]
-    B -->|Wait for slot| C[ROLLUP_ENTRY_QUEUE]
+    B -->|Move to rollup queue| C[ROLLUP_ENTRY_QUEUE]
     C -->|Become active| D[ACTIVE]
 
     style A fill:#fff4e1
@@ -215,10 +215,17 @@ flowchart LR
     style D fill:#4CAF50
 ```
 
+**State Transitions (purely on-chain):**
+
+All state transitions are determined by on-chain data:
+- **IN_STAKING_PROVIDER_QUEUE**: Attester exists in the staking provider's queue array
+- **ROLLUP_ENTRY_QUEUE**: Attester has left the provider queue and appears in the rollup contract with status = NONE
+- **ACTIVE**: Attester's on-chain status changes to VALIDATING
+
 **Typical timeline:**
 
-- **Phase 5 completion → IN_STAKING_PROVIDER_QUEUE:** Immediate
-- **IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE:** Variable (depends on protocol)
+- **Phase 5 completion → IN_STAKING_PROVIDER_QUEUE:** Immediate (once transaction confirms)
+- **IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE:** When the protocol moves the attester from provider queue to rollup entry queue (protocol-dependent)
 - **ROLLUP_ENTRY_QUEUE → ACTIVE:** Next epoch or activation period
 
 Monitor progress with:
@@ -330,8 +337,10 @@ Continue to monitor for the next few epochs:
 # Daily check
 aztec-butler scrape-attester-status --network testnet --show-all
 
-# Watch for state transitions
-# NEW → IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE → ACTIVE
+# Watch for state transitions (purely on-chain)
+# NEW → IN_STAKING_PROVIDER_QUEUE (when registered)
+# IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE (when protocol moves attester to rollup queue)
+# ROLLUP_ENTRY_QUEUE → ACTIVE (when attester begins validating)
 ```
 
 ## Next Steps

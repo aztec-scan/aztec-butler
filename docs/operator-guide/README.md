@@ -54,6 +54,7 @@ aztec-butler prepare-deployment \
 # Phase 3b: Fill coinbase addresses (if needed)
 aztec-butler --network mainnet scrape-coinbases
 aztec-butler --network mainnet fill-coinbases --keys-file mainnet-keys-A-v1.json
+# Note: Coinbase is tracked separately for operational awareness but does not affect attester state transitions
 
 # Phase 4: Deploy to servers (manual/scripted)
 # See phase-4.md for details
