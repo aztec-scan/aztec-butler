@@ -95,14 +95,27 @@ cat public-new-private-keys.json | jq '.'
 
 **🔴 CRITICAL: Store private keys before proceeding**
 
-From the console output, copy private keys to secure storage:
+`aztec-butler process-private-keys` now uploads attester (ETH + BLS) and publisher
+private keys directly to **GCP Secret Manager** using Application Default
+Credentials (Workload Identity or `gcloud auth application-default login`—no JSON
+key file required). Secrets are created per key with incremental IDs and the public key appended:
+
+```
+web3signer-${network}-${keyType}-${att|pub}-${id}-${publicKey}
+# Example sequence (0-based IDs, pubkey truncated):
+# web3signer-sepolia-eth-att-0-0xabc...
+# web3signer-sepolia-bls-att-0-0xdef...
+# web3signer-sepolia-eth-pub-0-0x123...
+# web3signer-sepolia-bls-att-1-0x456...
+```
+
+If a secret for a given public key already exists, the command skips uploading that key again.
+
+Networks are limited to `eth-mainnet` and `sepolia`. Set `GCP_PROJECT_ID` (or rely on `GOOGLE_CLOUD_PROJECT`) so the command knows
+which project to use. If GCP is unavailable in your environment, fall back to
+manual storage (Vault, HSM, etc.):
 
 ```bash
-# Example: GCP Secret Manager
-gcloud secrets create validator-keys-batch-2024-01 \
-  --data-file=<(echo '{"validators": [...]}')
-
-# Example: HashiCorp Vault
 vault kv put secret/aztec/validators/batch-2024-01 \
   keys=@new-private-keys.json
 ```
@@ -149,10 +162,12 @@ Validator Nodes:
 **Solution:**
 
 1. Identify which attesters are duplicates:
+
    ```bash
    # Check which attesters are duplicates (manually review error message)
    aztec-butler add-keys new-private-keys.json
    ```
+
 2. Remove duplicates from `new-private-keys.json`
 3. Re-run process command
 

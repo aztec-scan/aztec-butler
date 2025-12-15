@@ -95,6 +95,7 @@ export class StakingRewardsScraper extends AbstractScraper {
         "[staking-rewards] No coinbase data available in state, skipping scrape",
       );
       updateStakingRewardsData(this.network, null);
+      await this.exportAggregatesAndCoinbases(); // still publish headers to Sheets
       return;
     }
 
@@ -238,6 +239,7 @@ export class StakingRewardsScraper extends AbstractScraper {
       console.warn(
         "[staking-rewards] No coinbase data available, skipping staking rewards backfill",
       );
+      await this.exportAggregatesAndCoinbases(); // still publish headers to Sheets
       return;
     }
 

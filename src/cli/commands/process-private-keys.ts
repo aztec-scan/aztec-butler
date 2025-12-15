@@ -4,6 +4,7 @@ import path from "path";
 import { getAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { computeBn254G1PublicKeyCompressed } from "@aztec/foundation/crypto";
+import { SecretManagerServiceClient } from "@google-cloud/secret-manager";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import type { HexString } from "../../types/index.js";
@@ -53,6 +54,162 @@ interface DerivedKeys {
   feeRecipient: string;
 }
 
+type SecretRole = "att" | "pub";
+type SecretKeyType = "eth" | "bls";
+
+interface SecretManagerContext {
+  client: SecretManagerServiceClient;
+  projectId: string;
+  network: string;
+}
+
+interface SecretEntry {
+  role: SecretRole;
+  keyType: SecretKeyType;
+  key: string;
+  validatorIndex: number;
+  publicKey: string;
+}
+
+const createSecretId = (
+  network: string,
+  keyType: SecretKeyType,
+  role: SecretRole,
+  id: number,
+  publicKey: string,
+) => `web3signer-${network}-${keyType}-${role}-${id}-${publicKey}`;
+
+const isNotFoundError = (error: unknown) =>
+  typeof error === "object" && error !== null && (error as any).code === 5;
+
+const ensureSecretExists = async (
+  ctx: SecretManagerContext,
+  secretId: string,
+  labels: Record<string, string>,
+): Promise<string> => {
+  const parent = `projects/${ctx.projectId}`;
+  const name = `${parent}/secrets/${secretId}`;
+
+  try {
+    await ctx.client.getSecret({ name });
+    return name;
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      throw error;
+    }
+
+    await ctx.client.createSecret({
+      parent,
+      secretId,
+      secret: {
+        replication: { automatic: {} },
+        labels,
+      },
+    });
+
+    console.log(`Created secret ${secretId} with labels ${JSON.stringify(labels)}`);
+    return name;
+  }
+};
+
+const getExistingSecretInfo = async (
+  ctx: SecretManagerContext,
+  keyType: SecretKeyType,
+  role: SecretRole,
+) => {
+  const parent = `projects/${ctx.projectId}`;
+  const prefixRegex = new RegExp(
+    `^web3signer-${ctx.network}-${keyType}-${role}-(\\d+)-(0x[0-9a-fA-F]+)$`,
+  );
+
+  let maxId = -1;
+  const publicKeys = new Set<string>();
+  const iterable = ctx.client.listSecretsAsync({ parent });
+
+  for await (const secret of iterable) {
+    const fullName = secret.name ?? "";
+    const secretId = fullName.split("/").pop() ?? "";
+    const match = prefixRegex.exec(secretId);
+    if (!match) continue;
+
+    const idNum = Number.parseInt(match[1] ?? "0", 10);
+    if (!Number.isNaN(idNum) && idNum > maxId) {
+      maxId = idNum;
+    }
+
+    const secretPublicKey = match[2];
+    if (secretPublicKey) {
+      publicKeys.add(secretPublicKey.toLowerCase());
+    }
+  }
+
+  return { maxId, publicKeys };
+};
+
+const addSecretVersions = async (
+  ctx: SecretManagerContext,
+  entries: SecretEntry[],
+) => {
+  const grouped = entries.reduce<Record<string, SecretEntry[]>>((acc, entry) => {
+    const key = `${entry.role}-${entry.keyType}`;
+    acc[key] ??= [];
+    acc[key]!.push(entry);
+    return acc;
+  }, {});
+
+  for (const groupKey of Object.keys(grouped)) {
+    const [role, keyType] = groupKey.split("-") as [SecretRole, SecretKeyType];
+    const groupEntries = grouped[groupKey] ?? [];
+    if (groupEntries.length === 0) continue;
+
+    const { maxId, publicKeys } = await getExistingSecretInfo(
+      ctx,
+      keyType,
+      role,
+    );
+    let nextId = maxId + 1;
+
+    for (const entry of groupEntries) {
+      const normalizedPublicKey = entry.publicKey.toLowerCase();
+      if (publicKeys.has(normalizedPublicKey)) {
+        console.log(
+          `  ⚠️ Skipping ${role}/${keyType} for validator ${entry.validatorIndex}: public key already uploaded`,
+        );
+        continue;
+      }
+
+      const secretId = createSecretId(
+        ctx.network,
+        keyType,
+        role,
+        nextId,
+        normalizedPublicKey,
+      );
+      nextId += 1;
+      publicKeys.add(normalizedPublicKey);
+
+      const labels = {
+        network: ctx.network,
+        key_type: keyType,
+        role,
+        validator_index: String(entry.validatorIndex),
+      };
+
+      const secretName = await ensureSecretExists(ctx, secretId, labels);
+
+      const [version] = await ctx.client.addSecretVersion({
+        parent: secretName,
+        payload: { data: Buffer.from(entry.key, "utf8") },
+      });
+
+      const versionId = version.name?.split("/").pop();
+      console.log(
+        `  ➕ Added version ${versionId ?? "<unknown>"} to ${secretId} (validator ${entry.validatorIndex})`,
+      );
+    }
+  }
+};
+
 const command = async (
   ethClient: EthereumClient,
   config: ButlerConfig,
@@ -64,6 +221,13 @@ const command = async (
   );
 
   console.log("\n=== Processing Private Keys ===\n");
+
+  const allowedNetworks = ["eth-mainnet", "sepolia"] as const;
+  if (!allowedNetworks.includes(config.NETWORK as (typeof allowedNetworks)[number])) {
+    throw new Error(
+      `Unsupported network '${config.NETWORK}'. Supported: ${allowedNetworks.join(", ")}`,
+    );
+  }
 
   // 1. Load private keys file
   console.log(`Loading private keys: ${options.privateKeyFile}`);
@@ -107,6 +271,22 @@ const command = async (
       }
       if (!validator.feeRecipient) {
         throw new Error(`Validator ${i}: missing feeRecipient`);
+      }
+
+      // Validate publisher keys (string or array)
+      if (
+        validator.publisher === undefined ||
+        validator.publisher === null
+      ) {
+        throw new Error(`Validator ${i}: missing publisher private key(s)`);
+      }
+
+      const validatorPublisherKeys = Array.isArray(validator.publisher)
+        ? validator.publisher
+        : [validator.publisher];
+
+      if (validatorPublisherKeys.length === 0) {
+        throw new Error(`Validator ${i}: missing publisher private key(s)`);
       }
 
       // Derive ETH address from private key
@@ -159,19 +339,82 @@ const command = async (
 
   console.log(`✅ Successfully derived ${derivedKeys.length} public key(s)`);
 
-  // 3. GCP Storage Placeholder
-  console.log("\n=== GCP Storage (Placeholder) ===");
-  console.log("TODO: Implement GCP storage for private keys");
-  console.log("\nPrivate Keys & Derived Public Keys:");
-  for (let i = 0; i < derivedKeys.length; i++) {
-    const keys = derivedKeys[i]!;
-    console.log(`\nValidator ${i + 1}:`);
-    console.log(`  Private ETH Key: ${keys.privateKeys.eth}`);
-    console.log(`  Private BLS Key: ${keys.privateKeys.bls}`);
-    console.log(`  Public ETH Address: ${keys.publicKeys.eth}`);
-    console.log(`  Public BLS Key: ${keys.publicKeys.bls}`);
-    console.log(`  Fee Recipient: ${keys.feeRecipient}`);
+  // 3. Store secrets in GCP Secret Manager
+  console.log("\n=== GCP Secret Storage ===");
+
+  const secretManagerClient = new SecretManagerServiceClient();
+  const resolvedProjectId =
+    config.GCP_PROJECT_ID ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    (await secretManagerClient.getProjectId().catch(() => undefined));
+
+  if (!resolvedProjectId) {
+    throw new Error(
+      "GCP project ID not found. Set GCP_PROJECT_ID/GOOGLE_CLOUD_PROJECT and ensure Application Default Credentials are available (Workload Identity or gcloud auth application-default login).",
+    );
   }
+
+  console.log(
+    `Using Application Default Credentials to access project ${resolvedProjectId}`,
+  );
+
+  const secretContext: SecretManagerContext = {
+    client: secretManagerClient,
+    projectId: resolvedProjectId,
+    network: config.NETWORK,
+  };
+
+  const secretEntries: SecretEntry[] = [];
+
+  derivedKeys.forEach((keys, idx) => {
+    secretEntries.push(
+      {
+        role: "att",
+        keyType: "eth",
+        key: keys.privateKeys.eth,
+        validatorIndex: idx,
+        publicKey: keys.publicKeys.eth,
+      },
+      {
+        role: "att",
+        keyType: "bls",
+        key: keys.privateKeys.bls,
+        validatorIndex: idx,
+        publicKey: keys.publicKeys.bls,
+      },
+    );
+  });
+
+  // Publisher keys may contain duplicates across validators; keep unique entries while preserving index info
+  const publisherEntries = new Map<string, { validatorIndex: number; publicKey: string }>();
+  derivedKeys.forEach((keys, idx) => {
+    const validatorPublisherKeys = Array.isArray(privateKeysData.validators[idx]!.publisher)
+      ? privateKeysData.validators[idx]!.publisher
+      : [privateKeysData.validators[idx]!.publisher];
+
+    for (const key of validatorPublisherKeys) {
+      if (!publisherEntries.has(key)) {
+        const account = privateKeyToAccount(key as `0x${string}`);
+        publisherEntries.set(key, {
+          validatorIndex: idx,
+          publicKey: getAddress(account.address),
+        });
+      }
+    }
+  });
+
+  for (const [key, { validatorIndex, publicKey }] of publisherEntries.entries()) {
+    secretEntries.push({
+      role: "pub",
+      keyType: "eth",
+      key,
+      validatorIndex,
+      publicKey,
+    });
+  }
+
+  await addSecretVersions(secretContext, secretEntries);
+  console.log("✅ Stored private keys in GCP Secret Manager");
 
   // 4. Check provider queue for duplicates
   console.log("\n=== Checking Provider Queue ===");
@@ -207,7 +450,7 @@ const command = async (
         if (queueSet.has(attesterAddr.toLowerCase())) {
           throw new Error(
             `FATAL: Attester ${attesterAddr} is already in provider queue!\n` +
-              `Cannot process keys that are already queued.`,
+            `Cannot process keys that are already queued.`,
           );
         }
       }
