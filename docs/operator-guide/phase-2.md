@@ -120,6 +120,16 @@ vault kv put secret/aztec/validators/batch-2024-01 \
   keys=@new-private-keys.json
 ```
 
+- **Notify web3signer:** After secrets are stored in GCP, the command POSTs to
+  your web3signer instances so they pick up the new keys. Configure a
+  comma-separated list of base URLs in your `*-base.env`; `/reload` is added
+  automatically if omitted:
+
+  ```
+  WEB3SIGNER_URLS=https://sepolia-eth-web3signer,https://mainnet-eth-web3signer/reload
+  ```
+  Missing or failing URLs are logged; secrets are still uploaded.
+
 - [ ] Private keys stored in GCP Secret Manager / HSM / Vault
 - [ ] Verified keys are retrievable
 - [ ] Documented storage location and retrieval process

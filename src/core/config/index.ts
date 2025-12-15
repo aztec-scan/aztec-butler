@@ -6,6 +6,12 @@ import readline from "node:readline/promises";
 import { strict as assert } from "node:assert";
 import z from "zod";
 
+const parseUrlList = (value?: string) =>
+  value
+    ?.split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
+
 // Allow environment variable override for npm_package_version/name (useful when running via ts-node)
 const packageVersion =
   process.env.npm_package_version || process.env.NPM_PACKAGE_VERSION || "2.0.0";
@@ -171,6 +177,10 @@ function buildConfig(network: string) {
       .string()
       .optional()
       .parse(process.env.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1"),
+    WEB3SIGNER_URLS: z
+      .array(z.string().url())
+      .optional()
+      .parse(parseUrlList(process.env.WEB3SIGNER_URLS)),
   };
 }
 

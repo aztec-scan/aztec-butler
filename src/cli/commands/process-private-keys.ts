@@ -71,6 +71,72 @@ interface SecretEntry {
   publicKey: string;
 }
 
+const ensureReloadUrl = (rawUrl: string): string => {
+  try {
+    const url = new URL(rawUrl);
+    if (url.pathname === "/" || url.pathname === "") {
+      url.pathname = "/reload";
+    }
+    return url.toString();
+  } catch {
+    // Fallback: attempt to treat rawUrl as host without protocol
+    return `http://${rawUrl.replace(/\/$/, "")}/reload`;
+  }
+};
+
+const triggerWeb3SignerReloads = async (
+  network: string,
+  reloadUrls?: string[],
+) => {
+  if (!reloadUrls || reloadUrls.length === 0) {
+    console.log(
+      `No web3signer reload URLs configured for ${network}`,
+    );
+    return;
+  }
+
+  console.log(
+    `\n=== Triggering web3signer reloads for ${network} ===`,
+  );
+
+  const resolvedUrls = reloadUrls.map(ensureReloadUrl);
+
+  const results = await Promise.allSettled(
+    resolvedUrls.map(async (url) => {
+      const response = await fetch(url, { method: "POST" });
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(
+          `HTTP ${response.status} ${response.statusText}${body ? ` - ${body}` : ""}`,
+        );
+      }
+    }),
+  );
+
+  let failures = 0;
+  results.forEach((result, idx) => {
+    const url = resolvedUrls[idx]!;
+    if (result.status === "fulfilled") {
+      console.log(`  🔄 Reload triggered: ${url}`);
+    } else {
+      failures += 1;
+      console.error(
+        `  ❌ Reload failed for ${url}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+      );
+    }
+  });
+
+  if (failures === 0) {
+    console.log(
+      `✅ web3signer reload requests completed for ${reloadUrls.length} instance(s)`,
+    );
+  } else {
+    console.warn(
+      `⚠️  web3signer reloads finished with ${failures}/${reloadUrls.length} failure(s)`,
+    );
+  }
+};
+
 const createSecretId = (
   network: string,
   keyType: SecretKeyType,
@@ -415,6 +481,8 @@ const command = async (
 
   await addSecretVersions(secretContext, secretEntries);
   console.log("✅ Stored private keys in GCP Secret Manager");
+
+  await triggerWeb3SignerReloads(config.NETWORK, config.WEB3SIGNER_URLS);
 
   // 4. Check provider queue for duplicates
   console.log("\n=== Checking Provider Queue ===");
