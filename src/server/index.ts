@@ -9,6 +9,7 @@ import {
   initPublisherMetrics,
   initStakingRewardsMetrics,
   initEntryQueueMetrics,
+  initHostMetrics,
   getMetricsRegistry,
 } from "./metrics/index.js";
 import {
@@ -18,6 +19,7 @@ import {
   RollupScraper,
   StakingRewardsScraper,
   EntryQueueScraper,
+  HostScraper,
 } from "./scrapers/index.js";
 import { initHandlers, shutdownHandlers } from "./handlers/index.js";
 import {
@@ -190,6 +192,11 @@ async function initializeNetwork(
   const entryQueueScraper = new EntryQueueScraper(network, config, 600_000);
   scraperManager.register(entryQueueScraper, 600_000);
 
+  // Register host scraper (30 second interval)
+  console.log(`[${network}] Registering host scraper...`);
+  const hostScraper = new HostScraper(network);
+  scraperManager.register(hostScraper, 30_000);
+
   // Initialize staking provider metrics for this network
   console.log(`[${network}] Initializing staking provider metrics...`);
   initStakingProviderMetrics(network, stakingProviderScraper);
@@ -315,6 +322,7 @@ export const startServer = async (specificNetwork?: string) => {
   initPublisherMetrics();
   initStakingRewardsMetrics();
   initEntryQueueMetrics();
+  initHostMetrics();
 
   // Initialize config metrics for all networks
   initLog("Initializing configuration metrics for all networks...");

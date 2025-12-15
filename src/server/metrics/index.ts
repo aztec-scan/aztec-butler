@@ -10,3 +10,4 @@ export { initAttesterMetrics } from "./attester-metrics.js";
 export { initPublisherMetrics } from "./publisher-metrics.js";
 export { initStakingRewardsMetrics } from "./staking-rewards-metrics.js";
 export { initEntryQueueMetrics } from "./entry-queue-metrics.js";
+export { initHostMetrics } from "./host-metrics.js";
