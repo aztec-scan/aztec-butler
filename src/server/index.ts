@@ -90,9 +90,11 @@ async function initializeNetwork(
   console.log(`[${network}] Initializing state...`);
   initAttesterStatesFromCache(network, attesters);
 
-  // Extract just publisher addresses for PublisherScraper
-  const publisherAddresses = publishers.map((p) => p.address);
-  updatePublishersState(network, publisherAddresses);
+  // Keep publisher data with server IDs
+  updatePublishersState(
+    network,
+    publishers.map((p) => p.address),
+  );
 
   // Populate scraper config state for rollup scraper to use
   console.log(`[${network}] Populating scraper config state...`);
@@ -105,6 +107,7 @@ async function initializeNetwork(
 
   updateScraperConfigState(network, {
     network,
+    serverId: config.SERVER_ID,
     l1ChainId: nodeInfoForChainId.l1ChainId as 1 | 11155111,
     stakingProviderId: config.AZTEC_STAKING_PROVIDER_ID ?? 0n,
     stakingProviderAdmin:
@@ -114,7 +117,10 @@ async function initializeNetwork(
       address: a.address,
       coinbase: a.coinbase,
     })),
-    publishers: publisherAddresses,
+    publishers: publishers.map((p) => ({
+      address: p.address,
+      serverId: p.serverId,
+    })),
     lastUpdated: new Date().toISOString(),
     version: "1.1",
   });
@@ -159,7 +165,7 @@ async function initializeNetwork(
   const publisherScraper = new PublisherScraper(
     network,
     config,
-    publisherAddresses,
+    publishers.map((p) => p.address),
   );
   scraperManager.register(publisherScraper, 30_000);
 

@@ -122,7 +122,10 @@ export class ConfigReloader {
             address: a.address,
             coinbase: a.coinbase,
           })),
-          publishers: publisherAddresses,
+          publishers: publishers.map((p) => ({
+            address: p.address,
+            serverId: p.serverId,
+          })),
           lastUpdated: new Date().toISOString(),
         });
       }

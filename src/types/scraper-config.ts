@@ -23,14 +23,20 @@ export const ScraperAttesterSchema = z.object({
     .optional(),
 });
 
+export const ScraperPublisherSchema = z.object({
+  address: z.string().startsWith("0x").length(42),
+  serverId: z.string(),
+});
+
 export const ScraperConfigSchema = z
   .object({
     network: z.string(),
+    serverId: z.string().optional(), // Optional server identifier for multi-server deployments (deprecated - use publishers[].serverId)
     l1ChainId: z.union([z.literal(1), z.literal(11155111)]), // TODO: use named constants from somehwere (mainnet and sepolia)
     stakingProviderId: z.coerce.bigint(),
     stakingProviderAdmin: z.string().startsWith("0x").length(42),
     attesters: z.array(ScraperAttesterSchema),
-    publishers: z.array(z.string().startsWith("0x").length(42)),
+    publishers: z.array(ScraperPublisherSchema),
     lastUpdated: z.string().datetime(),
     version: z.literal("1.1"),
   })
@@ -48,7 +54,7 @@ export const ScraperConfigSchema = z
   .refine(
     (config) => {
       // Check for duplicate publisher addresses (case-insensitive)
-      const publishers = config.publishers.map((p) => p.toLowerCase());
+      const publishers = config.publishers.map((p) => p.address.toLowerCase());
       const uniquePublishers = new Set(publishers);
       return publishers.length === uniquePublishers.size;
     },
@@ -59,6 +65,7 @@ export const ScraperConfigSchema = z
 
 export type ScraperConfig = z.infer<typeof ScraperConfigSchema>;
 export type ScraperAttester = z.infer<typeof ScraperAttesterSchema>;
+export type ScraperPublisher = z.infer<typeof ScraperPublisherSchema>;
 
 // Coinbase Mapping Cache Schemas
 
