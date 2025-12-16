@@ -20,6 +20,12 @@ const packageName =
   process.env.NPM_PACKAGE_NAME ||
   "aztec-butler";
 
+const SENSITIVE_CONFIG_KEYS = new Set([
+  "METRICS_BEARER_TOKEN",
+  "SAFE_API_KEY",
+  "MULTISIG_PROPOSER_PRIVATE_KEY",
+]);
+
 export const PACKAGE_VERSION = packageVersion;
 export const PACKAGE_NAME = packageName;
 
@@ -62,7 +68,9 @@ async function loadNetworkConfig(
     // TODO: add default false "showSensitiveInfo"
     console.log(`CONFIGURATION (reading from ${configPath}):
 ${Object.entries(config)
-  .map(([key, value]) => `  ${key}\t${value}`)
+  .map(([key, value]) =>
+    `  ${key}\t${SENSITIVE_CONFIG_KEYS.has(key) ? "[redacted]" : value}`,
+  )
   .join("\n")}
 `);
   }
@@ -154,6 +162,12 @@ function buildConfig(network: string) {
       .string()
       .optional()
       .parse(process.env.GOOGLE_SHEETS_SPREADSHEET_ID),
+    GOOGLE_SERVICE_ACCOUNT_KEY_FILE: z
+      .string()
+      .optional()
+      .parse(
+        process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE,
+      ),
     GOOGLE_SHEETS_RANGE: z
       .string()
       .optional()

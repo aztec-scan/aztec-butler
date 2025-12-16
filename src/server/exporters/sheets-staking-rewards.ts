@@ -3,17 +3,18 @@ import {
   getStakingRewardsHistory,
 } from "../state/index.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-import { GoogleAuth } from "google-auth-library";
+import { getServiceAccountAuth } from "../../core/utils/googleAuth.js";
 
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
-const sheetsAuthClient = new GoogleAuth({ scopes: [SHEETS_SCOPE] });
-
-const getAccessToken = async () => {
-  const client = await sheetsAuthClient.getClient();
+const getAccessToken = async (config: ButlerConfig) => {
+  const auth = await getServiceAccountAuth(config, [SHEETS_SCOPE]);
+  const client = await auth.getClient();
   const accessToken = await client.getAccessToken();
   if (!accessToken || !accessToken.token) {
-    throw new Error("Failed to obtain Google access token via ADC");
+    throw new Error(
+      "Failed to obtain Google access token using service account credentials",
+    );
   }
 
   return accessToken.token;
@@ -337,7 +338,7 @@ export const exportStakingRewardsDailyToSheets = async (
 
   const range = config.GOOGLE_SHEETS_RANGE || "Daily!A1";
 
-  const token = await getAccessToken();
+  const token = await getAccessToken(config);
   const rows = formatDailyRows(network);
 
   const res = await fetch(
@@ -377,7 +378,7 @@ export const exportStakingRewardsDailyPerCoinbaseToSheets = async (
   const range =
     config.GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE || "DailyPerCoinbase!A1";
 
-  const token = await getAccessToken();
+  const token = await getAccessToken(config);
   const rows = formatDailyPerCoinbaseRows(network);
 
   const res = await fetch(
@@ -418,7 +419,7 @@ export const exportStakingRewardsDailyEarnedToSheets = async (
 
   const range = config.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1";
 
-  const token = await getAccessToken();
+  const token = await getAccessToken(config);
   const rows = formatDailyEarnedRows(network);
 
   const res = await fetch(
@@ -459,7 +460,7 @@ export const exportCoinbasesToSheets = async (
 
   const range = config.GOOGLE_SHEETS_COINBASES_RANGE || "Coinbases!A1";
 
-  const token = await getAccessToken();
+  const token = await getAccessToken(config);
   const rows = formatCoinbaseRows(network);
 
   const res = await fetch(

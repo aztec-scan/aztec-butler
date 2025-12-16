@@ -6,6 +6,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { computeBn254G1PublicKeyCompressed } from "@aztec/foundation/crypto";
 import { SecretManagerServiceClient } from "@google-cloud/secret-manager";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
+import { getServiceAccountCredentials } from "../../core/utils/googleAuth.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import type { HexString } from "../../types/index.js";
 
@@ -408,25 +409,42 @@ const command = async (
   // 3. Store secrets in GCP Secret Manager
   console.log("\n=== GCP Secret Storage ===");
 
-  const secretManagerClient = new SecretManagerServiceClient();
-  const resolvedProjectId =
-    config.GCP_PROJECT_ID ||
-    process.env.GOOGLE_CLOUD_PROJECT ||
+  const serviceAccountCredentials =
+    await getServiceAccountCredentials(config);
+  const resolvedProjectId = serviceAccountCredentials.project_id ||
+    config.GCP_PROJECT_ID;
+
+  const secretManagerClientOptions: ConstructorParameters<
+    typeof SecretManagerServiceClient
+  >[0] = {
+    credentials: serviceAccountCredentials,
+  };
+
+  if (resolvedProjectId) {
+    secretManagerClientOptions.projectId = resolvedProjectId;
+  }
+
+  const secretManagerClient = new SecretManagerServiceClient(
+    secretManagerClientOptions,
+  );
+
+  const projectId =
+    resolvedProjectId ||
     (await secretManagerClient.getProjectId().catch(() => undefined));
 
-  if (!resolvedProjectId) {
+  if (!projectId) {
     throw new Error(
-      "GCP project ID not found. Set GCP_PROJECT_ID/GOOGLE_CLOUD_PROJECT and ensure Application Default Credentials are available (Workload Identity or gcloud auth application-default login).",
+      "GCP project ID not found. Set GCP_PROJECT_ID or include project_id in the Google service account key JSON.",
     );
   }
 
   console.log(
-    `Using Application Default Credentials to access project ${resolvedProjectId}`,
+    `Using Google service account ${serviceAccountCredentials.client_email} for project ${projectId}`,
   );
 
   const secretContext: SecretManagerContext = {
     client: secretManagerClient,
-    projectId: resolvedProjectId,
+    projectId,
     network: config.NETWORK,
   };
 

@@ -96,9 +96,12 @@ cat public-new-private-keys.json | jq '.'
 **🔴 CRITICAL: Store private keys before proceeding**
 
 `aztec-butler process-private-keys` now uploads attester (ETH + BLS) and publisher
-private keys directly to **GCP Secret Manager** using Application Default
-Credentials (Workload Identity or `gcloud auth application-default login`—no JSON
-key file required). Secrets are created per key with incremental IDs and the public key appended:
+private keys directly to **GCP Secret Manager** using a Google service account
+JSON key (no user re-auth needed). Point `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` to the
+key file path in your `*-base.env`; the same key is used for Sheets exports.
+`GCP_PROJECT_ID` (or the `project_id` in the key) determines the target project.
+Secrets stored in **GCP Secret Manager** are created per key with incremental IDs
+and the public key appended:
 
 ```
 web3signer-${network}-${keyType}-${att|pub}-${id}-${publicKey}
