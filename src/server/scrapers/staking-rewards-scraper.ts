@@ -144,6 +144,19 @@ export class StakingRewardsScraper extends AbstractScraper {
     let totalOurShare = 0n;
     for (const entry of coinbases) {
       try {
+        const isDeployed = await this.isCoinbaseDeployed(
+          entry.coinbase,
+          blockNumber,
+          useArchiveClient,
+        );
+
+        if (!isDeployed) {
+          console.warn(
+            `[staking-rewards] Coinbase ${entry.coinbase} not yet deployed at block ${blockNumber}, skipping until it is on-chain`,
+          );
+          continue;
+        }
+
         const pendingRewards = await rollupContract.read.getSequencerRewards(
           [entry.coinbase],
           { blockNumber },
@@ -406,6 +419,34 @@ export class StakingRewardsScraper extends AbstractScraper {
     console.log("[staking-rewards] Shutting down...");
     this.ethClient = null;
     updateStakingRewardsData(this.network, null);
+  }
+
+  private async isCoinbaseDeployed(
+    coinbase: string,
+    blockNumber: bigint,
+    useArchiveClient: boolean,
+  ): Promise<boolean> {
+    if (!this.ethClient) {
+      throw new Error("Ethereum client not initialized");
+    }
+
+    const archiveClient = this.ethClient.getArchiveClient();
+    const client =
+      useArchiveClient && archiveClient ? archiveClient : this.ethClient.getPublicClient();
+
+    try {
+      const bytecode = await client.getCode({
+        address: getAddress(coinbase as `0x${string}`),
+        blockNumber,
+      });
+      return bytecode !== "0x";
+    } catch (err) {
+      console.warn(
+        `[staking-rewards] Failed to check deployment for coinbase ${coinbase} at block ${blockNumber}, will retry next scrape`,
+        err,
+      );
+      return false;
+    }
   }
 
   private getCoinbaseEntries(): CoinbaseEntry[] {
