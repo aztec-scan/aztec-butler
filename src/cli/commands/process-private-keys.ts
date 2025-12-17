@@ -289,7 +289,7 @@ const command = async (
 
   console.log("\n=== Processing Private Keys ===\n");
 
-  const allowedNetworks = ["eth-mainnet", "sepolia"] as const;
+  const allowedNetworks = ["mainnet", "testnet"] as const;
   if (!allowedNetworks.includes(config.NETWORK as (typeof allowedNetworks)[number])) {
     throw new Error(
       `Unsupported network '${config.NETWORK}'. Supported: ${allowedNetworks.join(", ")}`,
