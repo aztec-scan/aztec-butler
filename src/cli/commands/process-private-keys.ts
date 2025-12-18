@@ -35,6 +35,7 @@ interface PublicKeyValidator {
     eth: string;
     bls: string;
   };
+  publisher: string;
   feeRecipient: string;
 }
 
@@ -90,15 +91,11 @@ const triggerWeb3SignerReloads = async (
   reloadUrls?: string[],
 ) => {
   if (!reloadUrls || reloadUrls.length === 0) {
-    console.log(
-      `No web3signer reload URLs configured for ${network}`,
-    );
+    console.log(`No web3signer reload URLs configured for ${network}`);
     return;
   }
 
-  console.log(
-    `\n=== Triggering web3signer reloads for ${network} ===`,
-  );
+  console.log(`\n=== Triggering web3signer reloads for ${network} ===`);
 
   const resolvedUrls = reloadUrls.map(ensureReloadUrl);
 
@@ -174,7 +171,9 @@ const ensureSecretExists = async (
       },
     });
 
-    console.log(`Created secret ${secretId} with labels ${JSON.stringify(labels)}`);
+    console.log(
+      `Created secret ${secretId} with labels ${JSON.stringify(labels)}`,
+    );
     return name;
   }
 };
@@ -217,12 +216,15 @@ const addSecretVersions = async (
   ctx: SecretManagerContext,
   entries: SecretEntry[],
 ) => {
-  const grouped = entries.reduce<Record<string, SecretEntry[]>>((acc, entry) => {
-    const key = `${entry.role}-${entry.keyType}`;
-    acc[key] ??= [];
-    acc[key]!.push(entry);
-    return acc;
-  }, {});
+  const grouped = entries.reduce<Record<string, SecretEntry[]>>(
+    (acc, entry) => {
+      const key = `${entry.role}-${entry.keyType}`;
+      acc[key] ??= [];
+      acc[key]!.push(entry);
+      return acc;
+    },
+    {},
+  );
 
   for (const groupKey of Object.keys(grouped)) {
     const [role, keyType] = groupKey.split("-") as [SecretRole, SecretKeyType];
@@ -290,7 +292,11 @@ const command = async (
   console.log("\n=== Processing Private Keys ===\n");
 
   const allowedNetworks = ["mainnet", "testnet"] as const;
-  if (!allowedNetworks.includes(config.NETWORK as (typeof allowedNetworks)[number])) {
+  if (
+    !allowedNetworks.includes(
+      config.NETWORK as (typeof allowedNetworks)[number],
+    )
+  ) {
     throw new Error(
       `Unsupported network '${config.NETWORK}'. Supported: ${allowedNetworks.join(", ")}`,
     );
@@ -341,10 +347,7 @@ const command = async (
       }
 
       // Validate publisher keys (string or array)
-      if (
-        validator.publisher === undefined ||
-        validator.publisher === null
-      ) {
+      if (validator.publisher === undefined || validator.publisher === null) {
         throw new Error(`Validator ${i}: missing publisher private key(s)`);
       }
 
@@ -409,10 +412,9 @@ const command = async (
   // 3. Store secrets in GCP Secret Manager
   console.log("\n=== GCP Secret Storage ===");
 
-  const serviceAccountCredentials =
-    await getServiceAccountCredentials(config);
-  const resolvedProjectId = serviceAccountCredentials.project_id ||
-    config.GCP_PROJECT_ID;
+  const serviceAccountCredentials = await getServiceAccountCredentials(config);
+  const resolvedProjectId =
+    serviceAccountCredentials.project_id || config.GCP_PROJECT_ID;
 
   const secretManagerClientOptions: ConstructorParameters<
     typeof SecretManagerServiceClient
@@ -469,33 +471,21 @@ const command = async (
     );
   });
 
-  // Publisher keys may contain duplicates across validators; keep unique entries while preserving index info
-  const publisherEntries = new Map<string, { validatorIndex: number; publicKey: string }>();
+  // Publisher keys - skip storing to GCP with warnings
+  console.log(
+    "\n⚠️  Skipping publisher private keys - will not be stored to GCP",
+  );
   derivedKeys.forEach((keys, idx) => {
-    const validatorPublisherKeys = Array.isArray(privateKeysData.validators[idx]!.publisher)
+    const validatorPublisherKeys = Array.isArray(
+      privateKeysData.validators[idx]!.publisher,
+    )
       ? privateKeysData.validators[idx]!.publisher
       : [privateKeysData.validators[idx]!.publisher];
 
-    for (const key of validatorPublisherKeys) {
-      if (!publisherEntries.has(key)) {
-        const account = privateKeyToAccount(key as `0x${string}`);
-        publisherEntries.set(key, {
-          validatorIndex: idx,
-          publicKey: getAddress(account.address),
-        });
-      }
-    }
+    console.log(
+      `  ⚠️  Validator ${idx}: Skipping ${validatorPublisherKeys.length} publisher key(s)`,
+    );
   });
-
-  for (const [key, { validatorIndex, publicKey }] of publisherEntries.entries()) {
-    secretEntries.push({
-      role: "pub",
-      keyType: "eth",
-      key,
-      validatorIndex,
-      publicKey,
-    });
-  }
 
   await addSecretVersions(secretContext, secretEntries);
   console.log("✅ Stored private keys in GCP Secret Manager");
@@ -536,7 +526,7 @@ const command = async (
         if (queueSet.has(attesterAddr.toLowerCase())) {
           throw new Error(
             `FATAL: Attester ${attesterAddr} is already in provider queue!\n` +
-            `Cannot process keys that are already queued.`,
+              `Cannot process keys that are already queued.`,
           );
         }
       }
@@ -560,6 +550,7 @@ const command = async (
         eth: k.publicKeys.eth,
         bls: k.publicKeys.bls,
       },
+      publisher: "0x0000000000000000000000000000000000000000",
       feeRecipient: k.feeRecipient,
     })),
   };
@@ -580,9 +571,12 @@ const command = async (
   console.log(`Processed ${derivedKeys.length} validator(s)`);
   console.log(`Output: ${outputFile}`);
   console.log(
-    `Public keys generated with: attester.eth, attester.bls, feeRecipient`,
+    `Public keys generated with: attester.eth, attester.bls, publisher (zero address), feeRecipient`,
   );
-  console.log(`Excluded from output: publisher, coinbase`);
+  console.log(
+    `Publisher private keys were NOT stored to GCP (zero address used in output)`,
+  );
+  console.log(`Excluded from output: coinbase`);
   console.log("\n✅ Process complete!");
 };
 

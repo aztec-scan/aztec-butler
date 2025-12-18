@@ -1,6 +1,10 @@
 import fs from "fs/promises";
 import path from "path";
-import { KeystoreDataSchema, type KeystoreData } from "../../types/keystore.js";
+import {
+  KeystoreDataSchema,
+  KeystoreDataSchemaLenient,
+  type KeystoreData,
+} from "../../types/keystore.js";
 import { privateKeyToAccount } from "viem/accounts";
 import type { HexString } from "../../types/common.js";
 
@@ -16,9 +20,13 @@ export interface Keystore {
  */
 export async function loadKeystoresFromPaths(
   keystorePaths: string[],
+  options?: { lenientCoinbaseValidation?: boolean },
 ): Promise<Keystore[]> {
   const keystores: Keystore[] = [];
   const notNumbers = /[^0-9]/g;
+  const schema = options?.lenientCoinbaseValidation
+    ? KeystoreDataSchemaLenient
+    : KeystoreDataSchema;
 
   for (const keystorePath of keystorePaths) {
     try {
@@ -26,7 +34,7 @@ export async function loadKeystoresFromPaths(
       const data = JSON.parse(content);
 
       // Validate with Zod schema
-      const validated = KeystoreDataSchema.parse(data);
+      const validated = schema.parse(data);
 
       keystores.push({
         path: keystorePath,

@@ -39,10 +39,10 @@ If you're already familiar with the process:
 
 ```bash
 # Phase 1: Generate keys
-aztec validator-keys generate --num-validators 2
+aztec validator-keys new --fee-recipient 0x0000000000000000000000000000000000000000000000000000000000000000 --publisher-count 1 --count 100 --coinbase 0x0000000000000000000000000000000000000000 --data-dir ./
 
 # Phase 2: Process private keys
-aztec-butler process-private-keys new-private-keys.json
+aztec-butler process-private-keys key1.json --network mainnet
 
 # Phase 3: Prepare deployment
 aztec-butler prepare-deployment \

@@ -25,15 +25,21 @@ flowchart LR
 Use the Aztec CLI to generate new validator keys:
 
 ```bash
-aztec validator-keys generate \
-  --num-validators 2 \
-  --output new-private-keys.json
+aztec validator-keys new \
+  --fee-recipient 0x0000000000000000000000000000000000000000000000000000000000000000 \
+  --publisher-count 1 \
+  --count 2 \
+  --coinbase 0x0000000000000000000000000000000000000000 \
+  --data-dir ./
 ```
 
 **Parameters:**
 
-- `--num-validators`: Number of new validators to create
-- `--output`: Output filename (default: generates random name)
+- `--count`: Number of new validators to create
+- `--publisher-count`: Number of publishers per validator
+- `--fee-recipient`: Address to receive fees (use 0x0000... for default)
+- `--coinbase`: Coinbase address for the validator (use 0x0000... for default)
+- `--data-dir`: Directory where the keys file will be generated
 
 ### 2. Verify Generated File
 

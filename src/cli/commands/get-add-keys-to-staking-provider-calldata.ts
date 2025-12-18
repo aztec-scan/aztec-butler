@@ -9,6 +9,7 @@ import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { STAKING_REGISTRY_ABI, HexString } from "../../types/index.js";
 import { ButlerConfig } from "../../core/config/index.js";
 import { extractAttesterCoinbasePairs } from "../../core/utils/keystoreOperations.js";
+import { SafeGlobalClient } from "../../core/components/SafeGlobalClient.js";
 
 interface AddKeysOptions {
   keystorePath: string;
@@ -32,12 +33,14 @@ const command = async (
 
   console.log("\n=== Generating Add Keys Calldata ===\n");
 
-  // 1. Load keystore
+  // 1. Load keystore (with lenient coinbase validation for this command)
   console.log(`Loading keystore: ${options.keystorePath}`);
   const { loadKeystoresFromPaths } = await import(
     "../../core/utils/keystoreOperations.js"
   );
-  const keystores = await loadKeystoresFromPaths([options.keystorePath]);
+  const keystores = await loadKeystoresFromPaths([options.keystorePath], {
+    lenientCoinbaseValidation: true,
+  });
   const keystore = keystores[0]!;
   console.log(
     `✅ Loaded keystore with ${keystore.data.validators.length} validator(s)`,
@@ -135,31 +138,127 @@ const command = async (
     `✅ Generated registration data for ${keyStores.length} attester(s)`,
   );
 
-  // 5. Generate calldata
-  const callData = {
+  // 5. Split into chunks of 50
+  const CHUNK_SIZE = 50;
+  const chunks: (typeof keyStores)[] = [];
+  for (let i = 0; i < keyStores.length; i += CHUNK_SIZE) {
+    chunks.push(keyStores.slice(i, i + CHUNK_SIZE));
+  }
+
+  console.log(
+    `\n📦 Splitting ${keyStores.length} attester(s) into ${chunks.length} chunk(s) of up to ${CHUNK_SIZE}`,
+  );
+
+  // 6. Generate calldata for each chunk
+  const callDataChunks = chunks.map((chunk, index) => ({
+    chunkNumber: index + 1,
+    attestersCount: chunk.length,
     contractToCall: ethClient.getStakingRegistryAddress(),
     callData: encodeFunctionData({
       abi: STAKING_REGISTRY_ABI,
       functionName: "addKeysToProvider",
-      args: [stakingProviderData.providerId, keyStores],
+      args: [stakingProviderData.providerId, chunk],
     }),
-  };
+  }));
 
-  console.log(`\n=== ADD KEYS TO STAKING PROVIDER CALL DATA ===`);
-  console.log(JSON.stringify(callData, null, 2));
+  // Log calldata for each chunk
+  for (const chunkData of callDataChunks) {
+    console.log(
+      `\n=== ADD KEYS TO STAKING PROVIDER CALL DATA - CHUNK ${chunkData.chunkNumber}/${chunks.length} (${chunkData.attestersCount} attesters) ===`,
+    );
+    console.log(
+      JSON.stringify(
+        {
+          contractToCall: chunkData.contractToCall,
+          callData: chunkData.callData,
+        },
+        null,
+        2,
+      ),
+    );
+  }
 
-  // List attester addresses
-  console.log(`\n=== Attester Addresses ===`);
-  attesterAddresses.forEach((attester: string, index: number) => {
-    console.log(`${index + 1}. ${attester}`);
+  // List attester addresses by chunk
+  console.log(`\n=== Attester Addresses by Chunk ===`);
+  chunks.forEach((chunk, chunkIndex) => {
+    console.log(
+      `\nChunk ${chunkIndex + 1}/${chunks.length} (${chunk.length} attesters):`,
+    );
+    chunk.forEach((keyStore, index) => {
+      const globalIndex = chunkIndex * CHUNK_SIZE + index;
+      console.log(`${globalIndex + 1}. ${keyStore.attester}`);
+    });
   });
 
-  console.warn(
-    "\n⚠️  Note: Automatic multisig proposal is not yet implemented.",
-  );
-  console.warn(
-    "    Please copy the calldata above and propose it manually to your Safe multisig.",
-  );
+  // Check if automatic Safe proposal is enabled
+  if (
+    config.SAFE_PROPOSALS_ENABLED &&
+    config.SAFE_ADDRESS &&
+    config.MULTISIG_PROPOSER_PRIVATE_KEY &&
+    config.SAFE_API_KEY
+  ) {
+    console.log("\n🔄 Automatic multisig proposal is enabled...");
+    console.log(`📤 Proposing ${callDataChunks.length} transaction(s) to Safe`);
+
+    try {
+      const safeClient = new SafeGlobalClient({
+        safeAddress: config.SAFE_ADDRESS,
+        chainId: config.ETHEREUM_CHAIN_ID,
+        rpcUrl: config.ETHEREUM_NODE_URL,
+        proposerPrivateKey: config.MULTISIG_PROPOSER_PRIVATE_KEY,
+        safeApiKey: config.SAFE_API_KEY,
+      });
+
+      for (const chunkData of callDataChunks) {
+        console.log(
+          `\n📝 Proposing chunk ${chunkData.chunkNumber}/${chunks.length} (${chunkData.attestersCount} attesters)...`,
+        );
+        await safeClient.proposeTransaction({
+          to: chunkData.contractToCall,
+          data: chunkData.callData,
+          value: "0",
+        });
+        console.log(
+          `✅ Chunk ${chunkData.chunkNumber}/${chunks.length} successfully proposed!`,
+        );
+      }
+
+      console.log(
+        "\n✅ All transactions successfully proposed to Safe multisig!",
+      );
+      console.log(
+        `   View in Safe UI: https://app.safe.global/transactions/queue?safe=eth:${config.SAFE_ADDRESS}`,
+      );
+    } catch (error) {
+      console.error("\n❌ Failed to propose transaction to Safe:");
+      console.error(error);
+      console.warn(
+        "\n⚠️  Please copy the calldata above and propose it manually to your Safe multisig.",
+      );
+    }
+  } else {
+    console.warn("\n⚠️  Note: Automatic multisig proposal is not enabled.");
+    console.warn(
+      "    Please copy the calldata above and propose it manually to your Safe multisig.",
+    );
+
+    if (!config.SAFE_PROPOSALS_ENABLED) {
+      console.log(
+        "\n💡 To enable automatic proposals, set SAFE_PROPOSALS_ENABLED=true in your config",
+      );
+    }
+    if (!config.SAFE_ADDRESS) {
+      console.log("💡 Set SAFE_ADDRESS in your config");
+    }
+    if (!config.MULTISIG_PROPOSER_PRIVATE_KEY) {
+      console.log("💡 Set MULTISIG_PROPOSER_PRIVATE_KEY in your config");
+    }
+    if (!config.SAFE_API_KEY) {
+      console.log(
+        "💡 Set SAFE_API_KEY in your config (get one from https://app.safe.global/settings/api-key)",
+      );
+    }
+  }
 };
 
 export default command;

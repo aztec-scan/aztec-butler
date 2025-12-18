@@ -8,15 +8,29 @@ export const ValidatorSchema = z.object({
     bls: HexStringSchema,
     eth: HexStringSchema,
   }),
-  coinbase: HexStringSchema.refine((val) => val !== ZERO_ADDRESS, {
-    message: "Coinbase cannot be zero address",
-  }).optional(),
+  coinbase: HexStringSchema.optional(),
   publisher: z.union([HexStringSchema, z.array(HexStringSchema)]),
   feeRecipient: HexStringSchema,
 });
 
 export const KeystoreDataSchema = z.object({
   validators: z.array(ValidatorSchema),
+});
+
+// Lenient validator schema that allows zero-address coinbase
+// Used for commands where coinbase validation is not required
+const ValidatorSchemaLenient = z.object({
+  attester: z.object({
+    bls: HexStringSchema,
+    eth: HexStringSchema,
+  }),
+  coinbase: HexStringSchema.optional(),
+  publisher: z.union([HexStringSchema, z.array(HexStringSchema)]),
+  feeRecipient: HexStringSchema,
+});
+
+export const KeystoreDataSchemaLenient = z.object({
+  validators: z.array(ValidatorSchemaLenient),
 });
 
 export const KeystoreSchema = z.object({

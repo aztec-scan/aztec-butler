@@ -415,7 +415,7 @@ Provider ID: 42
 
 ```bash
 # Phase 1: Generate private keys using aztec CLI (outside butler)
-# aztec validator-keys generate --num 2 --output new-private-keys.json
+# aztec validator-keys new --fee-recipient 0x0000000000000000000000000000000000000000000000000000000000000000 --publisher-count 1 --count 2 --coinbase 0x0000000000000000000000000000000000000000 --data-dir ./
 
 # Phase 2: Process private keys
 ./scripts/process-private-keys.sh new-private-keys.json
@@ -494,13 +494,39 @@ Provider ID: 42
 
 ```bash
 # 1. Add new keystore file to ./keystores/
-# 2. Generate calldata
+# 2. Generate calldata (and optionally auto-propose to Safe)
 ./scripts/add-keys.sh keystores/production/testnet/key2.json
 
-# 3. Copy calldata and propose to Safe multisig
+# With network flag
+./scripts/add-keys.sh keystores/production/mainnet/key1.json --network mainnet
+
+# 3a. If SAFE_PROPOSALS_ENABLED=true, transaction is automatically proposed
+# 3b. Otherwise, copy calldata and propose manually to Safe multisig
 # 4. After transaction succeeds, verify with:
 ./scripts/check-publisher-eth.sh
 ```
+
+**Automatic Safe Proposals:**
+
+To enable automatic transaction proposals to your Safe multisig:
+
+1. Get a Safe API key from https://app.safe.global/settings/api-key
+2. Configure your environment:
+   ```bash
+   SAFE_ADDRESS=0x...              # Your Safe multisig address
+   SAFE_PROPOSALS_ENABLED=true     # Enable automatic proposals
+   SAFE_API_KEY=your-api-key       # API key from Safe
+   MULTISIG_PROPOSER_PRIVATE_KEY=0x...  # Private key of a Safe signer
+   ```
+3. Run the command as usual - it will automatically propose the transaction
+
+When enabled, the script will:
+
+- Generate the calldata
+- Create a Safe transaction proposal
+- Output a link to view the proposal in the Safe UI
+
+Other signers can then review and approve the transaction in the Safe interface.
 
 ### Periodic Maintenance
 
