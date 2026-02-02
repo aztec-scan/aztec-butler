@@ -84,7 +84,7 @@ echo "New public keys: $NEW_PUBLIC_KEYS"
 echo "Available publishers: $AVAILABLE_PUBLISHERS"
 echo ""
 
-npm run cli -- prepare-deployment \
+npx tsx cli.ts prepare-deployment \
   --production-keys "$PRODUCTION_KEYS" \
   --new-public-keys "$NEW_PUBLIC_KEYS" \
   --available-publishers "$AVAILABLE_PUBLISHERS" \

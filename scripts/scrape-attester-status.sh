@@ -80,5 +80,5 @@ if [[ $# -eq 0 ]]; then
   echo ""
 fi
 
-# Pass all arguments to the CLI
-npm run cli -- scrape-attester-status "$@"
+# Pass all arguments to the CLI using tsx (ts-node/esm has issues with Node.js v22)
+npx tsx cli.ts scrape-attester-status "$@"

@@ -50,4 +50,4 @@ echo ""
 echo "Input: $PRIVATE_KEY_FILE"
 echo ""
 
-npm run cli -- process-private-keys "$PRIVATE_KEY_FILE" "$@"
+npx tsx cli.ts process-private-keys "$PRIVATE_KEY_FILE" "$@"

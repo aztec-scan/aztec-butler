@@ -26,5 +26,5 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Run the command
-npm run cli -- get-queue-stats $NETWORK_FLAG $JSON_FLAG
+# Run the command using tsx (ts-node/esm has issues with Node.js v22)
+npx tsx cli.ts get-queue-stats $NETWORK_FLAG $JSON_FLAG

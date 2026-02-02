@@ -22,20 +22,40 @@ import { inspect } from "util";
 function formatError(error: unknown): string {
   // Handle standard Error instances
   if (error instanceof Error) {
-    return error.stack || error.message;
+    // Check for nested cause
+    let message = error.stack || error.message;
+    if (error.cause) {
+      message += `\n\nCaused by: ${formatError(error.cause)}`;
+    }
+    return message;
   }
 
   // Handle objects with error-like properties
   if (error && typeof error === "object") {
     const err = error as any;
+
+    // Check for common RPC/fetch error patterns
+    if (err.code && err.message) {
+      return `${err.code}: ${err.message}${err.details ? `\n  Details: ${err.details}` : ""}`;
+    }
+
     // Try common error properties
     if (err.message) return String(err.message);
     if (err.reason) return String(err.reason);
     if (err.shortMessage) return String(err.shortMessage);
 
-    // Try JSON.stringify
+    // Check for response/status from fetch errors
+    if (err.status || err.statusText) {
+      return `HTTP ${err.status || "?"}: ${err.statusText || "Unknown error"}${err.url ? ` (${err.url})` : ""}`;
+    }
+
+    // Try JSON.stringify (with custom replacer for BigInt)
     try {
-      const json = JSON.stringify(error, null, 2);
+      const json = JSON.stringify(
+        error,
+        (key, value) => (typeof value === "bigint" ? value.toString() : value),
+        2,
+      );
       if (json && json !== "{}") return json;
     } catch {}
 
@@ -52,6 +72,19 @@ function formatError(error: unknown): string {
   // Primitive types
   return String(error);
 }
+
+// Global error handlers to catch uncaught exceptions and unhandled rejections
+process.on("uncaughtException", (error) => {
+  console.error("❌ Uncaught Exception:\n");
+  console.error(formatError(error));
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ Unhandled Rejection:\n");
+  console.error(formatError(reason));
+  process.exit(1);
+});
 
 /**
  * Helper to parse BigInt values from command-line arguments
@@ -75,7 +108,20 @@ async function initEthClient(config: ButlerConfig): Promise<EthereumClient> {
   const aztecClient = new AztecClient({
     nodeUrl: config.AZTEC_NODE_URL,
   });
-  const nodeInfo = await aztecClient.getNodeInfo();
+
+  let nodeInfo;
+  try {
+    nodeInfo = await aztecClient.getNodeInfo();
+  } catch (error) {
+    throw new Error(
+      `Failed to connect to Aztec node at ${config.AZTEC_NODE_URL}\n` +
+        `Please check:\n` +
+        `  1. The node is running and accessible\n` +
+        `  2. AZTEC_NODE_URL is correctly configured\n` +
+        `  3. Network connectivity to the node\n\n` +
+        `Original error: ${formatError(error)}`,
+    );
+  }
 
   // Initialize Ethereum client
   const ethClient = new EthereumClient({
@@ -87,7 +133,16 @@ async function initEthClient(config: ButlerConfig): Promise<EthereumClient> {
     rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
   });
 
-  await ethClient.verifyChainId();
+  try {
+    await ethClient.verifyChainId();
+  } catch (error) {
+    throw new Error(
+      `Failed to verify Ethereum chain ID at ${config.ETHEREUM_NODE_URL}\n` +
+        `Expected chain ID: ${nodeInfo.l1ChainId}\n\n` +
+        `Original error: ${formatError(error)}`,
+    );
+  }
+
   return ethClient;
 }
 

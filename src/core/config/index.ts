@@ -78,123 +78,158 @@ ${Object.entries(config)
 }
 
 /**
+ * Helper to parse a config field with a descriptive error message
+ */
+function parseConfigField<T>(
+  fieldName: string,
+  schema: z.ZodType<T>,
+  value: unknown,
+): T {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    const errors = result.error.errors
+      .map((e) => `  - ${e.message}`)
+      .join("\n");
+    throw new Error(
+      `Invalid configuration for ${fieldName}:\n${errors}\n  Received: ${typeof value === "string" && value.length > 50 ? value.slice(0, 50) + "..." : value}`,
+    );
+  }
+  return result.data;
+}
+
+/**
  * Build config object from environment variables
  */
 function buildConfig(network: string) {
   return {
-    NETWORK: z.string().parse(network),
-    SERVER_ID: z
-      .string()
-      .optional()
-      .parse(process.env.SERVER_ID || "server-01"),
-    ETHEREUM_CHAIN_ID: z.coerce
-      .number()
-      .int()
-      .parse(process.env.ETHEREUM_CHAIN_ID),
-    ETHEREUM_NODE_URL: z
-      .string()
-      .url()
-      .parse(process.env.ETHEREUM_NODE_URL || "http://localhost:8545"),
-    ETHEREUM_ARCHIVE_NODE_URL: z
-      .string()
-      .url()
-      .optional()
-      .parse(process.env.ETHEREUM_ARCHIVE_NODE_URL),
-    AZTEC_NODE_URL: z
-      .string()
-      .url()
-      .parse(process.env.AZTEC_NODE_URL || "http://localhost:8080"),
-    AZTEC_STAKING_PROVIDER_ID: z.coerce
-      .bigint()
-      .optional()
-      .parse(process.env.AZTEC_STAKING_PROVIDER_ID),
-    STAKING_PROVIDER_ID: z
-      .string()
-      .optional()
-      .parse(process.env.STAKING_PROVIDER_ID),
-    AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS: z
-      .string()
-      .startsWith("0x")
-      .length(42)
-      .optional()
-      .parse(process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS),
-    SAFE_ADDRESS: z
-      .string()
-      .startsWith("0x")
-      .length(42)
-      .optional()
-      .parse(
-        process.env.SAFE_ADDRESS ||
-          process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-      ),
-    SAFE_PROPOSALS_ENABLED: z
-      .string()
-      .transform((val) => val === "true" || val === "1")
-      .pipe(z.boolean())
-      .optional()
-      .parse(process.env.SAFE_PROPOSALS_ENABLED ?? "false"),
-    MULTISIG_PROPOSER_PRIVATE_KEY: z
-      .string()
-      .startsWith("0x")
-      .length(66)
-      .optional()
-      .parse(process.env.MULTISIG_PROPOSER_PRIVATE_KEY),
-    MIN_ETH_PER_ATTESTER: z
-      .string()
-      .parse(process.env.MIN_ETH_PER_ATTESTER || "0.1"),
-    SAFE_API_KEY: z.string().optional().parse(process.env.SAFE_API_KEY),
-    METRICS_BEARER_TOKEN: z
-      .string()
-      .parse(process.env.METRICS_BEARER_TOKEN || "default-api-key"),
-    STAKING_REWARDS_SPLIT_FROM_BLOCK: z.coerce
-      .bigint()
-      .optional()
-      .parse(process.env.STAKING_REWARDS_SPLIT_FROM_BLOCK ?? "23083526"),
-    STAKING_REWARDS_SCRAPE_INTERVAL_MS: z.coerce
-      .number()
-      .int()
-      .positive()
-      .parse(
-        process.env.STAKING_REWARDS_SCRAPE_INTERVAL_MS ??
-          (60 * 60 * 1000).toString(),
-      ),
-    GOOGLE_SHEETS_SPREADSHEET_ID: z
-      .string()
-      .optional()
-      .parse(process.env.GOOGLE_SHEETS_SPREADSHEET_ID),
-    GOOGLE_SERVICE_ACCOUNT_KEY_FILE: z
-      .string()
-      .optional()
-      .parse(
-        process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE,
-      ),
-    GOOGLE_SHEETS_RANGE: z
-      .string()
-      .optional()
-      .parse(process.env.GOOGLE_SHEETS_RANGE || "DailyTotal!A1"),
-    GCP_PROJECT_ID: z
-      .string()
-      .optional()
-      .parse(process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT),
-    GOOGLE_SHEETS_COINBASES_RANGE: z
-      .string()
-      .optional()
-      .parse(process.env.GOOGLE_SHEETS_COINBASES_RANGE || "Coinbases!A1"),
-    GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE: z
-      .string()
-      .optional()
-      .parse(
-        process.env.GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE ||
-          "DailyPerCoinbase!A1",
-      ),
-    GOOGLE_SHEETS_DAILY_EARNED_RANGE: z
-      .string()
-      .optional()
-      .parse(process.env.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1"),
-    WEB3SIGNER_URLS: z
-      .array(z.string().url())
-      .optional()
-      .parse(parseUrlList(process.env.WEB3SIGNER_URLS)),
+    NETWORK: parseConfigField("NETWORK", z.string(), network),
+    SERVER_ID: parseConfigField(
+      "SERVER_ID",
+      z.string().optional(),
+      process.env.SERVER_ID || "server-01",
+    ),
+    ETHEREUM_CHAIN_ID: parseConfigField(
+      "ETHEREUM_CHAIN_ID",
+      z.coerce.number().int(),
+      process.env.ETHEREUM_CHAIN_ID,
+    ),
+    ETHEREUM_NODE_URL: parseConfigField(
+      "ETHEREUM_NODE_URL",
+      z.string().url(),
+      process.env.ETHEREUM_NODE_URL || "http://localhost:8545",
+    ),
+    ETHEREUM_ARCHIVE_NODE_URL: parseConfigField(
+      "ETHEREUM_ARCHIVE_NODE_URL",
+      z.string().url().optional(),
+      process.env.ETHEREUM_ARCHIVE_NODE_URL,
+    ),
+    AZTEC_NODE_URL: parseConfigField(
+      "AZTEC_NODE_URL",
+      z.string().url(),
+      process.env.AZTEC_NODE_URL || "http://localhost:8080",
+    ),
+    AZTEC_STAKING_PROVIDER_ID: parseConfigField(
+      "AZTEC_STAKING_PROVIDER_ID",
+      z.coerce.bigint().optional(),
+      process.env.AZTEC_STAKING_PROVIDER_ID,
+    ),
+    STAKING_PROVIDER_ID: parseConfigField(
+      "STAKING_PROVIDER_ID",
+      z.string().optional(),
+      process.env.STAKING_PROVIDER_ID,
+    ),
+    AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS: parseConfigField(
+      "AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS",
+      z.string().startsWith("0x").length(42).optional(),
+      process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+    ),
+    SAFE_ADDRESS: parseConfigField(
+      "SAFE_ADDRESS",
+      z.string().startsWith("0x").length(42).optional(),
+      process.env.SAFE_ADDRESS ||
+        process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+    ),
+    SAFE_PROPOSALS_ENABLED: parseConfigField(
+      "SAFE_PROPOSALS_ENABLED",
+      z
+        .string()
+        .transform((val) => val === "true" || val === "1")
+        .pipe(z.boolean())
+        .optional(),
+      process.env.SAFE_PROPOSALS_ENABLED ?? "false",
+    ),
+    MULTISIG_PROPOSER_PRIVATE_KEY: parseConfigField(
+      "MULTISIG_PROPOSER_PRIVATE_KEY",
+      z.string().startsWith("0x").length(66).optional(),
+      process.env.MULTISIG_PROPOSER_PRIVATE_KEY,
+    ),
+    MIN_ETH_PER_ATTESTER: parseConfigField(
+      "MIN_ETH_PER_ATTESTER",
+      z.string(),
+      process.env.MIN_ETH_PER_ATTESTER || "0.1",
+    ),
+    SAFE_API_KEY: parseConfigField(
+      "SAFE_API_KEY",
+      z.string().optional(),
+      process.env.SAFE_API_KEY,
+    ),
+    METRICS_BEARER_TOKEN: parseConfigField(
+      "METRICS_BEARER_TOKEN",
+      z.string(),
+      process.env.METRICS_BEARER_TOKEN || "default-api-key",
+    ),
+    STAKING_REWARDS_SPLIT_FROM_BLOCK: parseConfigField(
+      "STAKING_REWARDS_SPLIT_FROM_BLOCK",
+      z.coerce.bigint().optional(),
+      process.env.STAKING_REWARDS_SPLIT_FROM_BLOCK ?? "23083526",
+    ),
+    STAKING_REWARDS_SCRAPE_INTERVAL_MS: parseConfigField(
+      "STAKING_REWARDS_SCRAPE_INTERVAL_MS",
+      z.coerce.number().int().positive(),
+      process.env.STAKING_REWARDS_SCRAPE_INTERVAL_MS ??
+        (60 * 60 * 1000).toString(),
+    ),
+    GOOGLE_SHEETS_SPREADSHEET_ID: parseConfigField(
+      "GOOGLE_SHEETS_SPREADSHEET_ID",
+      z.string().optional(),
+      process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
+    ),
+    GOOGLE_SERVICE_ACCOUNT_KEY_FILE: parseConfigField(
+      "GOOGLE_SERVICE_ACCOUNT_KEY_FILE",
+      z.string().optional(),
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE,
+    ),
+    GOOGLE_SHEETS_RANGE: parseConfigField(
+      "GOOGLE_SHEETS_RANGE",
+      z.string().optional(),
+      process.env.GOOGLE_SHEETS_RANGE || "DailyTotal!A1",
+    ),
+    GCP_PROJECT_ID: parseConfigField(
+      "GCP_PROJECT_ID",
+      z.string().optional(),
+      process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
+    ),
+    GOOGLE_SHEETS_COINBASES_RANGE: parseConfigField(
+      "GOOGLE_SHEETS_COINBASES_RANGE",
+      z.string().optional(),
+      process.env.GOOGLE_SHEETS_COINBASES_RANGE || "Coinbases!A1",
+    ),
+    GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE: parseConfigField(
+      "GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE",
+      z.string().optional(),
+      process.env.GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE ||
+        "DailyPerCoinbase!A1",
+    ),
+    GOOGLE_SHEETS_DAILY_EARNED_RANGE: parseConfigField(
+      "GOOGLE_SHEETS_DAILY_EARNED_RANGE",
+      z.string().optional(),
+      process.env.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1",
+    ),
+    WEB3SIGNER_URLS: parseConfigField(
+      "WEB3SIGNER_URLS",
+      z.array(z.string().url()).optional(),
+      parseUrlList(process.env.WEB3SIGNER_URLS),
+    ),
   };
 }
 

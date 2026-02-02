@@ -81,6 +81,5 @@ else
   echo "Update config: NO (use --update-config to enable)"
 fi
 
-# Build the CLI command
-CLI_CMD="npm run cli -- $NETWORK_FLAG add-keys \"$KEYSTORE_FILE\" $UPDATE_CONFIG_FLAG"
-eval $CLI_CMD
+# Build the CLI command using tsx (ts-node/esm has issues with Node.js v22)
+npx tsx cli.ts $NETWORK_FLAG add-keys "$KEYSTORE_FILE" $UPDATE_CONFIG_FLAG

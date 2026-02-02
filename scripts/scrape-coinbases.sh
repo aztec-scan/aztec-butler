@@ -42,5 +42,5 @@ else
   echo ""
 fi
 
-# Pass all arguments to the CLI
-npm run cli -- scrape-coinbases "$@"
+# Pass all arguments to the CLI using tsx (ts-node/esm has issues with Node.js v22)
+npx tsx cli.ts scrape-coinbases "$@"

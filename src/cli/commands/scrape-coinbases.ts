@@ -44,14 +44,14 @@ const command = async (
   );
 
   // Get provider ID from config (must be set in .env)
-  if (!config.STAKING_PROVIDER_ID) {
+  if (!config.AZTEC_STAKING_PROVIDER_ID) {
     throw new Error(
-      `STAKING_PROVIDER_ID not configured for network "${options.network}".\n` +
-        `Add STAKING_PROVIDER_ID to your ${options.network}-base.env file.`,
+      `AZTEC_STAKING_PROVIDER_ID not configured for network "${options.network}".\n` +
+        `Add AZTEC_STAKING_PROVIDER_ID to your ${options.network}-base.env file.`,
     );
   }
 
-  const providerId = BigInt(config.STAKING_PROVIDER_ID);
+  const providerId = config.AZTEC_STAKING_PROVIDER_ID;
   console.log(`✅ Provider ID: ${providerId}`);
 
   // Extract attester addresses

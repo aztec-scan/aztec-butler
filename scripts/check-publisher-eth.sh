@@ -24,4 +24,4 @@ echo ""
 echo "Using keystores from: ./keystores/"
 echo ""
 
-npm run cli -- check-publisher-eth
+npx tsx cli.ts check-publisher-eth

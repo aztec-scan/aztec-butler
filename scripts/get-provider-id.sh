@@ -31,4 +31,4 @@ echo "Get Staking Provider ID"
 echo "==================================="
 echo ""
 
-npm run cli -- get-provider-id "$1"
+npx tsx cli.ts get-provider-id "$1"

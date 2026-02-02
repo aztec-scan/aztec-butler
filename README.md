@@ -6,6 +6,29 @@ A tool for helping out with managing multiple aztec nodes with an opinionated wo
 
 - **Node.js v22.0.0 or higher**
 
+## Development
+
+### Running CLI Commands
+
+The shell scripts in `scripts/` use `tsx` for TypeScript execution (compatible with Node.js v22):
+
+```bash
+# Run any script directly
+./scripts/scrape-coinbases.sh --network mainnet
+./scripts/get-queue-stats.sh --network mainnet
+
+# Or run CLI commands directly with tsx
+npx tsx cli.ts scrape-coinbases --network mainnet
+npx tsx cli.ts get-queue-stats --network mainnet --json
+```
+
+### Building for Production
+
+```bash
+npm run build
+npm start -- serve --network mainnet
+```
+
 ## Attester State Diagram
 
 ```mermaid
