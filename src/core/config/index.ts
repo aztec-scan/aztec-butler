@@ -82,7 +82,7 @@ ${Object.entries(config)
  */
 function parseConfigField<T>(
   fieldName: string,
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   value: unknown,
 ): T {
   const result = schema.safeParse(value);
@@ -151,11 +151,7 @@ function buildConfig(network: string) {
     ),
     SAFE_PROPOSALS_ENABLED: parseConfigField(
       "SAFE_PROPOSALS_ENABLED",
-      z
-        .string()
-        .transform((val) => val === "true" || val === "1")
-        .pipe(z.boolean())
-        .optional(),
+      z.string().transform((val) => val === "true" || val === "1"),
       process.env.SAFE_PROPOSALS_ENABLED ?? "false",
     ),
     MULTISIG_PROPOSER_PRIVATE_KEY: parseConfigField(
