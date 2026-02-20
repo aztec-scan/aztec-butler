@@ -1,4 +1,4 @@
-import type { ObservableGauge } from "@opentelemetry/api";
+import type { Attributes, ObservableGauge, ObservableResult } from "@opentelemetry/api";
 import { createObservableGauge } from "./registry.js";
 import type { StakingProviderScraper } from "../scrapers/staking-provider-scraper.js";
 
@@ -26,7 +26,8 @@ export const initStakingProviderMetrics = (
       },
     );
 
-    stakingProviderQueueLengthGauge.addCallback((observableResult) => {
+    stakingProviderQueueLengthGauge.addCallback(
+      (observableResult: ObservableResult<Attributes>) => {
       const now = new Date().toISOString();
       console.log(`[Metrics/Callback] stakingProviderQueueLengthGauge invoked at ${now}`);
       
@@ -56,7 +57,8 @@ export const initStakingProviderMetrics = (
       },
     );
 
-    stakingProviderConfigGauge.addCallback((observableResult) => {
+    stakingProviderConfigGauge.addCallback(
+      (observableResult: ObservableResult<Attributes>) => {
       for (const [net, scraper] of scrapers.entries()) {
         const data = scraper.getData();
 
@@ -85,7 +87,8 @@ export const initStakingProviderMetrics = (
       },
     );
 
-    stakingProviderLastScrapedTimestampGauge.addCallback((observableResult) => {
+    stakingProviderLastScrapedTimestampGauge.addCallback(
+      (observableResult: ObservableResult<Attributes>) => {
       for (const [net, scraper] of scrapers.entries()) {
         const data = scraper.getData();
 

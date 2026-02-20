@@ -4,7 +4,7 @@
  * Prometheus metrics for tracking attesters state, and required metadata
  */
 
-import type { ObservableGauge } from "@opentelemetry/api";
+import type { Attributes, ObservableGauge, ObservableResult } from "@opentelemetry/api";
 import {
   countAttestersByState,
   countAttestersByOnChainStatus,
@@ -35,7 +35,8 @@ export const initAttesterMetrics = () => {
     },
   );
 
-  nbrofAttestersInStateGauge.addCallback((observableResult) => {
+  nbrofAttestersInStateGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const now = new Date().toISOString();
     console.log(`[Metrics/Callback] nbrofAttestersInStateGauge invoked at ${now}`);
     
@@ -59,7 +60,8 @@ export const initAttesterMetrics = () => {
     },
   );
 
-  attesterOnChainStatusCountGauge.addCallback((observableResult) => {
+  attesterOnChainStatusCountGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const now = new Date().toISOString();
     console.log(`[Metrics/Callback] attesterOnChainStatusCountGauge invoked at ${now}`);
     
@@ -87,7 +89,8 @@ export const initAttesterMetrics = () => {
     },
   );
 
-  attestersMissingCoinbaseGauge.addCallback((observableResult) => {
+  attestersMissingCoinbaseGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const now = new Date().toISOString();
     console.log(`[Metrics/Callback] attestersMissingCoinbaseGauge invoked at ${now}`);
     
@@ -121,7 +124,8 @@ export const initAttesterMetrics = () => {
     },
   );
 
-  attesterStatesLastUpdatedGauge.addCallback((observableResult) => {
+  attesterStatesLastUpdatedGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, _state] of networkStates.entries()) {

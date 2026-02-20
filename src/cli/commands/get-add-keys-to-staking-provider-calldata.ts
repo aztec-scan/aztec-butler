@@ -101,7 +101,7 @@ const command = async (
   const client = ethClient.getPublicClient();
   const rollupContract = ethClient.getRollupContract();
   const gse = new GSEContract(
-    client as ViemPublicClient,
+    client as unknown as ViemPublicClient,
     getAddress(await rollupContract.read.getGSE()) as any,
   );
 

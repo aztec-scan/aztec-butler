@@ -478,7 +478,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
 
     const gseAddress = getAddress(await rollupContract.read.getGSE());
     const gse = new GSEContract(
-      this.client as ViemPublicClient,
+      this.client as unknown as ViemPublicClient,
       gseAddress as any,
     );
     const registrationTuple = await gse.makeRegistrationTuple(
@@ -547,7 +547,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     const rollupContract = this.getRollupContract();
     const gseAddress = getAddress(await rollupContract.read.getGSE());
     const gse = new GSEContract(
-      this.client as ViemPublicClient,
+      this.client as unknown as ViemPublicClient,
       gseAddress as any,
     );
 

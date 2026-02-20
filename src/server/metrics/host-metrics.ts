@@ -5,8 +5,10 @@
  */
 
 import type {
+  Attributes,
   Histogram,
   ObservableGauge,
+  ObservableResult,
 } from "@opentelemetry/api";
 import {
   createHistogram,
@@ -59,7 +61,8 @@ export const initHostMetrics = () => {
     description: "DNS resolution status (1 = up, 0 = down)",
   });
 
-  hostDnsStatusGauge.addCallback((observableResult) => {
+  hostDnsStatusGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     for (const entry of dnsStatusCache.values()) {
       observableResult.observe(entry.status ? 1 : 0, entry.labels);
     }
@@ -69,7 +72,8 @@ export const initHostMetrics = () => {
     description: "P2P connection status (1 = up, 0 = down)",
   });
 
-  hostP2PStatusGauge.addCallback((observableResult) => {
+  hostP2PStatusGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     for (const entry of p2pStatusCache.values()) {
       observableResult.observe(entry.status ? 1 : 0, entry.labels);
     }
@@ -79,7 +83,8 @@ export const initHostMetrics = () => {
     description: "RPC HTTPS status (1 = up, 0 = down)",
   });
 
-  hostRpcHttpsStatusGauge.addCallback((observableResult) => {
+  hostRpcHttpsStatusGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     for (const entry of rpcHttpsStatusCache.values()) {
       observableResult.observe(entry.status ? 1 : 0, entry.labels);
     }
@@ -89,7 +94,8 @@ export const initHostMetrics = () => {
     description: "RPC IP+port status (1 = up, 0 = down)",
   });
 
-  hostRpcIpStatusGauge.addCallback((observableResult) => {
+  hostRpcIpStatusGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     for (const entry of rpcIpStatusCache.values()) {
       observableResult.observe(entry.status ? 1 : 0, entry.labels);
     }
@@ -116,7 +122,8 @@ export const initHostMetrics = () => {
     description: "Host information (always 1)",
   });
 
-  hostInfoGauge.addCallback((observableResult) => {
+  hostInfoGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     for (const info of hostInfoCache.values()) {
       const labels: Record<string, string> = {
         network: info.network,

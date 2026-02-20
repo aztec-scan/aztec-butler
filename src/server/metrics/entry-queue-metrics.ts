@@ -4,7 +4,7 @@
  * Prometheus metrics for entry queue statistics and timing estimates
  */
 
-import type { ObservableGauge } from "@opentelemetry/api";
+import type { Attributes, ObservableGauge, ObservableResult } from "@opentelemetry/api";
 import { getAllNetworkStates, getEntryQueueStats } from "../state/index.js";
 import { createObservableGauge } from "./registry.js";
 
@@ -28,7 +28,8 @@ export const initEntryQueueMetrics = () => {
     description: "Total attesters waiting in entry queue",
   });
 
-  entryQueueLengthGauge.addCallback((observableResult) => {
+  entryQueueLengthGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const now = new Date().toISOString();
     console.log(`[Metrics/Callback] entryQueueLengthGauge invoked at ${now}`);
     
@@ -58,7 +59,8 @@ export const initEntryQueueMetrics = () => {
     },
   );
 
-  entryQueueTimePerAttesterGauge.addCallback((observableResult) => {
+  entryQueueTimePerAttesterGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, _state] of networkStates.entries()) {
@@ -82,7 +84,8 @@ export const initEntryQueueMetrics = () => {
     },
   );
 
-  entryQueueLastAttesterTimestampGauge.addCallback((observableResult) => {
+  entryQueueLastAttesterTimestampGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, _state] of networkStates.entries()) {
@@ -103,7 +106,8 @@ export const initEntryQueueMetrics = () => {
     },
   );
 
-  entryQueueProviderCountGauge.addCallback((observableResult) => {
+  entryQueueProviderCountGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const now = new Date().toISOString();
     console.log(`[Metrics/Callback] entryQueueProviderCountGauge invoked at ${now}`);
     
@@ -135,7 +139,7 @@ export const initEntryQueueMetrics = () => {
   );
 
   entryQueueProviderNextArrivalTimestampGauge.addCallback(
-    (observableResult) => {
+    (observableResult: ObservableResult<Attributes>) => {
       const networkStates = getAllNetworkStates();
 
       for (const [network, _state] of networkStates.entries()) {
@@ -167,7 +171,7 @@ export const initEntryQueueMetrics = () => {
   );
 
   entryQueueProviderNextMissingCoinbaseTimestampGauge.addCallback(
-    (observableResult) => {
+    (observableResult: ObservableResult<Attributes>) => {
       const networkStates = getAllNetworkStates();
 
       for (const [network, _state] of networkStates.entries()) {
@@ -203,7 +207,7 @@ export const initEntryQueueMetrics = () => {
   );
 
   entryQueueProviderLastArrivalTimestampGauge.addCallback(
-    (observableResult) => {
+    (observableResult: ObservableResult<Attributes>) => {
       const networkStates = getAllNetworkStates();
 
       for (const [network, _state] of networkStates.entries()) {

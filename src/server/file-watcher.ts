@@ -55,10 +55,10 @@ export class KeysFileWatcher {
         );
         this.options.onKeysFileChange("unlink", filePath);
       })
-      .on("error", (error: Error) => {
+      .on("error", (err: unknown) => {
         console.error(
           `[FileWatcher/${this.options.network}] Watcher error:`,
-          error,
+          err instanceof Error ? err : new Error(String(err)),
         );
       })
       .on("ready", () => {

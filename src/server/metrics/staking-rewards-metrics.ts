@@ -1,4 +1,9 @@
-import type { ObservableCounter, ObservableGauge } from "@opentelemetry/api";
+import type {
+  Attributes,
+  ObservableCounter,
+  ObservableGauge,
+  ObservableResult,
+} from "@opentelemetry/api";
 import { createObservableCounter, createObservableGauge } from "./registry.js";
 import { getAllNetworkStates } from "../state/index.js";
 
@@ -24,7 +29,8 @@ export const initStakingRewardsMetrics = () => {
       "Cumulative staking rewards earned for our Safe per coinbase (token units)",
   });
 
-  pendingRewardsGauge.addCallback((observableResult) => {
+  pendingRewardsGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, state] of networkStates.entries()) {
@@ -42,7 +48,8 @@ export const initStakingRewardsMetrics = () => {
     }
   });
 
-  ourShareGauge.addCallback((observableResult) => {
+  ourShareGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, state] of networkStates.entries()) {
@@ -60,7 +67,8 @@ export const initStakingRewardsMetrics = () => {
     }
   });
 
-  earnedCounter.addCallback((observableResult) => {
+  earnedCounter.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, state] of networkStates.entries()) {

@@ -4,7 +4,7 @@
  * Prometheus metrics for tracking publisher ETH balances, load, and required top-ups
  */
 
-import type { ObservableGauge } from "@opentelemetry/api";
+import type { Attributes, ObservableGauge, ObservableResult } from "@opentelemetry/api";
 import { createObservableGauge } from "./registry.js";
 import {
   getPublisherData,
@@ -28,7 +28,8 @@ export const initPublisherMetrics = () => {
       "Number of validators using this publisher (can be fractional for shared publishers)",
   });
 
-  publisherLoadGauge.addCallback((observableResult) => {
+  publisherLoadGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, _state] of networkStates.entries()) {
@@ -77,7 +78,8 @@ export const initPublisherMetrics = () => {
     description: "Current ETH balance of publisher address (in ether)",
   });
 
-  publisherEthBalanceGauge.addCallback((observableResult) => {
+  publisherEthBalanceGauge.addCallback(
+    (observableResult: ObservableResult<Attributes>) => {
     const networkStates = getAllNetworkStates();
 
     for (const [network, _state] of networkStates.entries()) {

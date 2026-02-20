@@ -1,4 +1,4 @@
-import type { ObservableGauge } from "@opentelemetry/api";
+import type { Attributes, ObservableGauge, ObservableResult } from "@opentelemetry/api";
 import { createObservableGauge } from "./registry.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import { getScraperConfig } from "../state/index.js";
@@ -15,7 +15,8 @@ export const initConfigMetrics = (network: string, config: ButlerConfig) => {
       description: "Aztec Butler configuration information",
     });
 
-    configInfoGauge.addCallback((observableResult) => {
+    configInfoGauge.addCallback(
+      (observableResult: ObservableResult<Attributes>) => {
       for (const [net, cfg] of networkConfigs.entries()) {
         const scraperConfig = getScraperConfig(net);
 
