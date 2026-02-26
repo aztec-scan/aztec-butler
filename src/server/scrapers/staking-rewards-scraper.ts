@@ -80,7 +80,9 @@ export class StakingRewardsScraper extends AbstractScraper {
       `Staking rewards scraper initialized (target Safe ${this.safeAddress})`,
     );
 
-    await this.backfillHistory();
+    void this.backfillHistory().catch((error) => {
+      console.error("[staking-rewards] Backfill failed:", error);
+    });
   }
 
   async scrape(): Promise<void> {
@@ -432,7 +434,9 @@ export class StakingRewardsScraper extends AbstractScraper {
 
     const archiveClient = this.ethClient.getArchiveClient();
     const client =
-      useArchiveClient && archiveClient ? archiveClient : this.ethClient.getPublicClient();
+      useArchiveClient && archiveClient
+        ? archiveClient
+        : this.ethClient.getPublicClient();
 
     try {
       const bytecode = await client.getCode({

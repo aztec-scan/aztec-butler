@@ -3,6 +3,7 @@ import type { BaseScraper } from "./base-scraper.js";
 export interface ScraperConfig {
   scraper: BaseScraper;
   intervalMs: number;
+  enabled: boolean;
 }
 
 /**
@@ -18,7 +19,7 @@ export class ScraperManager {
    * Register a scraper with a specific interval
    */
   register(scraper: BaseScraper, intervalMs: number) {
-    this.scraperConfigs.push({ scraper, intervalMs });
+    this.scraperConfigs.push({ scraper, intervalMs, enabled: true });
   }
 
   /**
@@ -26,23 +27,34 @@ export class ScraperManager {
    */
   async init() {
     console.log(`Initializing ${this.scraperConfigs.length} scrapers...`);
+    let initializedCount = 0;
+    let failedCount = 0;
 
-    for (const { scraper } of this.scraperConfigs) {
+    for (const config of this.scraperConfigs) {
+      const { scraper } = config;
       try {
         console.log(
           `  - Initializing ${scraper.name} scraper [${scraper.network}]...`,
         );
         await scraper.init();
+        initializedCount++;
       } catch (error) {
         console.error(
           `  ✗ Failed to initialize ${scraper.name} scraper [${scraper.network}]:`,
           error,
         );
-        throw error;
+        config.enabled = false;
+        failedCount++;
       }
     }
 
-    console.log("All scrapers initialized successfully");
+    if (failedCount > 0) {
+      console.warn(
+        `Scraper initialization complete (${initializedCount} ok, ${failedCount} failed). Failed scrapers will be skipped.`,
+      );
+    } else {
+      console.log("All scrapers initialized successfully");
+    }
   }
 
   /**
@@ -57,7 +69,14 @@ export class ScraperManager {
     console.log("Starting all scrapers...");
     this.isRunning = true;
 
-    for (const { scraper, intervalMs } of this.scraperConfigs) {
+    for (const { scraper, intervalMs, enabled } of this.scraperConfigs) {
+      if (!enabled) {
+        console.warn(
+          `  ! Skipping ${scraper.name} scraper [${scraper.network}] (disabled after failed init)`,
+        );
+        continue;
+      }
+
       // Run immediately on start
       try {
         console.log(
