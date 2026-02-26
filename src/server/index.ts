@@ -302,7 +302,7 @@ export const startServer = async (specificNetwork?: string) => {
   }
 
   initLog("Initializing Prometheus metrics registry...");
-  const metricsPort = 9464;
+  const metricsPort = firstConfig.METRICS_PORT;
   initMetricsRegistry({
     port: metricsPort,
     bearerToken: firstConfig.METRICS_BEARER_TOKEN,

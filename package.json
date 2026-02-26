@@ -39,7 +39,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@aztec/aztec.js": "^2.1.2",
     "@aztec/ethereum": "^2.1.2",
     "@aztec/foundation": "^2.1.2",
     "@aztec/l1-artifacts": "^2.1.2",

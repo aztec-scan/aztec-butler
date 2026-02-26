@@ -1,4 +1,4 @@
-import { NodeInfo } from "@aztec/aztec.js";
+import type { NodeInfo } from "../../types/aztec-node.js";
 
 const command = async (nodeInfo: NodeInfo) => {
   // console.log("✅ Node info:", {

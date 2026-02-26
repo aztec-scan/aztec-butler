@@ -9,3 +9,4 @@ export * from "./staking-rewards.js";
 export * from "./scraper-config.js";
 export * from "./entry-queue.js";
 export * from "./host-check.js";
+export * from "./aztec-node.js";

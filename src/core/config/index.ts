@@ -68,8 +68,9 @@ async function loadNetworkConfig(
     // TODO: add default false "showSensitiveInfo"
     console.log(`CONFIGURATION (reading from ${configPath}):
 ${Object.entries(config)
-  .map(([key, value]) =>
-    `  ${key}\t${SENSITIVE_CONFIG_KEYS.has(key) ? "[redacted]" : value}`,
+  .map(
+    ([key, value]) =>
+      `  ${key}\t${SENSITIVE_CONFIG_KEYS.has(key) ? "[redacted]" : value}`,
   )
   .join("\n")}
 `);
@@ -173,6 +174,11 @@ function buildConfig(network: string) {
       "METRICS_BEARER_TOKEN",
       z.string(),
       process.env.METRICS_BEARER_TOKEN || "default-api-key",
+    ),
+    METRICS_PORT: parseConfigField(
+      "METRICS_PORT",
+      z.coerce.number().int().positive(),
+      process.env.METRICS_PORT || "9464",
     ),
     STAKING_REWARDS_SPLIT_FROM_BLOCK: parseConfigField(
       "STAKING_REWARDS_SPLIT_FROM_BLOCK",
