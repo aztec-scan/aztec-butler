@@ -4,9 +4,12 @@ import { AztecClient } from "../../core/components/AztecClient.js";
 import { EthereumClient } from "../../core/components/EthereumClient.js";
 import {
   getAttesterCoinbaseInfo,
+  getAttesterStates,
+  getStakingRewardsHistory,
   updateStakingRewardsData,
   recordStakingRewardsSnapshots,
   getLatestStakingRewardsSnapshotTimestamp,
+  AttesterState,
 } from "../state/index.js";
 import {
   StakingRewardsEntrySchema,
@@ -472,10 +475,44 @@ export class StakingRewardsScraper extends AbstractScraper {
       map.get(coinbase)!.add(attesterAddress);
     }
 
-    return Array.from(map.entries()).map(([coinbase, attesters]) => ({
-      coinbase,
-      attesters: Array.from(attesters),
-    }));
+    const attesterStates = getAttesterStates(this.network);
+    const history = getStakingRewardsHistory(this.network);
+
+    // Build a map of coinbase -> latest pending rewards from history
+    const latestPendingByCoinbase = new Map<string, bigint>();
+    for (const snap of history) {
+      const key = snap.coinbase.toLowerCase();
+      latestPendingByCoinbase.set(key, snap.pendingRewards);
+    }
+
+    return Array.from(map.entries())
+      .filter(([coinbase, attesters]) => {
+        // Keep coinbases that have at least one non-exited attester
+        const allExited = Array.from(attesters).every((addr) => {
+          const state = attesterStates.get(addr);
+          return state?.state === AttesterState.NO_LONGER_ACTIVE;
+        });
+
+        if (!allExited) {
+          return true;
+        }
+
+        // All attesters exited — keep only if there are still pending rewards
+        const lastPending =
+          latestPendingByCoinbase.get(coinbase.toLowerCase()) ?? 0n;
+        if (lastPending === 0n) {
+          console.log(
+            `[staking-rewards] Skipping coinbase ${coinbase}: all attesters exited and no pending rewards`,
+          );
+          return false;
+        }
+
+        return true;
+      })
+      .map(([coinbase, attesters]) => ({
+        coinbase,
+        attesters: Array.from(attesters),
+      }));
   }
 
   private isHistoricalStateError(error: unknown): boolean {

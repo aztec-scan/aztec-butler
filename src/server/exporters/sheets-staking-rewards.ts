@@ -144,54 +144,20 @@ const formatDailyEarnedRows = (network: string) => {
   const snapshots = getStakingRewardsHistory(network).slice();
   snapshots.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
-  const perCoinbase = new Map<
-    string,
-    Map<
-      string,
-      {
-        firstPending: bigint;
-        firstOurShare: bigint;
-        firstOtherShare: bigint;
-        lastPending: bigint;
-        lastOurShare: bigint;
-        lastOtherShare: bigint;
-        sampleCount: number;
-      }
-    >
-  >();
-
+  // Group snapshots by coinbase, keeping chronological order
+  const perCoinbase = new Map<string, (typeof snapshots)[number][]>();
   for (const snap of snapshots) {
     const key = snap.coinbase.toLowerCase();
-    const date = snap.timestamp.toISOString().slice(0, 10);
-
     if (!perCoinbase.has(key)) {
-      perCoinbase.set(key, new Map());
+      perCoinbase.set(key, []);
     }
-    const byDate = perCoinbase.get(key)!;
-
-    const entry = byDate.get(date);
-    if (!entry) {
-      byDate.set(date, {
-        firstPending: snap.pendingRewards,
-        firstOurShare: snap.ourShare,
-        firstOtherShare: snap.otherShare,
-        lastPending: snap.pendingRewards,
-        lastOurShare: snap.ourShare,
-        lastOtherShare: snap.otherShare,
-        sampleCount: 1,
-      });
-    } else {
-      byDate.set(date, {
-        ...entry,
-        lastPending: snap.pendingRewards,
-        lastOurShare: snap.ourShare,
-        lastOtherShare: snap.otherShare,
-        sampleCount: entry.sampleCount + 1,
-      });
-    }
+    perCoinbase.get(key)!.push(snap);
   }
 
-  // Aggregate intra-day flows per date across all coinbases
+  // Compare consecutive snapshots per coinbase, attributing each delta
+  // to the day of the later snapshot. This correctly captures:
+  // - Cross-day changes (e.g. withdrawal at 23:30 shows on the right day)
+  // - Intra-day gross flows (accrued and withdrawn tracked separately)
   const perDateTotals = new Map<
     string,
     {
@@ -207,11 +173,15 @@ const formatDailyEarnedRows = (network: string) => {
     }
   >();
 
-  for (const [, byDate] of perCoinbase.entries()) {
-    for (const [date, entry] of byDate.entries()) {
-      const deltaPending = entry.lastPending - entry.firstPending;
-      const deltaOur = entry.lastOurShare - entry.firstOurShare;
-      const deltaOther = entry.lastOtherShare - entry.firstOtherShare;
+  for (const [, coinbaseSnapshots] of perCoinbase.entries()) {
+    for (let i = 1; i < coinbaseSnapshots.length; i++) {
+      const prev = coinbaseSnapshots[i - 1]!;
+      const curr = coinbaseSnapshots[i]!;
+      const date = curr.timestamp.toISOString().slice(0, 10);
+
+      const deltaPending = curr.pendingRewards - prev.pendingRewards;
+      const deltaOur = curr.ourShare - prev.ourShare;
+      const deltaOther = curr.otherShare - prev.otherShare;
 
       const accruedPending = deltaPending > 0n ? deltaPending : 0n;
       const accruedOur = deltaOur > 0n ? deltaOur : 0n;
@@ -220,10 +190,6 @@ const formatDailyEarnedRows = (network: string) => {
       const withdrawalPending = deltaPending < 0n ? -deltaPending : 0n;
       const withdrawalOur = deltaOur < 0n ? -deltaOur : 0n;
       const withdrawalOther = deltaOther < 0n ? -deltaOther : 0n;
-
-      const netPending = accruedPending - withdrawalPending;
-      const netOur = accruedOur - withdrawalOur;
-      const netOther = accruedOther - withdrawalOther;
 
       const agg = perDateTotals.get(date) ?? {
         accruedPending: 0n,
@@ -235,7 +201,6 @@ const formatDailyEarnedRows = (network: string) => {
         netPending: 0n,
         netOur: 0n,
         netOther: 0n,
-        sampleCount: 0,
       };
       perDateTotals.set(date, {
         accruedPending: agg.accruedPending + accruedPending,
@@ -244,9 +209,9 @@ const formatDailyEarnedRows = (network: string) => {
         withdrawalPending: agg.withdrawalPending + withdrawalPending,
         withdrawalOur: agg.withdrawalOur + withdrawalOur,
         withdrawalOther: agg.withdrawalOther + withdrawalOther,
-        netPending: agg.netPending + netPending,
-        netOur: agg.netOur + netOur,
-        netOther: agg.netOther + netOther,
+        netPending: agg.netPending + deltaPending,
+        netOur: agg.netOur + deltaOur,
+        netOther: agg.netOther + deltaOther,
       });
     }
   }
