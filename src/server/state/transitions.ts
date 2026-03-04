@@ -48,7 +48,8 @@ export function isAttesterInProviderQueue(
  * NEW → IN_STAKING_PROVIDER_QUEUE (when added to provider queue)
  * IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE (when moved to rollup entry queue)
  * ROLLUP_ENTRY_QUEUE → ACTIVE (when status becomes VALIDATING)
- * ACTIVE → NO_LONGER_ACTIVE (when status becomes ZOMBIE or EXITING)
+ * ROLLUP_ENTRY_QUEUE → NO_LONGER_ACTIVE (when status is NONE with zero balance, i.e. removed before activation)
+ * ACTIVE → NO_LONGER_ACTIVE (when status becomes ZOMBIE, EXITING, or NONE)
  *
  * @param network - The network name
  * @param attesterAddress - The attester's Ethereum address
@@ -76,8 +77,12 @@ export async function handleStateTransitions(
           AttesterState.IN_STAKING_PROVIDER_QUEUE,
         );
       }
-      // Check if attester went directly to rollup entry queue (has onChainView but not VALIDATING)
-      else if (onChainView && onChainView.status === AttesterOnChainStatus.NONE) {
+      // Check if attester went directly to rollup entry queue (has onChainView with balance but not VALIDATING)
+      else if (
+        onChainView &&
+        onChainView.status === AttesterOnChainStatus.NONE &&
+        onChainView.effectiveBalance > 0n
+      ) {
         console.log(
           `[${network}] Attester ${attesterAddress} entered rollup entry queue directly (NEW → ROLLUP_ENTRY_QUEUE)`,
         );
@@ -85,6 +90,21 @@ export async function handleStateTransitions(
           network,
           attesterAddress,
           AttesterState.ROLLUP_ENTRY_QUEUE,
+        );
+      }
+      // Check if attester was registered but already exited (status NONE with zero balance)
+      else if (
+        onChainView &&
+        onChainView.status === AttesterOnChainStatus.NONE &&
+        onChainView.effectiveBalance === 0n
+      ) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} was registered but already exited (NEW → NO_LONGER_ACTIVE)`,
+        );
+        updateAttesterState(
+          network,
+          attesterAddress,
+          AttesterState.NO_LONGER_ACTIVE,
         );
       }
       // Check if attester became active directly
@@ -113,7 +133,8 @@ export async function handleStateTransitions(
           updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
         } else if (
           onChainView &&
-          onChainView.status === AttesterOnChainStatus.NONE
+          onChainView.status === AttesterOnChainStatus.NONE &&
+          onChainView.effectiveBalance > 0n
         ) {
           console.log(
             `[${network}] Attester ${attesterAddress} left provider queue, now in rollup entry queue (IN_STAKING_PROVIDER_QUEUE → ROLLUP_ENTRY_QUEUE)`,
@@ -122,6 +143,19 @@ export async function handleStateTransitions(
             network,
             attesterAddress,
             AttesterState.ROLLUP_ENTRY_QUEUE,
+          );
+        } else if (
+          onChainView &&
+          onChainView.status === AttesterOnChainStatus.NONE &&
+          onChainView.effectiveBalance === 0n
+        ) {
+          console.log(
+            `[${network}] Attester ${attesterAddress} left provider queue and was removed (zero balance) (IN_STAKING_PROVIDER_QUEUE → NO_LONGER_ACTIVE)`,
+          );
+          updateAttesterState(
+            network,
+            attesterAddress,
+            AttesterState.NO_LONGER_ACTIVE,
           );
         } else {
           // No on-chain view but not in provider queue anymore
@@ -145,16 +179,46 @@ export async function handleStateTransitions(
         );
         updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
       }
-      // Check if attester lost on-chain view (shouldn't happen but handle it)
-      else if (!onChainView || onChainView.status !== AttesterOnChainStatus.NONE) {
+      // Check if attester was removed before activation (status NONE with zero balance)
+      else if (
+        onChainView &&
+        onChainView.status === AttesterOnChainStatus.NONE &&
+        onChainView.effectiveBalance === 0n
+      ) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} removed from entry queue (zero balance) (ROLLUP_ENTRY_QUEUE → NO_LONGER_ACTIVE)`,
+        );
+        updateAttesterState(
+          network,
+          attesterAddress,
+          AttesterState.NO_LONGER_ACTIVE,
+        );
+      }
+      // Check for other unexpected states (ZOMBIE, EXITING)
+      else if (
+        onChainView &&
+        (onChainView.status === AttesterOnChainStatus.ZOMBIE ||
+          onChainView.status === AttesterOnChainStatus.EXITING)
+      ) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} exited from entry queue (status: ${AttesterOnChainStatus[onChainView.status]}) (ROLLUP_ENTRY_QUEUE → NO_LONGER_ACTIVE)`,
+        );
+        updateAttesterState(
+          network,
+          attesterAddress,
+          AttesterState.NO_LONGER_ACTIVE,
+        );
+      }
+      // No on-chain view at all (shouldn't happen)
+      else if (!onChainView) {
         console.warn(
-          `[${network}] Attester ${attesterAddress} in ROLLUP_ENTRY_QUEUE has unexpected on-chain state`,
+          `[${network}] Attester ${attesterAddress} in ROLLUP_ENTRY_QUEUE has no on-chain view`,
         );
       }
       break;
 
     case AttesterState.ACTIVE:
-      // Check if attester is no longer active
+      // Check if attester is no longer active (ZOMBIE or EXITING)
       if (
         onChainView &&
         (onChainView.status === AttesterOnChainStatus.ZOMBIE ||
@@ -169,13 +233,24 @@ export async function handleStateTransitions(
           AttesterState.NO_LONGER_ACTIVE,
         );
       }
-      // Warn if active attester lost validation status
+      // Check if attester fully exited (status reverted to NONE)
       else if (
-        !onChainView ||
-        onChainView.status !== AttesterOnChainStatus.VALIDATING
+        onChainView &&
+        onChainView.status === AttesterOnChainStatus.NONE
       ) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} fully exited (status: NONE) (ACTIVE → NO_LONGER_ACTIVE)`,
+        );
+        updateAttesterState(
+          network,
+          attesterAddress,
+          AttesterState.NO_LONGER_ACTIVE,
+        );
+      }
+      // No on-chain view at all
+      else if (!onChainView) {
         console.error(
-          `[${network}] CRITICAL: Active attester ${attesterAddress} lost VALIDATING status on-chain!`,
+          `[${network}] CRITICAL: Active attester ${attesterAddress} has no on-chain view!`,
         );
       }
       break;
@@ -216,13 +291,25 @@ export async function processAttesterState(
       updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
     } else if (
       onChainView &&
-      onChainView.status === AttesterOnChainStatus.NONE
+      onChainView.status === AttesterOnChainStatus.NONE &&
+      onChainView.effectiveBalance > 0n
     ) {
-      // In rollup entry queue (has on-chain view but not yet validating)
+      // In rollup entry queue (has on-chain view with balance but not yet validating)
       updateAttesterState(
         network,
         attesterAddress,
         AttesterState.ROLLUP_ENTRY_QUEUE,
+      );
+    } else if (
+      onChainView &&
+      onChainView.status === AttesterOnChainStatus.NONE &&
+      onChainView.effectiveBalance === 0n
+    ) {
+      // Was registered on-chain but has zero balance - already exited
+      updateAttesterState(
+        network,
+        attesterAddress,
+        AttesterState.NO_LONGER_ACTIVE,
       );
     } else if (isInProviderQueue) {
       // In provider queue
