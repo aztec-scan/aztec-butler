@@ -50,6 +50,7 @@ export function isAttesterInProviderQueue(
  * ROLLUP_ENTRY_QUEUE → ACTIVE (when status becomes VALIDATING)
  * ROLLUP_ENTRY_QUEUE → NO_LONGER_ACTIVE (when status is NONE with zero balance, i.e. removed before activation)
  * ACTIVE → NO_LONGER_ACTIVE (when status becomes ZOMBIE, EXITING, or NONE)
+ * NO_LONGER_ACTIVE → ACTIVE (when status recovers to VALIDATING on-chain)
  *
  * @param network - The network name
  * @param attesterAddress - The attester's Ethereum address
@@ -256,7 +257,16 @@ export async function handleStateTransitions(
       break;
 
     case AttesterState.NO_LONGER_ACTIVE:
-      // Terminal state - no transitions
+      // Recovery: if attester is back to VALIDATING on-chain, transition back to ACTIVE
+      if (
+        onChainView &&
+        onChainView.status === AttesterOnChainStatus.VALIDATING
+      ) {
+        console.log(
+          `[${network}] Attester ${attesterAddress} recovered to VALIDATING on-chain (NO_LONGER_ACTIVE → ACTIVE)`,
+        );
+        updateAttesterState(network, attesterAddress, AttesterState.ACTIVE);
+      }
       break;
 
     default:
