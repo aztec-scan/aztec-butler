@@ -23,6 +23,7 @@ import {
   CuratedKeystoreData,
   STAKING_REGISTRY_ABI,
   StakingRegistryContract,
+  StakingRegistryTarget,
   type StakingProviderData,
   type AttesterRegistration,
   type HexString,
@@ -66,6 +67,7 @@ export interface EthereumClientConfig {
   archiveRpcUrl?: string;
   chainId: number;
   rollupAddress: Address;
+  ollaStakingRegistryAddress?: Address;
 }
 
 export type CalldataExport = {
@@ -79,7 +81,10 @@ export class EthereumClient {
   private readonly config: EthereumClientConfig;
   private rollupContract?: RollupContract;
   private archiveRollupContract?: RollupContract;
-  private stakingRegistryContract?: StakingRegistryContract;
+  private stakingRegistryContracts: Map<
+    StakingRegistryTarget,
+    StakingRegistryContract
+  > = new Map();
   private providerDataCache: Map<string, StakingProviderData | null> =
     new Map();
 
@@ -167,7 +172,16 @@ export class EthereumClient {
   /**
    * Get the staking registry contract address for this chain
    */
-  getStakingRegistryAddress(): Address {
+  getStakingRegistryAddress(target: StakingRegistryTarget = "native"): Address {
+    if (target === "olla") {
+      if (!this.config.ollaStakingRegistryAddress) {
+        throw new Error(
+          "Registry target 'olla' selected but OLLA_AZTEC_STAKING_REGISTRY_ADDRESS is not configured.",
+        );
+      }
+      return this.config.ollaStakingRegistryAddress;
+    }
+
     if (this.config.chainId === 11155111) {
       return getAddress("0xc3860c45e5F0b1eF3000dbF93149756f16928ADB");
     } else if (this.config.chainId === 1) {
@@ -179,15 +193,21 @@ export class EthereumClient {
   /**
    * Get the staking registry contract instance (lazy initialization)
    */
-  getStakingRegistryContract(): StakingRegistryContract {
-    if (!this.stakingRegistryContract) {
-      this.stakingRegistryContract = getContract({
-        address: this.getStakingRegistryAddress(),
-        abi: STAKING_REGISTRY_ABI,
-        client: this.client,
-      });
+  getStakingRegistryContract(
+    target: StakingRegistryTarget = "native",
+  ): StakingRegistryContract {
+    const existing = this.stakingRegistryContracts.get(target);
+    if (existing) {
+      return existing;
     }
-    return this.stakingRegistryContract;
+
+    const contract = getContract({
+      address: this.getStakingRegistryAddress(target),
+      abi: STAKING_REGISTRY_ABI,
+      client: this.client,
+    });
+    this.stakingRegistryContracts.set(target, contract);
+    return contract;
   }
 
   /**
@@ -272,13 +292,15 @@ supply: ${await stakingAssetContract.read.totalSupply()}
    */
   async getStakingProvider(
     adminAddress: string,
+    target: StakingRegistryTarget = "native",
   ): Promise<StakingProviderData | null> {
+    const cacheKey = `${target}:${adminAddress.toLowerCase()}`;
     // Check cache first
-    if (this.providerDataCache.has(adminAddress)) {
-      return this.providerDataCache.get(adminAddress)!;
+    if (this.providerDataCache.has(cacheKey)) {
+      return this.providerDataCache.get(cacheKey)!;
     }
 
-    const stakingReg = this.getStakingRegistryContract();
+    const stakingReg = this.getStakingRegistryContract(target);
     let index = 0n;
 
     while (true) {
@@ -293,13 +315,13 @@ supply: ${await stakingAssetContract.read.totalSupply()}
             rewardsRecipient,
           };
           // Cache the result
-          this.providerDataCache.set(adminAddress, providerData);
+          this.providerDataCache.set(cacheKey, providerData);
           return providerData;
         }
         index++;
       } catch (error) {
         // No more providers found
-        this.providerDataCache.set(adminAddress, null);
+        this.providerDataCache.set(cacheKey, null);
         return null;
       }
     }
@@ -308,8 +330,11 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   /**
    * Get the queue length for a provider
    */
-  async getProviderQueueLength(providerId: bigint): Promise<bigint> {
-    const stakingReg = this.getStakingRegistryContract();
+  async getProviderQueueLength(
+    providerId: bigint,
+    target: StakingRegistryTarget = "native",
+  ): Promise<bigint> {
+    const stakingReg = this.getStakingRegistryContract(target);
     return await stakingReg.read.getProviderQueueLength([providerId]);
   }
 
@@ -317,8 +342,11 @@ supply: ${await stakingAssetContract.read.totalSupply()}
    * Get the full queue of attesters for a provider
    * Iterates through queue indices to fetch all attester addresses
    */
-  async getProviderQueue(providerId: bigint): Promise<string[]> {
-    const stakingReg = this.getStakingRegistryContract();
+  async getProviderQueue(
+    providerId: bigint,
+    target: StakingRegistryTarget = "native",
+  ): Promise<string[]> {
+    const stakingReg = this.getStakingRegistryContract(target);
 
     const firstIndex = await stakingReg.read.getFirstIndexInQueue([providerId]);
     const lastIndex = await stakingReg.read.getLastIndexInQueue([providerId]);
@@ -418,7 +446,7 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     takeRate: number;
     rewardsRecipient: Address;
   } | null> {
-    const providerData = await this.getStakingProvider(adminAddress);
+    const providerData = await this.getStakingProvider(adminAddress, "native");
     if (!providerData) {
       return null;
     }
@@ -583,6 +611,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
   async generateAddKeysToProviderCalldata(
     providerId: bigint,
     attesterRegistrations: AttesterRegistration[],
+    target: StakingRegistryTarget = "native",
   ): Promise<CalldataExport> {
     // Transform attester data to match ABI structure
     const keyStores = attesterRegistrations.map((attesterData) => ({
@@ -604,7 +633,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     }));
 
     return {
-      address: this.getStakingRegistryAddress(),
+      address: this.getStakingRegistryAddress(target),
       calldata: encodeFunctionData({
         abi: STAKING_REGISTRY_ABI,
         functionName: "addKeysToProvider",

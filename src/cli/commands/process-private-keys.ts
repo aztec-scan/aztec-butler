@@ -1,4 +1,3 @@
-import assert from "assert";
 import fs from "fs/promises";
 import path from "path";
 import { getAddress } from "viem";
@@ -8,11 +7,13 @@ import { SecretManagerServiceClient } from "@google-cloud/secret-manager";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { getServiceAccountCredentials } from "../../core/utils/googleAuth.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-import type { HexString } from "../../types/index.js";
+import type { HexString, StakingRegistryTarget } from "../../types/index.js";
+import { checkAttesterDuplicatesAcrossRegistries } from "../utils/stakingRegistryChecks.js";
 
 interface ProcessPrivateKeysOptions {
   privateKeyFile: string;
   outputFile?: string;
+  registry: StakingRegistryTarget;
 }
 
 interface PrivateKeyValidator {
@@ -284,12 +285,24 @@ const command = async (
   config: ButlerConfig,
   options: ProcessPrivateKeysOptions,
 ) => {
-  assert(
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-    "Staking provider admin address must be provided.",
-  );
+  const stakingProviderAdminAddress =
+    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
+
+  if (
+    !stakingProviderAdminAddress &&
+    !(options.registry === "olla" && config.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS)
+  ) {
+    throw new Error(
+      "Staking provider admin address must be provided unless using --registry olla with OLLA_AZTEC_STAKING_REGISTRY_ADDRESS configured.",
+    );
+  }
 
   console.log("\n=== Processing Private Keys ===\n");
+  const selectedRegistryAddress = ethClient.getStakingRegistryAddress(
+    options.registry,
+  );
+  console.log(`Registry target: ${options.registry}`);
+  console.log(`Registry address: ${selectedRegistryAddress}`);
 
   const allowedNetworks = ["mainnet", "testnet"] as const;
   if (
@@ -493,46 +506,47 @@ const command = async (
   await triggerWeb3SignerReloads(config.NETWORK, config.WEB3SIGNER_URLS);
 
   // 4. Check provider queue for duplicates
-  console.log("\n=== Checking Provider Queue ===");
+  console.log("\n=== Checking Provider Queue(s) ===");
 
-  const stakingProviderData = await ethClient.getStakingProvider(
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-  );
-
-  if (!stakingProviderData) {
+  if (!stakingProviderAdminAddress) {
     console.warn(
-      "⚠️  Staking provider not registered yet - skipping queue check",
+      "⚠️  AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS not configured - skipping provider queue duplicate checks",
     );
   } else {
-    console.log(`Provider ID: ${stakingProviderData.providerId}`);
-
-    const queueLength = await ethClient.getProviderQueueLength(
-      stakingProviderData.providerId,
+    const stakingProviderData = await ethClient.getStakingProvider(
+      stakingProviderAdminAddress,
+      options.registry,
     );
-    console.log(`Provider queue length: ${queueLength}`);
 
-    const attesterAddresses = derivedKeys.map((k) => k.publicKeys.eth);
-
-    if (queueLength > 0n) {
-      const providerQueue = await ethClient.getProviderQueue(
-        stakingProviderData.providerId,
+    if (!stakingProviderData) {
+      console.warn(
+        "⚠️  Staking provider not registered yet - skipping queue check",
       );
-      console.log(`Loaded ${providerQueue.length} attester(s) from queue`);
-
-      // Check if any attesters are already in queue
-      const queueSet = new Set(providerQueue.map((addr) => addr.toLowerCase()));
-
-      for (const attesterAddr of attesterAddresses) {
-        if (queueSet.has(attesterAddr.toLowerCase())) {
-          throw new Error(
-            `FATAL: Attester ${attesterAddr} is already in provider queue!\n` +
-              `Cannot process keys that are already queued.`,
-          );
-        }
-      }
-      console.log("✅ No duplicate attesters found in queue");
     } else {
-      console.log("✅ Queue is empty, no duplicates possible");
+      console.log(`Provider ID: ${stakingProviderData.providerId}`);
+
+      const attesterAddresses = derivedKeys.map((k) => k.publicKeys.eth);
+
+      const { duplicates } = await checkAttesterDuplicatesAcrossRegistries(
+        ethClient,
+        stakingProviderAdminAddress,
+        attesterAddresses,
+      );
+
+      if (duplicates.size > 0) {
+        const duplicateLines = Array.from(duplicates.entries()).map(
+          ([attester, targets]) =>
+            `  - ${attester}: ${Array.from(targets.values()).join(", ")}`,
+        );
+        throw new Error(
+          "FATAL: Duplicate attester(s) found in staking provider queues across registries:\n" +
+            duplicateLines.join("\n") +
+            "\nCannot process keys that are already queued.",
+        );
+      }
+      console.log(
+        "✅ No duplicate attesters found across available registries",
+      );
     }
   }
 

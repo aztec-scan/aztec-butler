@@ -1,17 +1,32 @@
 import assert from "assert";
 import { encodeFunctionData, getAddress } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
-import { STAKING_REGISTRY_ABI } from "../../types/index.js";
+import {
+  STAKING_REGISTRY_ABI,
+  type StakingRegistryTarget,
+} from "../../types/index.js";
 import { ButlerConfig } from "../../core/config/index.js";
 
 const DEFAULT_COMISSION_RATE_PERCENTAGE = 10;
 
-const command = async (ethClient: EthereumClient, config: ButlerConfig) => {
+interface GetCreateStakingProviderCalldataOptions {
+  registry: StakingRegistryTarget;
+}
+
+const command = async (
+  ethClient: EthereumClient,
+  config: ButlerConfig,
+  options: GetCreateStakingProviderCalldataOptions,
+) => {
   assert(
     config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
     "Staking provider admin address must be provided.",
   );
-  const stakingRegistryAddress = ethClient.getStakingRegistryAddress();
+  const stakingRegistryAddress = ethClient.getStakingRegistryAddress(
+    options.registry,
+  );
+  console.log(`Registry target: ${options.registry}`);
+  console.log(`Registry address: ${stakingRegistryAddress}`);
   const stakingProviderAdminAddress = getAddress(
     config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
   );
@@ -31,6 +46,7 @@ const command = async (ethClient: EthereumClient, config: ButlerConfig) => {
   };
   const stakingProviderData = await ethClient.getStakingProvider(
     stakingProviderAdminAddress,
+    options.registry,
   );
   if (stakingProviderData) {
     console.log("Staking provider already registered on-chain.");

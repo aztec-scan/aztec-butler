@@ -1,0 +1,2 @@
+- scrape/fill coinbases not needed for Olla
+- rename OLLA_AZTEC_STAKING_REGISTRY_ADDRESS to OLLA_AZTEC_STAKING_REGISTRY_ADDRESS_ADMIN

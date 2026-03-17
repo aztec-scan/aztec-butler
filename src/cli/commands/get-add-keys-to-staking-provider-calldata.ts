@@ -8,12 +8,14 @@ import {
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { STAKING_REGISTRY_ABI, HexString } from "../../types/index.js";
 import { ButlerConfig } from "../../core/config/index.js";
-import { extractAttesterCoinbasePairs } from "../../core/utils/keystoreOperations.js";
 import { SafeGlobalClient } from "../../core/components/SafeGlobalClient.js";
+import type { StakingRegistryTarget } from "../../types/index.js";
+import { checkAttesterDuplicatesAcrossRegistries } from "../utils/stakingRegistryChecks.js";
 
 interface AddKeysOptions {
   keystorePath: string;
   network: string;
+  registry: StakingRegistryTarget;
   // updateConfig option removed - deprecated with scraper config format
 }
 
@@ -32,6 +34,11 @@ const command = async (
   );
 
   console.log("\n=== Generating Add Keys Calldata ===\n");
+  const selectedRegistryAddress = ethClient.getStakingRegistryAddress(
+    options.registry,
+  );
+  console.log(`Registry target: ${options.registry}`);
+  console.log(`Registry address: ${selectedRegistryAddress}`);
 
   // 1. Load keystore (with lenient coinbase validation for this command)
   console.log(`Loading keystore: ${options.keystorePath}`);
@@ -49,6 +56,7 @@ const command = async (
   // 2. Get staking provider info
   const stakingProviderData = await ethClient.getStakingProvider(
     config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+    options.registry,
   );
 
   if (!stakingProviderData) {
@@ -63,38 +71,30 @@ const command = async (
   );
   console.log(`Staking Provider ID: ${stakingProviderData.providerId}`);
 
-  // 3. Check for duplicate attesters in provider queue
-  console.log("\nChecking for duplicate attesters in provider queue...");
-  const queueLength = await ethClient.getProviderQueueLength(
-    stakingProviderData.providerId,
-  );
-  console.log(`Provider queue length: ${queueLength}`);
-
+  // 3. Check for duplicate attesters in provider queue(s)
+  console.log("\nChecking for duplicate attesters across registries...");
   const attesterAddresses = keystore.data.validators.map((v: any) =>
     getAddressFromPrivateKey(v.attester.eth as `0x${string}`),
   );
 
-  if (queueLength > 0n) {
-    const providerQueue = await ethClient.getProviderQueue(
-      stakingProviderData.providerId,
+  const { duplicates } = await checkAttesterDuplicatesAcrossRegistries(
+    ethClient,
+    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+    attesterAddresses,
+  );
+
+  if (duplicates.size > 0) {
+    const duplicateLines = Array.from(duplicates.entries()).map(
+      ([attester, targets]) =>
+        `  - ${attester}: ${Array.from(targets.values()).join(", ")}`,
     );
-    console.log(`Loaded ${providerQueue.length} attester(s) from queue`);
-
-    // Check if any attesters are already in queue
-    const queueSet = new Set(providerQueue.map((addr) => addr.toLowerCase()));
-
-    for (const attesterAddr of attesterAddresses) {
-      if (queueSet.has(attesterAddr.toLowerCase())) {
-        throw new Error(
-          `FATAL: Attester ${attesterAddr} is already in provider queue!\n` +
-            `Cannot add keys that are already queued. This would result in an on-chain transaction failure.`,
-        );
-      }
-    }
-    console.log("✅ No duplicate attesters found");
-  } else {
-    console.log("✅ Queue is empty, no duplicates possible");
+    throw new Error(
+      "FATAL: Duplicate attester(s) found in staking provider queues across registries:\n" +
+        duplicateLines.join("\n") +
+        "\nCannot add keys that are already queued. This would result in an on-chain transaction failure.",
+    );
   }
+  console.log("✅ No duplicate attesters found across available registries");
 
   // 4. Generate registration data
   console.log("\nGenerating registration data...");
@@ -153,7 +153,7 @@ const command = async (
   const callDataChunks = chunks.map((chunk, index) => ({
     chunkNumber: index + 1,
     attestersCount: chunk.length,
-    contractToCall: ethClient.getStakingRegistryAddress(),
+    contractToCall: selectedRegistryAddress,
     callData: encodeFunctionData({
       abi: STAKING_REGISTRY_ABI,
       functionName: "addKeysToProvider",

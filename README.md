@@ -79,6 +79,44 @@ See [src/server/state/index.ts](./src/server/state/index.ts) and [src/server/sta
 
 ## Configuration
 
+### Staking Registry Targeting
+
+Proposal-related CLI commands support selecting which staking registry to target:
+
+- `native` (default)
+- `olla`
+
+Supported commands:
+
+- `add-keys`
+- `get-provider-id`
+- `get-create-staking-provider-calldata`
+- `process-private-keys`
+
+Use `--registry <native|olla>` (defaults to `native` if omitted).
+
+Example:
+
+```bash
+# Default (native)
+aztec-butler get-provider-id 0xYourAdminAddress --network mainnet
+
+# Explicit Olla target
+aztec-butler get-provider-id 0xYourAdminAddress --network mainnet --registry olla
+```
+
+For Olla target support, configure:
+
+```bash
+OLLA_AZTEC_STAKING_REGISTRY_ADDRESS=0x...
+```
+
+If `--registry olla` is selected and this env var is missing, the CLI fails fast with a clear error.
+
+Duplicate checks for `add-keys` and `process-private-keys` are performed across both registries (where available), not only the selected target. If one registry is unavailable or unconfigured, Butler warns and continues checking the other registry.
+
+Note: scraper support/refactors are intentionally out of scope for this change.
+
 ### Unified Keys File Format
 
 Aztec Butler uses a unified configuration format for both validator nodes and the monitoring server. Keys files follow the naming convention:

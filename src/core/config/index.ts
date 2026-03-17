@@ -144,6 +144,11 @@ function buildConfig(network: string) {
       z.string().startsWith("0x").length(42).optional(),
       process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
     ),
+    OLLA_AZTEC_STAKING_REGISTRY_ADDRESS: parseConfigField(
+      "OLLA_AZTEC_STAKING_REGISTRY_ADDRESS",
+      z.string().startsWith("0x").length(42).optional(),
+      process.env.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS,
+    ),
     SAFE_ADDRESS: parseConfigField(
       "SAFE_ADDRESS",
       z.string().startsWith("0x").length(42).optional(),
