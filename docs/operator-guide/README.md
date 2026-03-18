@@ -49,7 +49,8 @@ aztec-butler prepare-deployment \
   --production-keys prod-keyfile.json \
   --new-public-keys public-new-private-keys.json \
   --available-publishers available_publisher_addresses.json \
-  --network mainnet
+  --network mainnet \
+  --registry native
 
 # Phase 3b: Fill coinbase addresses (if needed)
 aztec-butler --network mainnet scrape-coinbases
@@ -120,6 +121,7 @@ Commands with registry support:
 - `get-provider-id`
 - `get-create-staking-provider-calldata`
 - `process-private-keys`
+- `prepare-deployment`
 
 Use `--registry <native|olla>`.
 
@@ -133,9 +135,21 @@ For Olla targeting, set:
 
 ```bash
 OLLA_AZTEC_STAKING_REGISTRY_ADDRESS=0x...
+OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=0x...
+OLLA_REWARDS_COINBASE_ADDRESS=0x...
 ```
 
-If this variable is missing and `--registry olla` is used, Butler exits with an error.
+If required Olla variables are missing and `--registry olla` is used, Butler exits with an error.
+
+`process-private-keys` uploads to GCP Secret Manager using Ethereum network naming derived from `ETHEREUM_CHAIN_ID` (not `NETWORK`):
+
+- `1` -> `mainnet`
+- `11155111` -> `sepolia`
+- any other chain -> `chain-<id>`
+
+So with `NETWORK=testnet` and `ETHEREUM_CHAIN_ID=11155111`, secrets are named `web3signer-sepolia-...`.
+
+If a previous run is interrupted after creating a secret but before adding versions, rerunning `process-private-keys` now recovers by appending a missing version to that existing secret.
 
 Duplicate checks in `add-keys` and `process-private-keys` are executed across both registries (when available). If one registry is unavailable or not configured, Butler logs a warning and still checks the other registry.
 
