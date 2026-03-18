@@ -511,16 +511,28 @@ supply: ${await stakingAssetContract.read.totalSupply()}
 
     for (const log of addedLogs) {
       timeline.push({
-        blockNumber: BigInt(log.blockNumber ?? 0),
-        logIndex: BigInt(log.logIndex ?? 0),
+        blockNumber:
+          typeof log.blockNumber === "bigint"
+            ? log.blockNumber
+            : BigInt(log.blockNumber ?? 0),
+        logIndex:
+          typeof log.logIndex === "bigint"
+            ? log.logIndex
+            : BigInt(log.logIndex ?? 0),
         kind: "add",
         attesters: (log.args?.attesters ?? []) as string[],
       });
     }
     for (const log of drippedLogs) {
       timeline.push({
-        blockNumber: BigInt(log.blockNumber ?? 0),
-        logIndex: BigInt(log.logIndex ?? 0),
+        blockNumber:
+          typeof log.blockNumber === "bigint"
+            ? log.blockNumber
+            : BigInt(log.blockNumber ?? 0),
+        logIndex:
+          typeof log.logIndex === "bigint"
+            ? log.logIndex
+            : BigInt(log.logIndex ?? 0),
         kind: "drip",
         attester: log.args?.attester as string,
       });
