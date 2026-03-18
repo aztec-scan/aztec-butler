@@ -4,13 +4,15 @@ import {
   type StakingRegistryTarget,
 } from "../../types/index.js";
 
+type AdminAddressByTarget = Partial<Record<StakingRegistryTarget, string>>;
+
 export interface RegistryDuplicateCheckResult {
   duplicates: Map<string, Set<StakingRegistryTarget>>;
 }
 
 export const checkAttesterDuplicatesAcrossRegistries = async (
   ethClient: EthereumClient,
-  adminAddress: string,
+  adminAddressesByTarget: AdminAddressByTarget,
   attesterAddresses: string[],
 ): Promise<RegistryDuplicateCheckResult> => {
   const normalizedCandidates = attesterAddresses.map((addr) =>
@@ -19,6 +21,14 @@ export const checkAttesterDuplicatesAcrossRegistries = async (
   const duplicates = new Map<string, Set<StakingRegistryTarget>>();
 
   for (const target of STAKING_REGISTRY_TARGETS) {
+    const adminAddress = adminAddressesByTarget[target];
+    if (!adminAddress) {
+      console.warn(
+        `⚠️  Skipping duplicate check for '${target}' registry: missing admin address configuration`,
+      );
+      continue;
+    }
+
     let registryAddress: string;
     try {
       registryAddress = ethClient.getStakingRegistryAddress(target);

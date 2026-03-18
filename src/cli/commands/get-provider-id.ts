@@ -34,9 +34,13 @@ const command = async (
   console.log("\n✅ Staking Provider Found:\n");
   console.log(`  Provider ID: ${providerData.providerId}`);
   console.log(`  Admin: ${providerData.admin}`);
-  console.log(
-    `  Take Rate: ${providerData.takeRate} (${providerData.takeRate / 100}%)`,
-  );
+  if (options.registry === "olla") {
+    console.log("  Take Rate: n/a (not exposed by Olla registry)");
+  } else {
+    console.log(
+      `  Take Rate: ${providerData.takeRate} (${providerData.takeRate / 100}%)`,
+    );
+  }
   console.log(`  Rewards Recipient: ${providerData.rewardsRecipient}`);
 
   console.log("\n💡 You can use this provider ID in other commands:");

@@ -1,92 +1,80 @@
-## Multi-Registry Key Proposal Plan (native + olla)
+# Plan: Add Olla env-vars to prepare-deployment workflow
 
-### Goal
+## Context / Current State
 
-Extend butler so validator keys can be proposed to either staking registry target:
+- `OLLA_AZTEC_STAKING_REGISTRY_ADDRESS` — already in config (`src/core/config/index.ts:147-151`), already used by `EthereumClient` for `--registry olla`. Working.
+- `AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` — one shared admin address used for both registries. Olla needs its own: `OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS`.
+- `OLLA_REWARDS_COINBASE_ADDRESS` — not in config at all. For Olla, all validators share one coinbase (the `RewardsAccumulator` proxy), unlike native where coinbases are per-attester split contracts.
+- `prepare-deployment` currently validates coinbases per-validator and loads from a scraped coinbase cache — none of this applies to Olla.
 
-- `native` (Aztec native staking registry)
-- `olla` (Olla staking registry)
+## Target env vars
 
-Both paths still end with validators becoming Attesters in Aztec Rollup.
+```
+OLLA_AZTEC_STAKING_REGISTRY_ADDRESS=0x62EB3A17629C8B600D494B88232874866272Ae65
+OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=0xeFB5C5e06b5d4b78838fe8186931AaD104898a9A
+OLLA_REWARDS_COINBASE_ADDRESS=0xC9d7235cb57e62E36C4c814Fd80226D1cE6907fB
+```
 
-### Scope
+None of these are required — they're only needed when operating with `--registry olla`.
 
-- In scope: CLI/config/client changes needed to generate and propose calldata to `native` or `olla` staking registries.
-- Out of scope: server scrapers/metrics/state transitions refactor (scrapers remain unchanged in this plan).
+## Changes (5 tasks, 5 files)
 
-### Config Changes
+### 1. Add 2 new env vars to config
 
-1. Add optional env var in config parsing/validation:
-   - `OLLA_AZTEC_STAKING_REGISTRY_ADDRESS`
-2. Keep existing native behavior as default when no registry flag is provided.
-3. Keep existing Safe proposer flow unchanged:
-   - same `SAFE_ADDRESS`, proposer key, and Safe API key
-   - only transaction `to` address varies by selected registry target
+**File:** `src/core/config/index.ts`
 
-### Registry Targeting Model
+Add to `buildConfig()`:
+- `OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` — optional `0x` address (42 chars), same validation as the existing native one.
+- `OLLA_REWARDS_COINBASE_ADDRESS` — optional `0x` address (42 chars).
 
-1. Introduce registry target enum/string union used by CLI + client:
-   - `native` | `olla`
-2. Wire `--registry <native|olla>` into relevant commands, default `native`.
-3. Fail fast with clear error if `--registry olla` is selected and `OLLA_AZTEC_STAKING_REGISTRY_ADDRESS` is missing.
+### 2. Update callers to resolve the correct admin address per registry target
 
-### Ethereum Client Refactor
+Currently `getStakingProvider()` takes a single `adminAddress` parameter and callers always pass `config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS`. Callers need to pick the right admin address based on target:
 
-1. Refactor staking registry access to be target-aware (instead of single hardcoded registry):
-   - resolve address by target
-   - cache contract instances per target
-2. Update provider/queue methods to accept target:
-   - `getStakingRegistryAddress(...)`
-   - `getStakingProvider(...)`
-   - `getProviderQueueLength(...)`
-   - `getProviderQueue(...)`
-   - calldata generation for `addKeysToProvider(...)`
+- `--registry olla` → use `config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS`
+- `--registry native` → use `config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS`
 
-### CLI Command Updates
+Key callers to update:
+- **`src/cli/commands/get-add-keys-to-staking-provider-calldata.ts`** — line 58, passes admin + target.
+- **`src/cli/utils/stakingRegistryChecks.ts`** — iterates all targets with a single admin. Needs config or per-target admin map.
 
-Add `--registry <native|olla>` to proposal-related commands:
+### 3. Update `prepare-deployment` for Olla coinbase
 
-1. `add-keys`
-2. `get-provider-id`
-3. `get-create-staking-provider-calldata`
-4. `process-private-keys` (duplicate-check logic)
+**File:** `src/cli/commands/prepare-deployment.ts`
 
-Each command should:
+Add `registry` field to `PrepareDeploymentOptions`. Behavior when `--registry olla`:
+- Require `OLLA_REWARDS_COINBASE_ADDRESS` is set in config.
+- Set all validators' coinbase to `OLLA_REWARDS_COINBASE_ADDRESS` — no scraping needed.
+- Skip coinbase cache loading entirely (per TODO.md: "scrape/fill coinbases not needed for Olla").
+- Zero-address coinbase validation still runs (but should always pass since we set them).
 
-- log selected registry target and contract address
-- use target-aware Ethereum client calls
+When `--registry native` (default): behavior unchanged.
 
-### Duplicate-Check Requirements
+### 4. Add `--registry` option to `prepare-deployment` CLI command
 
-Duplicate attester checks must be performed across registries (not only selected target):
+**File:** `cli.ts`
 
-1. For `add-keys` and `process-private-keys`, load provider queues from both `native` and `olla` (where configured).
-2. Reject if any candidate attester already exists in either queue.
-3. If one registry is not configured/available, continue with explicit warning and still check the other.
-4. Error output should identify where duplicate was found (`native`, `olla`, or both).
+Add `--registry` option to the `prepare-deployment` command definition, matching the existing pattern from `add-keys`. Pass registry target through to the command.
 
-### Backward Compatibility
+### 5. Update `stakingRegistryChecks.ts` to use per-registry admin address
 
-1. Default behavior remains `native` if no flag is passed.
-2. Existing configs continue to work without requiring Olla env vars.
-3. Existing SAFE proposer/multisig destination remains the same address unless user changes it.
+**File:** `src/cli/utils/stakingRegistryChecks.ts`
 
-### Documentation Updates
+The cross-registry duplicate checker iterates all targets with a single `adminAddress`. Change signature to accept config or a per-target admin map so it can resolve the correct admin address per target.
 
-Update docs to reflect:
+## Files to modify
 
-1. New `--registry <native|olla>` flag and examples.
-2. New env var `OLLA_AZTEC_STAKING_REGISTRY_ADDRESS`.
-3. Duplicate-check behavior across both registries.
-4. Explicit note that scraper support is out of scope for this change.
+| File | Change |
+|---|---|
+| `src/core/config/index.ts` | Add `OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` and `OLLA_REWARDS_COINBASE_ADDRESS` |
+| `src/cli/commands/prepare-deployment.ts` | Add `registry` option, use Olla coinbase, skip coinbase cache for olla |
+| `cli.ts` | Add `--registry` option to `prepare-deployment` command |
+| `src/cli/utils/stakingRegistryChecks.ts` | Accept per-target admin addresses instead of single admin |
+| `src/cli/commands/get-add-keys-to-staking-provider-calldata.ts` | Use olla admin address when `--registry olla` |
 
-### Validation Plan
+## Not in scope
 
-1. Build/typecheck: `npm run build`.
-2. Smoke tests:
-   - `add-keys` default (`native`) unchanged behavior
-   - `add-keys --registry olla` targets Olla address
-   - `get-provider-id --registry olla` resolves provider from Olla registry
-   - duplicate-checks trigger when attester exists in either registry queue
-3. Safe proposal dry run:
-   - confirm transaction `to` address matches selected registry
+- **ABIs** — assume current ABI works for both targets.
+- **Server scrapers** — out of scope per previous plan.
+- **`process-private-keys`** — already has `--registry` support, minor follow-up to use correct admin address.
+- **`EthereumClient` internals** — methods are fine; it's callers that pick the right admin address.

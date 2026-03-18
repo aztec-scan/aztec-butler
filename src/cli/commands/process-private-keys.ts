@@ -63,7 +63,7 @@ type SecretKeyType = "eth" | "bls";
 interface SecretManagerContext {
   client: SecretManagerServiceClient;
   projectId: string;
-  network: string;
+  secretNetwork: string;
 }
 
 interface SecretEntry {
@@ -137,15 +137,41 @@ const triggerWeb3SignerReloads = async (
 };
 
 const createSecretId = (
-  network: string,
+  secretNetwork: string,
   keyType: SecretKeyType,
   role: SecretRole,
   id: number,
   publicKey: string,
-) => `web3signer-${network}-${keyType}-${role}-${id}-${publicKey}`;
+) => `web3signer-${secretNetwork}-${keyType}-${role}-${id}-${publicKey}`;
+
+const getEthereumNetworkName = (chainId: number): string => {
+  switch (chainId) {
+    case 1:
+      return "mainnet";
+    case 11155111:
+      return "sepolia";
+    default:
+      return `chain-${chainId}`;
+  }
+};
 
 const isNotFoundError = (error: unknown) =>
   typeof error === "object" && error !== null && (error as any).code === 5;
+
+const hasEnabledSecretVersion = async (
+  ctx: SecretManagerContext,
+  secretName: string,
+): Promise<boolean> => {
+  const versions = ctx.client.listSecretVersionsAsync({ parent: secretName });
+
+  for await (const version of versions) {
+    if (version.state === "ENABLED") {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 const ensureSecretExists = async (
   ctx: SecretManagerContext,
@@ -186,11 +212,11 @@ const getExistingSecretInfo = async (
 ) => {
   const parent = `projects/${ctx.projectId}`;
   const prefixRegex = new RegExp(
-    `^web3signer-${ctx.network}-${keyType}-${role}-(\\d+)-(0x[0-9a-fA-F]+)$`,
+    `^web3signer-${ctx.secretNetwork}-${keyType}-${role}-(\\d+)-(0x[0-9a-fA-F]+)$`,
   );
 
   let maxId = -1;
-  const publicKeys = new Set<string>();
+  const secretNamesByPublicKey = new Map<string, string[]>();
   const iterable = ctx.client.listSecretsAsync({ parent });
 
   for await (const secret of iterable) {
@@ -206,11 +232,15 @@ const getExistingSecretInfo = async (
 
     const secretPublicKey = match[2];
     if (secretPublicKey) {
-      publicKeys.add(secretPublicKey.toLowerCase());
+      const normalizedPublicKey = secretPublicKey.toLowerCase();
+      const secretName = `${parent}/secrets/${secretId}`;
+      const existing = secretNamesByPublicKey.get(normalizedPublicKey) ?? [];
+      existing.push(secretName);
+      secretNamesByPublicKey.set(normalizedPublicKey, existing);
     }
   }
 
-  return { maxId, publicKeys };
+  return { maxId, secretNamesByPublicKey };
 };
 
 const addSecretVersions = async (
@@ -232,7 +262,7 @@ const addSecretVersions = async (
     const groupEntries = grouped[groupKey] ?? [];
     if (groupEntries.length === 0) continue;
 
-    const { maxId, publicKeys } = await getExistingSecretInfo(
+    const { maxId, secretNamesByPublicKey } = await getExistingSecretInfo(
       ctx,
       keyType,
       role,
@@ -241,31 +271,64 @@ const addSecretVersions = async (
 
     for (const entry of groupEntries) {
       const normalizedPublicKey = entry.publicKey.toLowerCase();
-      if (publicKeys.has(normalizedPublicKey)) {
-        console.log(
-          `  ⚠️ Skipping ${role}/${keyType} for validator ${entry.validatorIndex}: public key already uploaded`,
-        );
-        continue;
+
+      const existingSecretNames =
+        secretNamesByPublicKey.get(normalizedPublicKey) ?? [];
+
+      if (existingSecretNames.length > 0) {
+        let reusedSecretName: string | null = null;
+        let hasEnabledVersion = false;
+
+        for (const existingSecretName of existingSecretNames) {
+          if (await hasEnabledSecretVersion(ctx, existingSecretName)) {
+            hasEnabledVersion = true;
+            break;
+          }
+          reusedSecretName = existingSecretName;
+        }
+
+        if (hasEnabledVersion) {
+          console.log(
+            `  ⚠️ Skipping ${role}/${keyType} for validator ${entry.validatorIndex}: public key already uploaded`,
+          );
+          continue;
+        }
+
+        if (reusedSecretName) {
+          const [version] = await ctx.client.addSecretVersion({
+            parent: reusedSecretName,
+            payload: { data: Buffer.from(entry.key, "utf8") },
+          });
+
+          const secretId = reusedSecretName.split("/").pop() ?? "<unknown>";
+          const versionId = version.name?.split("/").pop();
+          console.log(
+            `  ➕ Added missing version ${versionId ?? "<unknown>"} to ${secretId} (validator ${entry.validatorIndex})`,
+          );
+          continue;
+        }
       }
 
       const secretId = createSecretId(
-        ctx.network,
+        ctx.secretNetwork,
         keyType,
         role,
         nextId,
         normalizedPublicKey,
       );
       nextId += 1;
-      publicKeys.add(normalizedPublicKey);
 
       const labels = {
-        network: ctx.network,
+        network: ctx.secretNetwork,
         key_type: keyType,
         role,
         validator_index: String(entry.validatorIndex),
       };
 
       const secretName = await ensureSecretExists(ctx, secretId, labels);
+      const existing = secretNamesByPublicKey.get(normalizedPublicKey) ?? [];
+      existing.push(secretName);
+      secretNamesByPublicKey.set(normalizedPublicKey, existing);
 
       const [version] = await ctx.client.addSecretVersion({
         parent: secretName,
@@ -286,7 +349,9 @@ const command = async (
   options: ProcessPrivateKeysOptions,
 ) => {
   const stakingProviderAdminAddress =
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
+    options.registry === "olla"
+      ? config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+      : config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
 
   if (
     !stakingProviderAdminAddress &&
@@ -460,7 +525,7 @@ const command = async (
   const secretContext: SecretManagerContext = {
     client: secretManagerClient,
     projectId,
-    network: config.NETWORK,
+    secretNetwork: getEthereumNetworkName(config.ETHEREUM_CHAIN_ID),
   };
 
   const secretEntries: SecretEntry[] = [];
@@ -510,7 +575,7 @@ const command = async (
 
   if (!stakingProviderAdminAddress) {
     console.warn(
-      "⚠️  AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS not configured - skipping provider queue duplicate checks",
+      `⚠️  Staking provider admin address for '${options.registry}' registry is not configured - skipping provider queue duplicate checks`,
     );
   } else {
     const stakingProviderData = await ethClient.getStakingProvider(
@@ -529,7 +594,14 @@ const command = async (
 
       const { duplicates } = await checkAttesterDuplicatesAcrossRegistries(
         ethClient,
-        stakingProviderAdminAddress,
+        {
+          ...(config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+            ? { native: config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS }
+            : {}),
+          ...(config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+            ? { olla: config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS }
+            : {}),
+        },
         attesterAddresses,
       );
 

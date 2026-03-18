@@ -7,6 +7,7 @@ import {
 } from "@aztec/ethereum";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { STAKING_REGISTRY_ABI, HexString } from "../../types/index.js";
+import { OLLA_STAKING_PROVIDER_REGISTRY_ABI } from "../../types/generated/olla-staking-provider-registry-abi.js";
 import { ButlerConfig } from "../../core/config/index.js";
 import { SafeGlobalClient } from "../../core/components/SafeGlobalClient.js";
 import type { StakingRegistryTarget } from "../../types/index.js";
@@ -23,14 +24,25 @@ const get0xString = (bn: bigint): HexString => {
   return `0x${bn.toString(16).padStart(64, "0")}`;
 };
 
+const resolveAttesterAddress = (value: string): string => {
+  if (value.startsWith("0x") && value.length === 42) {
+    return getAddress(value);
+  }
+  return getAddressFromPrivateKey(value as `0x${string}`);
+};
+
 const command = async (
   ethClient: EthereumClient,
   config: ButlerConfig,
   options: AddKeysOptions,
 ) => {
+  const selectedAdminAddress =
+    options.registry === "olla"
+      ? config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+      : config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
   assert(
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-    "Staking provider admin address must be provided.",
+    selectedAdminAddress,
+    `Staking provider admin address must be provided for '${options.registry}' registry.`,
   );
 
   console.log("\n=== Generating Add Keys Calldata ===\n");
@@ -55,7 +67,7 @@ const command = async (
 
   // 2. Get staking provider info
   const stakingProviderData = await ethClient.getStakingProvider(
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+    selectedAdminAddress,
     options.registry,
   );
 
@@ -74,12 +86,19 @@ const command = async (
   // 3. Check for duplicate attesters in provider queue(s)
   console.log("\nChecking for duplicate attesters across registries...");
   const attesterAddresses = keystore.data.validators.map((v: any) =>
-    getAddressFromPrivateKey(v.attester.eth as `0x${string}`),
+    resolveAttesterAddress(v.attester.eth),
   );
 
   const { duplicates } = await checkAttesterDuplicatesAcrossRegistries(
     ethClient,
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+    {
+      ...(config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+        ? { native: config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS }
+        : {}),
+      ...(config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+        ? { olla: config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS }
+        : {}),
+    },
     attesterAddresses,
   );
 
@@ -111,9 +130,7 @@ const command = async (
       BigInt(validator.attester.bls),
     );
 
-    const attesterAddr = getAddressFromPrivateKey(
-      validator.attester.eth as `0x${string}`,
-    );
+    const attesterAddr = resolveAttesterAddress(validator.attester.eth);
 
     keyStores.push({
       attester: getAddress(attesterAddr),
@@ -150,16 +167,28 @@ const command = async (
   );
 
   // 6. Generate calldata for each chunk
-  const callDataChunks = chunks.map((chunk, index) => ({
-    chunkNumber: index + 1,
-    attestersCount: chunk.length,
-    contractToCall: selectedRegistryAddress,
-    callData: encodeFunctionData({
-      abi: STAKING_REGISTRY_ABI,
-      functionName: "addKeysToProvider",
-      args: [stakingProviderData.providerId, chunk],
-    }),
-  }));
+  const callDataChunks =
+    options.registry === "olla"
+      ? chunks.map((chunk, index) => ({
+          chunkNumber: index + 1,
+          attestersCount: chunk.length,
+          contractToCall: selectedRegistryAddress,
+          callData: encodeFunctionData({
+            abi: OLLA_STAKING_PROVIDER_REGISTRY_ABI,
+            functionName: "addKeysToProvider",
+            args: [chunk],
+          }),
+        }))
+      : chunks.map((chunk, index) => ({
+          chunkNumber: index + 1,
+          attestersCount: chunk.length,
+          contractToCall: selectedRegistryAddress,
+          callData: encodeFunctionData({
+            abi: STAKING_REGISTRY_ABI,
+            functionName: "addKeysToProvider",
+            args: [stakingProviderData.providerId, chunk],
+          }),
+        }));
 
   // Log calldata for each chunk
   for (const chunkData of callDataChunks) {

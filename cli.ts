@@ -404,12 +404,19 @@ program
     "-o, --output <path>",
     "Output file path (default: [production-keys].new)",
   )
+  .option(
+    "--registry <registry>",
+    "Staking registry target (native|olla)",
+    parseRegistryTarget,
+    "native",
+  )
   .action(
     async (options: {
       productionKeys: string;
       newPublicKeys: string;
       availablePublishers: string;
       output?: string;
+      registry: StakingRegistryTarget;
     }) => {
       const globalOpts = program.opts();
       const config = await initConfig({ network: globalOpts.network });
@@ -420,6 +427,7 @@ program
         newPublicKeys: options.newPublicKeys,
         availablePublishers: options.availablePublishers,
         network: config.NETWORK,
+        registry: options.registry,
         ...(options.output ? { outputPath: options.output } : {}),
       });
     },

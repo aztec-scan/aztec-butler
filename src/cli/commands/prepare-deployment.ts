@@ -4,6 +4,7 @@ import { formatEther } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import type { Keystore, KeystoreValidator } from "../../types/keystore.js";
+import type { StakingRegistryTarget } from "../../types/index.js";
 import { generateVersionedFilename } from "../../core/utils/keysFileOperations.js";
 import { loadCoinbaseCache } from "../../core/utils/scraperConfigOperations.js";
 
@@ -13,6 +14,7 @@ interface PrepareDeploymentOptions {
   availablePublishers: string;
   outputPath?: string;
   network: string;
+  registry: StakingRegistryTarget;
 }
 
 interface ServerPublishers {
@@ -27,6 +29,16 @@ const command = async (
   options: PrepareDeploymentOptions,
 ) => {
   console.log("\n=== Prepare Deployment ===\n");
+  console.log(`Registry target: ${options.registry}`);
+
+  const isOllaRegistry = options.registry === "olla";
+  const ollaRewardsCoinbaseAddress = config.OLLA_REWARDS_COINBASE_ADDRESS;
+
+  if (isOllaRegistry && !ollaRewardsCoinbaseAddress) {
+    throw new Error(
+      "OLLA_REWARDS_COINBASE_ADDRESS must be configured when using --registry olla.",
+    );
+  }
 
   // 1. Load and validate input files
   console.log("Loading input files...");
@@ -174,29 +186,7 @@ const command = async (
 
   console.log("✅ No duplicate attesters found");
 
-  // 3. Coinbase validation
-  console.log("\nValidating coinbase addresses...");
-
-  const zeroCoinbases: string[] = [];
-
-  for (const validator of [
-    ...productionData.validators,
-    ...newPublicKeysData.validators,
-  ]) {
-    if (validator.coinbase === ZERO_ADDRESS) {
-      zeroCoinbases.push(validator.attester.eth);
-    }
-  }
-
-  if (zeroCoinbases.length > 0) {
-    throw new Error(
-      `FATAL: Found validators with zero-address coinbase:\n${zeroCoinbases.map((addr) => `  - ${addr}`).join("\n")}`,
-    );
-  }
-
-  console.log("✅ No zero-address coinbases found");
-
-  // 4. Publisher funding check
+  // 3. Publisher funding check
   console.log("\nChecking publisher funding...");
 
   const minEthPerAttester = BigInt(
@@ -234,7 +224,7 @@ const command = async (
 
   console.log("✅ All publishers have ETH");
 
-  // 5. Server detection
+  // 4. Server detection
   console.log("\nDetecting servers from available publishers...");
 
   const serverIds = Object.keys(serverPublishers).filter(
@@ -252,33 +242,39 @@ const command = async (
     `✅ Found ${serverIds.length} server(s): ${serverIds.join(", ")}`,
   );
 
-  // 6. Load coinbase cache (optional)
-  console.log("\nLoading coinbase cache...");
-
   const coinbaseMap = new Map<string, string>();
-  try {
-    const coinbaseCache = await loadCoinbaseCache(options.network);
-    if (coinbaseCache) {
-      for (const mapping of coinbaseCache.mappings) {
-        coinbaseMap.set(
-          mapping.attesterAddress.toLowerCase(),
-          mapping.coinbaseAddress,
+  if (isOllaRegistry) {
+    console.log(
+      `\nUsing Olla rewards coinbase for all validators: ${ollaRewardsCoinbaseAddress}`,
+    );
+    console.log("Skipping coinbase cache loading for Olla registry");
+  } else {
+    // 5. Load coinbase cache (optional)
+    console.log("\nLoading coinbase cache...");
+    try {
+      const coinbaseCache = await loadCoinbaseCache(options.network);
+      if (coinbaseCache) {
+        for (const mapping of coinbaseCache.mappings) {
+          coinbaseMap.set(
+            mapping.attesterAddress.toLowerCase(),
+            mapping.coinbaseAddress,
+          );
+        }
+        console.log(
+          `✅ Loaded ${coinbaseMap.size} coinbase mapping(s) from cache`,
         );
       }
-      console.log(
-        `✅ Loaded ${coinbaseMap.size} coinbase mapping(s) from cache`,
+    } catch (error) {
+      console.warn(
+        `⚠️  No coinbase cache found for network "${options.network}". Validators will be created without coinbase addresses.`,
+      );
+      console.warn(
+        `   Run 'aztec-butler scrape-coinbases --network ${options.network}' to create the cache, then use 'fill-coinbases' to add them.`,
       );
     }
-  } catch (error) {
-    console.warn(
-      `⚠️  No coinbase cache found for network "${options.network}". Validators will be created without coinbase addresses.`,
-    );
-    console.warn(
-      `   Run 'aztec-butler scrape-coinbases --network ${options.network}' to create the cache, then use 'fill-coinbases' to add them.`,
-    );
   }
 
-  // 7. Generate output file(s)
+  // 6. Generate output file(s)
   console.log("\nGenerating output file(s)...");
 
   const outputDir = path.dirname(options.outputPath || options.productionKeys);
@@ -295,9 +291,9 @@ const command = async (
       feeRecipient,
     };
 
-    // Use existing coinbase from production, or lookup in cache
-    const coinbase =
-      existingCoinbase || coinbaseMap.get(attester.eth.toLowerCase());
+    const coinbase = isOllaRegistry
+      ? ollaRewardsCoinbaseAddress
+      : existingCoinbase || coinbaseMap.get(attester.eth.toLowerCase());
     if (coinbase) {
       entry.coinbase = coinbase;
     }
@@ -313,6 +309,25 @@ const command = async (
       createValidatorEntry(v.attester, v.feeRecipient),
     ),
   ];
+
+  // 7. Coinbase validation
+  console.log("\nValidating coinbase addresses...");
+
+  const zeroCoinbases: string[] = [];
+
+  for (const validator of mergedValidators) {
+    if (validator.coinbase === ZERO_ADDRESS) {
+      zeroCoinbases.push(validator.attester.eth);
+    }
+  }
+
+  if (zeroCoinbases.length > 0) {
+    throw new Error(
+      `FATAL: Found validators with zero-address coinbase:\n${zeroCoinbases.map((addr) => `  - ${addr}`).join("\n")}`,
+    );
+  }
+
+  console.log("✅ No zero-address coinbases found");
 
   // Function to assign publishers using round-robin
   const assignPublishers = (
