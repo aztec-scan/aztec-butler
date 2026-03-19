@@ -1,4 +1,3 @@
-import assert from "assert";
 import fs from "fs/promises";
 import path from "path";
 import { getAddress } from "viem";
@@ -8,11 +7,13 @@ import { SecretManagerServiceClient } from "@google-cloud/secret-manager";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { getServiceAccountCredentials } from "../../core/utils/googleAuth.js";
 import type { ButlerConfig } from "../../core/config/index.js";
-import type { HexString } from "../../types/index.js";
+import type { HexString, StakingRegistryTarget } from "../../types/index.js";
+import { checkAttesterDuplicatesAcrossRegistries } from "../utils/stakingRegistryChecks.js";
 
 interface ProcessPrivateKeysOptions {
   privateKeyFile: string;
   outputFile?: string;
+  registry: StakingRegistryTarget;
 }
 
 interface PrivateKeyValidator {
@@ -62,7 +63,7 @@ type SecretKeyType = "eth" | "bls";
 interface SecretManagerContext {
   client: SecretManagerServiceClient;
   projectId: string;
-  network: string;
+  secretNetwork: string;
 }
 
 interface SecretEntry {
@@ -136,15 +137,41 @@ const triggerWeb3SignerReloads = async (
 };
 
 const createSecretId = (
-  network: string,
+  secretNetwork: string,
   keyType: SecretKeyType,
   role: SecretRole,
   id: number,
   publicKey: string,
-) => `web3signer-${network}-${keyType}-${role}-${id}-${publicKey}`;
+) => `web3signer-${secretNetwork}-${keyType}-${role}-${id}-${publicKey}`;
+
+const getEthereumNetworkName = (chainId: number): string => {
+  switch (chainId) {
+    case 1:
+      return "mainnet";
+    case 11155111:
+      return "sepolia";
+    default:
+      return `chain-${chainId}`;
+  }
+};
 
 const isNotFoundError = (error: unknown) =>
   typeof error === "object" && error !== null && (error as any).code === 5;
+
+const hasEnabledSecretVersion = async (
+  ctx: SecretManagerContext,
+  secretName: string,
+): Promise<boolean> => {
+  const versions = ctx.client.listSecretVersionsAsync({ parent: secretName });
+
+  for await (const version of versions) {
+    if (version.state === "ENABLED") {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 const ensureSecretExists = async (
   ctx: SecretManagerContext,
@@ -185,11 +212,11 @@ const getExistingSecretInfo = async (
 ) => {
   const parent = `projects/${ctx.projectId}`;
   const prefixRegex = new RegExp(
-    `^web3signer-${ctx.network}-${keyType}-${role}-(\\d+)-(0x[0-9a-fA-F]+)$`,
+    `^web3signer-${ctx.secretNetwork}-${keyType}-${role}-(\\d+)-(0x[0-9a-fA-F]+)$`,
   );
 
   let maxId = -1;
-  const publicKeys = new Set<string>();
+  const secretNamesByPublicKey = new Map<string, string[]>();
   const iterable = ctx.client.listSecretsAsync({ parent });
 
   for await (const secret of iterable) {
@@ -205,11 +232,15 @@ const getExistingSecretInfo = async (
 
     const secretPublicKey = match[2];
     if (secretPublicKey) {
-      publicKeys.add(secretPublicKey.toLowerCase());
+      const normalizedPublicKey = secretPublicKey.toLowerCase();
+      const secretName = `${parent}/secrets/${secretId}`;
+      const existing = secretNamesByPublicKey.get(normalizedPublicKey) ?? [];
+      existing.push(secretName);
+      secretNamesByPublicKey.set(normalizedPublicKey, existing);
     }
   }
 
-  return { maxId, publicKeys };
+  return { maxId, secretNamesByPublicKey };
 };
 
 const addSecretVersions = async (
@@ -231,7 +262,7 @@ const addSecretVersions = async (
     const groupEntries = grouped[groupKey] ?? [];
     if (groupEntries.length === 0) continue;
 
-    const { maxId, publicKeys } = await getExistingSecretInfo(
+    const { maxId, secretNamesByPublicKey } = await getExistingSecretInfo(
       ctx,
       keyType,
       role,
@@ -240,31 +271,64 @@ const addSecretVersions = async (
 
     for (const entry of groupEntries) {
       const normalizedPublicKey = entry.publicKey.toLowerCase();
-      if (publicKeys.has(normalizedPublicKey)) {
-        console.log(
-          `  ⚠️ Skipping ${role}/${keyType} for validator ${entry.validatorIndex}: public key already uploaded`,
-        );
-        continue;
+
+      const existingSecretNames =
+        secretNamesByPublicKey.get(normalizedPublicKey) ?? [];
+
+      if (existingSecretNames.length > 0) {
+        let reusedSecretName: string | null = null;
+        let hasEnabledVersion = false;
+
+        for (const existingSecretName of existingSecretNames) {
+          if (await hasEnabledSecretVersion(ctx, existingSecretName)) {
+            hasEnabledVersion = true;
+            break;
+          }
+          reusedSecretName = existingSecretName;
+        }
+
+        if (hasEnabledVersion) {
+          console.log(
+            `  ⚠️ Skipping ${role}/${keyType} for validator ${entry.validatorIndex}: public key already uploaded`,
+          );
+          continue;
+        }
+
+        if (reusedSecretName) {
+          const [version] = await ctx.client.addSecretVersion({
+            parent: reusedSecretName,
+            payload: { data: Buffer.from(entry.key, "utf8") },
+          });
+
+          const secretId = reusedSecretName.split("/").pop() ?? "<unknown>";
+          const versionId = version.name?.split("/").pop();
+          console.log(
+            `  ➕ Added missing version ${versionId ?? "<unknown>"} to ${secretId} (validator ${entry.validatorIndex})`,
+          );
+          continue;
+        }
       }
 
       const secretId = createSecretId(
-        ctx.network,
+        ctx.secretNetwork,
         keyType,
         role,
         nextId,
         normalizedPublicKey,
       );
       nextId += 1;
-      publicKeys.add(normalizedPublicKey);
 
       const labels = {
-        network: ctx.network,
+        network: ctx.secretNetwork,
         key_type: keyType,
         role,
         validator_index: String(entry.validatorIndex),
       };
 
       const secretName = await ensureSecretExists(ctx, secretId, labels);
+      const existing = secretNamesByPublicKey.get(normalizedPublicKey) ?? [];
+      existing.push(secretName);
+      secretNamesByPublicKey.set(normalizedPublicKey, existing);
 
       const [version] = await ctx.client.addSecretVersion({
         parent: secretName,
@@ -284,12 +348,26 @@ const command = async (
   config: ButlerConfig,
   options: ProcessPrivateKeysOptions,
 ) => {
-  assert(
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-    "Staking provider admin address must be provided.",
-  );
+  const stakingProviderAdminAddress =
+    options.registry === "olla"
+      ? config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+      : config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
+
+  if (
+    !stakingProviderAdminAddress &&
+    !(options.registry === "olla" && config.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS)
+  ) {
+    throw new Error(
+      "Staking provider admin address must be provided unless using --registry olla with OLLA_AZTEC_STAKING_REGISTRY_ADDRESS configured.",
+    );
+  }
 
   console.log("\n=== Processing Private Keys ===\n");
+  const selectedRegistryAddress = ethClient.getStakingRegistryAddress(
+    options.registry,
+  );
+  console.log(`Registry target: ${options.registry}`);
+  console.log(`Registry address: ${selectedRegistryAddress}`);
 
   const allowedNetworks = ["mainnet", "testnet"] as const;
   if (
@@ -447,7 +525,7 @@ const command = async (
   const secretContext: SecretManagerContext = {
     client: secretManagerClient,
     projectId,
-    network: config.NETWORK,
+    secretNetwork: getEthereumNetworkName(config.ETHEREUM_CHAIN_ID),
   };
 
   const secretEntries: SecretEntry[] = [];
@@ -493,46 +571,54 @@ const command = async (
   await triggerWeb3SignerReloads(config.NETWORK, config.WEB3SIGNER_URLS);
 
   // 4. Check provider queue for duplicates
-  console.log("\n=== Checking Provider Queue ===");
+  console.log("\n=== Checking Provider Queue(s) ===");
 
-  const stakingProviderData = await ethClient.getStakingProvider(
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-  );
-
-  if (!stakingProviderData) {
+  if (!stakingProviderAdminAddress) {
     console.warn(
-      "⚠️  Staking provider not registered yet - skipping queue check",
+      `⚠️  Staking provider admin address for '${options.registry}' registry is not configured - skipping provider queue duplicate checks`,
     );
   } else {
-    console.log(`Provider ID: ${stakingProviderData.providerId}`);
-
-    const queueLength = await ethClient.getProviderQueueLength(
-      stakingProviderData.providerId,
+    const stakingProviderData = await ethClient.getStakingProvider(
+      stakingProviderAdminAddress,
+      options.registry,
     );
-    console.log(`Provider queue length: ${queueLength}`);
 
-    const attesterAddresses = derivedKeys.map((k) => k.publicKeys.eth);
-
-    if (queueLength > 0n) {
-      const providerQueue = await ethClient.getProviderQueue(
-        stakingProviderData.providerId,
+    if (!stakingProviderData) {
+      console.warn(
+        "⚠️  Staking provider not registered yet - skipping queue check",
       );
-      console.log(`Loaded ${providerQueue.length} attester(s) from queue`);
-
-      // Check if any attesters are already in queue
-      const queueSet = new Set(providerQueue.map((addr) => addr.toLowerCase()));
-
-      for (const attesterAddr of attesterAddresses) {
-        if (queueSet.has(attesterAddr.toLowerCase())) {
-          throw new Error(
-            `FATAL: Attester ${attesterAddr} is already in provider queue!\n` +
-              `Cannot process keys that are already queued.`,
-          );
-        }
-      }
-      console.log("✅ No duplicate attesters found in queue");
     } else {
-      console.log("✅ Queue is empty, no duplicates possible");
+      console.log(`Provider ID: ${stakingProviderData.providerId}`);
+
+      const attesterAddresses = derivedKeys.map((k) => k.publicKeys.eth);
+
+      const { duplicates } = await checkAttesterDuplicatesAcrossRegistries(
+        ethClient,
+        {
+          ...(config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+            ? { native: config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS }
+            : {}),
+          ...(config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+            ? { olla: config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS }
+            : {}),
+        },
+        attesterAddresses,
+      );
+
+      if (duplicates.size > 0) {
+        const duplicateLines = Array.from(duplicates.entries()).map(
+          ([attester, targets]) =>
+            `  - ${attester}: ${Array.from(targets.values()).join(", ")}`,
+        );
+        throw new Error(
+          "FATAL: Duplicate attester(s) found in staking provider queues across registries:\n" +
+            duplicateLines.join("\n") +
+            "\nCannot process keys that are already queued.",
+        );
+      }
+      console.log(
+        "✅ No duplicate attesters found across available registries",
+      );
     }
   }
 

@@ -23,12 +23,14 @@ import {
   CuratedKeystoreData,
   STAKING_REGISTRY_ABI,
   StakingRegistryContract,
+  StakingRegistryTarget,
   type StakingProviderData,
   type AttesterRegistration,
   type HexString,
   type AttesterView,
   AttesterOnChainStatus,
 } from "../../types/index.js";
+import { OLLA_STAKING_PROVIDER_REGISTRY_ABI } from "../../types/generated/olla-staking-provider-registry-abi.js";
 
 const SUPPORTED_CHAINS = [sepolia, mainnet];
 
@@ -39,6 +41,11 @@ type GovernanceContract = GetContractReturnType<
 >;
 type GSEContractType = GetContractReturnType<typeof GSEAbi, PublicClient>;
 type ERC20Contract = GetContractReturnType<typeof erc20Abi, PublicClient>;
+type OllaStakingProviderRegistryContract = GetContractReturnType<
+  typeof OLLA_STAKING_PROVIDER_REGISTRY_ABI,
+  PublicClient
+>;
+type AnyStakingRegistryContract = any;
 
 type EntryQueueData = {
   attester: string;
@@ -58,14 +65,25 @@ type SplitAllocationData = {
 const SPLIT_UPDATED_EVENT = parseAbiItem(
   "event SplitUpdated((address[] recipients,uint256[] allocations,uint256 totalAllocation,uint16 distributorFee) split)",
 );
+const OLLA_KEYS_ADDED_EVENT = parseAbiItem(
+  "event KeysAddedToProvider(address[] attesters)",
+);
+const OLLA_QUEUE_DRIPPED_EVENT = parseAbiItem(
+  "event QueueDripped(address indexed attester)",
+);
 const ADDRESS_MASK = (1n << 160n) - 1n;
 const LOG_RANGE_LIMIT = 50_000n;
+const OLLA_QUEUE_SCAN_START_BLOCK_BY_CHAIN_ID: Record<number, bigint> = {
+  [sepolia.id]: 10421273n,
+  [mainnet.id]: 24690544n,
+};
 
 export interface EthereumClientConfig {
   rpcUrl: string;
   archiveRpcUrl?: string;
   chainId: number;
   rollupAddress: Address;
+  ollaStakingRegistryAddress?: Address;
 }
 
 export type CalldataExport = {
@@ -79,9 +97,12 @@ export class EthereumClient {
   private readonly config: EthereumClientConfig;
   private rollupContract?: RollupContract;
   private archiveRollupContract?: RollupContract;
-  private stakingRegistryContract?: StakingRegistryContract;
+  private nativeStakingRegistryContract?: StakingRegistryContract;
+  private ollaStakingRegistryContract?: OllaStakingProviderRegistryContract;
   private providerDataCache: Map<string, StakingProviderData | null> =
     new Map();
+  private ollaQueueCache: { latestBlock: bigint; queue: string[] } | null =
+    null;
 
   constructor(config: EthereumClientConfig) {
     this.config = config;
@@ -167,7 +188,16 @@ export class EthereumClient {
   /**
    * Get the staking registry contract address for this chain
    */
-  getStakingRegistryAddress(): Address {
+  getStakingRegistryAddress(target: StakingRegistryTarget = "native"): Address {
+    if (target === "olla") {
+      if (!this.config.ollaStakingRegistryAddress) {
+        throw new Error(
+          "Registry target 'olla' selected but OLLA_AZTEC_STAKING_REGISTRY_ADDRESS is not configured.",
+        );
+      }
+      return this.config.ollaStakingRegistryAddress;
+    }
+
     if (this.config.chainId === 11155111) {
       return getAddress("0xc3860c45e5F0b1eF3000dbF93149756f16928ADB");
     } else if (this.config.chainId === 1) {
@@ -179,15 +209,43 @@ export class EthereumClient {
   /**
    * Get the staking registry contract instance (lazy initialization)
    */
-  getStakingRegistryContract(): StakingRegistryContract {
-    if (!this.stakingRegistryContract) {
-      this.stakingRegistryContract = getContract({
-        address: this.getStakingRegistryAddress(),
+  getStakingRegistryContract(target: "native"): StakingRegistryContract;
+  getStakingRegistryContract(
+    target: "olla",
+  ): OllaStakingProviderRegistryContract;
+  getStakingRegistryContract(
+    target: StakingRegistryTarget = "native",
+  ): AnyStakingRegistryContract {
+    if (target === "olla") {
+      if (!this.ollaStakingRegistryContract) {
+        this.ollaStakingRegistryContract = getContract({
+          address: this.getStakingRegistryAddress("olla"),
+          abi: OLLA_STAKING_PROVIDER_REGISTRY_ABI,
+          client: this.client,
+        }) as OllaStakingProviderRegistryContract;
+      }
+      return this.ollaStakingRegistryContract;
+    }
+
+    if (!this.nativeStakingRegistryContract) {
+      this.nativeStakingRegistryContract = getContract({
+        address: this.getStakingRegistryAddress("native"),
         abi: STAKING_REGISTRY_ABI,
         client: this.client,
       });
     }
-    return this.stakingRegistryContract;
+
+    return this.nativeStakingRegistryContract;
+  }
+
+  private getNativeStakingRegistryContract(): StakingRegistryContract {
+    return this.getStakingRegistryContract("native") as StakingRegistryContract;
+  }
+
+  private getOllaStakingRegistryContract(): OllaStakingProviderRegistryContract {
+    return this.getStakingRegistryContract(
+      "olla",
+    ) as OllaStakingProviderRegistryContract;
   }
 
   /**
@@ -272,13 +330,33 @@ supply: ${await stakingAssetContract.read.totalSupply()}
    */
   async getStakingProvider(
     adminAddress: string,
+    target: StakingRegistryTarget = "native",
   ): Promise<StakingProviderData | null> {
+    const cacheKey = `${target}:${adminAddress.toLowerCase()}`;
     // Check cache first
-    if (this.providerDataCache.has(adminAddress)) {
-      return this.providerDataCache.get(adminAddress)!;
+    if (this.providerDataCache.has(cacheKey)) {
+      return this.providerDataCache.get(cacheKey)!;
     }
 
-    const stakingReg = this.getStakingRegistryContract();
+    if (target === "olla") {
+      const stakingReg = this.getOllaStakingRegistryContract();
+      const providerConfig = await stakingReg.read.getStakingProviderConfig();
+      if (providerConfig.admin.toLowerCase() !== adminAddress.toLowerCase()) {
+        this.providerDataCache.set(cacheKey, null);
+        return null;
+      }
+
+      const providerData: StakingProviderData = {
+        providerId: 0n,
+        admin: providerConfig.admin,
+        takeRate: 0,
+        rewardsRecipient: providerConfig.rewardsRecipient,
+      };
+      this.providerDataCache.set(cacheKey, providerData);
+      return providerData;
+    }
+
+    const stakingReg = this.getNativeStakingRegistryContract();
     let index = 0n;
 
     while (true) {
@@ -292,14 +370,12 @@ supply: ${await stakingAssetContract.read.totalSupply()}
             takeRate,
             rewardsRecipient,
           };
-          // Cache the result
-          this.providerDataCache.set(adminAddress, providerData);
+          this.providerDataCache.set(cacheKey, providerData);
           return providerData;
         }
         index++;
-      } catch (error) {
-        // No more providers found
-        this.providerDataCache.set(adminAddress, null);
+      } catch {
+        this.providerDataCache.set(cacheKey, null);
         return null;
       }
     }
@@ -308,8 +384,16 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   /**
    * Get the queue length for a provider
    */
-  async getProviderQueueLength(providerId: bigint): Promise<bigint> {
-    const stakingReg = this.getStakingRegistryContract();
+  async getProviderQueueLength(
+    providerId: bigint,
+    target: StakingRegistryTarget = "native",
+  ): Promise<bigint> {
+    if (target === "olla") {
+      const stakingReg = this.getOllaStakingRegistryContract();
+      return await stakingReg.read.getQueueLength();
+    }
+
+    const stakingReg = this.getNativeStakingRegistryContract();
     return await stakingReg.read.getProviderQueueLength([providerId]);
   }
 
@@ -317,8 +401,15 @@ supply: ${await stakingAssetContract.read.totalSupply()}
    * Get the full queue of attesters for a provider
    * Iterates through queue indices to fetch all attester addresses
    */
-  async getProviderQueue(providerId: bigint): Promise<string[]> {
-    const stakingReg = this.getStakingRegistryContract();
+  async getProviderQueue(
+    providerId: bigint,
+    target: StakingRegistryTarget = "native",
+  ): Promise<string[]> {
+    if (target === "olla") {
+      return await this.getOllaProviderQueueFromEvents();
+    }
+
+    const stakingReg = this.getNativeStakingRegistryContract();
 
     const firstIndex = await stakingReg.read.getFirstIndexInQueue([providerId]);
     const lastIndex = await stakingReg.read.getLastIndexInQueue([providerId]);
@@ -341,6 +432,150 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     }
 
     return queue;
+  }
+
+  private async getLogsWithArchiveFallback(params: {
+    address: Address;
+    event: any;
+    fromBlock: bigint;
+    toBlock: bigint;
+  }): Promise<any[]> {
+    try {
+      return await this.client.getLogs(params);
+    } catch (err) {
+      if (!this.archiveClient) {
+        throw err;
+      }
+      console.warn(
+        "[EthereumClient] Primary RPC getLogs failed, trying archive client...",
+        err,
+      );
+      return await this.archiveClient.getLogs(params);
+    }
+  }
+
+  private async getLogsChunked(params: {
+    address: Address;
+    event: any;
+    fromBlock: bigint;
+    toBlock: bigint;
+  }): Promise<any[]> {
+    const logs: any[] = [];
+    let cursor = params.fromBlock;
+    while (cursor <= params.toBlock) {
+      const end =
+        cursor + LOG_RANGE_LIMIT - 1n > params.toBlock
+          ? params.toBlock
+          : cursor + LOG_RANGE_LIMIT - 1n;
+      const chunkLogs = await this.getLogsWithArchiveFallback({
+        address: params.address,
+        event: params.event,
+        fromBlock: cursor,
+        toBlock: end,
+      });
+      logs.push(...chunkLogs);
+      cursor = end + 1n;
+    }
+    return logs;
+  }
+
+  private async getOllaProviderQueueFromEvents(): Promise<string[]> {
+    const latestBlock = await this.client.getBlockNumber();
+    if (
+      this.ollaQueueCache &&
+      this.ollaQueueCache.latestBlock === latestBlock
+    ) {
+      return [...this.ollaQueueCache.queue];
+    }
+
+    const registryAddress = this.getStakingRegistryAddress("olla");
+    const queueScanStartBlock =
+      OLLA_QUEUE_SCAN_START_BLOCK_BY_CHAIN_ID[this.config.chainId] ?? 0n;
+    const [addedLogs, drippedLogs] = await Promise.all([
+      this.getLogsChunked({
+        address: registryAddress,
+        event: OLLA_KEYS_ADDED_EVENT,
+        fromBlock: queueScanStartBlock,
+        toBlock: latestBlock,
+      }),
+      this.getLogsChunked({
+        address: registryAddress,
+        event: OLLA_QUEUE_DRIPPED_EVENT,
+        fromBlock: queueScanStartBlock,
+        toBlock: latestBlock,
+      }),
+    ]);
+
+    const timeline: {
+      blockNumber: bigint;
+      logIndex: bigint;
+      kind: "add" | "drip";
+      attesters?: string[];
+      attester?: string;
+    }[] = [];
+
+    for (const log of addedLogs) {
+      timeline.push({
+        blockNumber:
+          typeof log.blockNumber === "bigint"
+            ? log.blockNumber
+            : BigInt(log.blockNumber ?? 0),
+        logIndex:
+          typeof log.logIndex === "bigint"
+            ? log.logIndex
+            : BigInt(log.logIndex ?? 0),
+        kind: "add",
+        attesters: (log.args?.attesters ?? []) as string[],
+      });
+    }
+    for (const log of drippedLogs) {
+      timeline.push({
+        blockNumber:
+          typeof log.blockNumber === "bigint"
+            ? log.blockNumber
+            : BigInt(log.blockNumber ?? 0),
+        logIndex:
+          typeof log.logIndex === "bigint"
+            ? log.logIndex
+            : BigInt(log.logIndex ?? 0),
+        kind: "drip",
+        attester: log.args?.attester as string,
+      });
+    }
+
+    timeline.sort((a, b) => {
+      if (a.blockNumber !== b.blockNumber) {
+        return a.blockNumber < b.blockNumber ? -1 : 1;
+      }
+      if (a.logIndex === b.logIndex) {
+        return 0;
+      }
+      return a.logIndex < b.logIndex ? -1 : 1;
+    });
+
+    const queue: string[] = [];
+    for (const event of timeline) {
+      if (event.kind === "add") {
+        for (const attester of event.attesters ?? []) {
+          queue.push(attester);
+        }
+        continue;
+      }
+
+      const dripped = event.attester;
+      const shifted = queue.shift();
+      if (!shifted || !dripped) {
+        continue;
+      }
+      if (shifted.toLowerCase() !== dripped.toLowerCase()) {
+        console.warn(
+          `[EthereumClient] Olla queue replay mismatch: expected ${shifted}, dripped ${dripped}`,
+        );
+      }
+    }
+
+    this.ollaQueueCache = { latestBlock, queue };
+    return [...queue];
   }
 
   /**
@@ -418,7 +653,7 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     takeRate: number;
     rewardsRecipient: Address;
   } | null> {
-    const providerData = await this.getStakingProvider(adminAddress);
+    const providerData = await this.getStakingProvider(adminAddress, "native");
     if (!providerData) {
       return null;
     }
@@ -583,6 +818,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
   async generateAddKeysToProviderCalldata(
     providerId: bigint,
     attesterRegistrations: AttesterRegistration[],
+    target: StakingRegistryTarget = "native",
   ): Promise<CalldataExport> {
     // Transform attester data to match ABI structure
     const keyStores = attesterRegistrations.map((attesterData) => ({
@@ -604,7 +840,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     }));
 
     return {
-      address: this.getStakingRegistryAddress(),
+      address: this.getStakingRegistryAddress(target),
       calldata: encodeFunctionData({
         abi: STAKING_REGISTRY_ABI,
         functionName: "addKeysToProvider",

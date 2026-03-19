@@ -42,14 +42,15 @@ If you're already familiar with the process:
 aztec validator-keys new --fee-recipient 0x0000000000000000000000000000000000000000000000000000000000000000 --publisher-count 1 --count 100 --coinbase 0x0000000000000000000000000000000000000000 --data-dir ./
 
 # Phase 2: Process private keys
-aztec-butler process-private-keys key1.json --network mainnet
+aztec-butler process-private-keys key1.json --network mainnet --registry native
 
 # Phase 3: Prepare deployment
 aztec-butler prepare-deployment \
   --production-keys prod-keyfile.json \
   --new-public-keys public-new-private-keys.json \
   --available-publishers available_publisher_addresses.json \
-  --network mainnet
+  --network mainnet \
+  --registry native
 
 # Phase 3b: Fill coinbase addresses (if needed)
 aztec-butler --network mainnet scrape-coinbases
@@ -60,9 +61,11 @@ aztec-butler --network mainnet fill-coinbases --keys-file mainnet-keys-A-v1.json
 # See phase-4.md for details
 
 # Phase 5: Register on-chain
-aztec-butler add-keys prod-keyfile.json
+aztec-butler add-keys prod-keyfile.json --network mainnet --registry native
 # Then submit the calldata to your multisig
 ```
+
+To target Olla staking registry instead of native, use `--registry olla` and ensure `OLLA_AZTEC_STAKING_REGISTRY_ADDRESS` is configured.
 
 ## Important Notes
 
@@ -104,6 +107,53 @@ Starting with this version, Aztec Butler uses a unified configuration format for
 For example: `mainnet-keys-A-v1.json`, `mainnet-keys-B-v2.json`
 
 The monitoring server automatically discovers and loads all keys files for the configured network. See the [main README](../../README.md#configuration) for details about the unified configuration format.
+
+### Multi-Registry Key Proposals
+
+Key proposal-related commands can target either registry:
+
+- `native` (default)
+- `olla`
+
+Commands with registry support:
+
+- `add-keys`
+- `get-provider-id`
+- `get-create-staking-provider-calldata`
+- `process-private-keys`
+- `prepare-deployment`
+
+Use `--registry <native|olla>`.
+
+Example:
+
+```bash
+aztec-butler add-keys prod-keyfile.json --network mainnet --registry olla
+```
+
+For Olla targeting, set:
+
+```bash
+OLLA_AZTEC_STAKING_REGISTRY_ADDRESS=0x...
+OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=0x...
+OLLA_REWARDS_COINBASE_ADDRESS=0x...
+```
+
+If required Olla variables are missing and `--registry olla` is used, Butler exits with an error.
+
+`process-private-keys` uploads to GCP Secret Manager using Ethereum network naming derived from `ETHEREUM_CHAIN_ID` (not `NETWORK`):
+
+- `1` -> `mainnet`
+- `11155111` -> `sepolia`
+- any other chain -> `chain-<id>`
+
+So with `NETWORK=testnet` and `ETHEREUM_CHAIN_ID=11155111`, secrets are named `web3signer-sepolia-...`.
+
+If a previous run is interrupted after creating a secret but before adding versions, rerunning `process-private-keys` now recovers by appending a missing version to that existing secret.
+
+Duplicate checks in `add-keys` and `process-private-keys` are executed across both registries (when available). If one registry is unavailable or not configured, Butler logs a warning and still checks the other registry.
+
+Note: scraper support for multi-registry state is out of scope for this change.
 
 ## File Organization
 

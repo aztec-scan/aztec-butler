@@ -1,7 +1,9 @@
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
+import type { StakingRegistryTarget } from "../../types/index.js";
 
 interface GetProviderIdOptions {
   adminAddress: string;
+  registry: StakingRegistryTarget;
 }
 
 const command = async (
@@ -9,11 +11,17 @@ const command = async (
   options: GetProviderIdOptions,
 ) => {
   console.log("\n=== Query Staking Provider ID ===\n");
+  const registryAddress = ethClient.getStakingRegistryAddress(options.registry);
 
+  console.log(`Registry Target: ${options.registry}`);
+  console.log(`Registry Address: ${registryAddress}`);
   console.log(`Admin Address: ${options.adminAddress}`);
   console.log("\nQuerying staking provider from chain...");
 
-  const providerData = await ethClient.getStakingProvider(options.adminAddress);
+  const providerData = await ethClient.getStakingProvider(
+    options.adminAddress,
+    options.registry,
+  );
 
   if (!providerData) {
     console.error(
@@ -26,9 +34,13 @@ const command = async (
   console.log("\n✅ Staking Provider Found:\n");
   console.log(`  Provider ID: ${providerData.providerId}`);
   console.log(`  Admin: ${providerData.admin}`);
-  console.log(
-    `  Take Rate: ${providerData.takeRate} (${providerData.takeRate / 100}%)`,
-  );
+  if (options.registry === "olla") {
+    console.log("  Take Rate: n/a (not exposed by Olla registry)");
+  } else {
+    console.log(
+      `  Take Rate: ${providerData.takeRate} (${providerData.takeRate / 100}%)`,
+    );
+  }
   console.log(`  Rewards Recipient: ${providerData.rewardsRecipient}`);
 
   console.log("\n💡 You can use this provider ID in other commands:");

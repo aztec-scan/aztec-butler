@@ -15,6 +15,10 @@ import { EthereumClient } from "./src/core/components/EthereumClient.js";
 import * as command from "./src/cli/commands/index.js";
 import { glob } from "glob";
 import { inspect } from "util";
+import {
+  STAKING_REGISTRY_TARGETS,
+  type StakingRegistryTarget,
+} from "./src/types/index.js";
 
 /**
  * Format any error type into a readable string with stack trace
@@ -131,6 +135,12 @@ async function initEthClient(config: ButlerConfig): Promise<EthereumClient> {
       : {}),
     chainId: nodeInfo.l1ChainId,
     rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
+    ...(config.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS
+      ? {
+          ollaStakingRegistryAddress:
+            config.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS as `0x${string}`,
+        }
+      : {}),
   });
 
   try {
@@ -146,6 +156,15 @@ async function initEthClient(config: ButlerConfig): Promise<EthereumClient> {
   return ethClient;
 }
 
+const parseRegistryTarget = (value: string): StakingRegistryTarget => {
+  if ((STAKING_REGISTRY_TARGETS as readonly string[]).includes(value)) {
+    return value as StakingRegistryTarget;
+  }
+  throw new Error(
+    `Invalid registry target '${value}'. Expected one of: ${STAKING_REGISTRY_TARGETS.join(", ")}`,
+  );
+};
+
 // Setup Commander program
 const program = new Command();
 
@@ -159,11 +178,44 @@ program
 program
   .command("get-provider-id <admin-address>")
   .description("Get staking provider ID for an admin address")
-  .action(async (adminAddress: string) => {
+  .option(
+    "--registry <registry>",
+    "Staking registry target (native|olla)",
+    parseRegistryTarget,
+    "native",
+  )
+  .action(
+    async (
+      adminAddress: string,
+      options: { registry: StakingRegistryTarget },
+    ) => {
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
+      const ethClient = await initEthClient(config);
+      await command.getProviderId(ethClient, {
+        adminAddress,
+        registry: options.registry,
+      });
+    },
+  );
+
+// Command: get-create-staking-provider-calldata
+program
+  .command("get-create-staking-provider-calldata")
+  .description("Generate calldata to register staking provider")
+  .option(
+    "--registry <registry>",
+    "Staking registry target (native|olla)",
+    parseRegistryTarget,
+    "native",
+  )
+  .action(async (options: { registry: StakingRegistryTarget }) => {
     const globalOpts = program.opts();
     const config = await initConfig({ network: globalOpts.network });
     const ethClient = await initEthClient(config);
-    await command.getProviderId(ethClient, { adminAddress });
+    await command.getCreateStakingProviderCallData(ethClient, config, {
+      registry: options.registry,
+    });
   });
 
 // Command: check-publisher-eth
@@ -192,16 +244,28 @@ program
 program
   .command("add-keys <keystore-path>")
   .description("Generate calldata to add keys to staking provider")
-  .action(async (keystorePath: string) => {
-    const globalOpts = program.opts();
-    const config = await initConfig({ network: globalOpts.network });
-    const ethClient = await initEthClient(config);
+  .option(
+    "--registry <registry>",
+    "Staking registry target (native|olla)",
+    parseRegistryTarget,
+    "native",
+  )
+  .action(
+    async (
+      keystorePath: string,
+      options: { registry: StakingRegistryTarget },
+    ) => {
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
+      const ethClient = await initEthClient(config);
 
-    await command.getAddKeysToStakingProviderCalldata(ethClient, config, {
-      keystorePath,
-      network: config.NETWORK,
-    });
-  });
+      await command.getAddKeysToStakingProviderCalldata(ethClient, config, {
+        keystorePath,
+        network: config.NETWORK,
+        registry: options.registry,
+      });
+    },
+  );
 
 // Command: scrape-coinbases
 program
@@ -292,19 +356,31 @@ program
     "Process private keys to generate public keys and check provider queue",
   )
   .option(
+    "--registry <registry>",
+    "Staking registry target (native|olla)",
+    parseRegistryTarget,
+    "native",
+  )
+  .option(
     "-o, --output <file>",
     "Output file path (default: public-[input-file].json)",
   )
-  .action(async (privateKeyFile: string, options: { output?: string }) => {
-    const globalOpts = program.opts();
-    const config = await initConfig({ network: globalOpts.network });
-    const ethClient = await initEthClient(config);
+  .action(
+    async (
+      privateKeyFile: string,
+      options: { output?: string; registry: StakingRegistryTarget },
+    ) => {
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
+      const ethClient = await initEthClient(config);
 
-    await command.processPrivateKeys(ethClient, config, {
-      privateKeyFile,
-      ...(options.output ? { outputFile: options.output } : {}),
-    });
-  });
+      await command.processPrivateKeys(ethClient, config, {
+        privateKeyFile,
+        registry: options.registry,
+        ...(options.output ? { outputFile: options.output } : {}),
+      });
+    },
+  );
 
 // Command: prepare-deployment
 program
@@ -328,12 +404,19 @@ program
     "-o, --output <path>",
     "Output file path (default: [production-keys].new)",
   )
+  .option(
+    "--registry <registry>",
+    "Staking registry target (native|olla)",
+    parseRegistryTarget,
+    "native",
+  )
   .action(
     async (options: {
       productionKeys: string;
       newPublicKeys: string;
       availablePublishers: string;
       output?: string;
+      registry: StakingRegistryTarget;
     }) => {
       const globalOpts = program.opts();
       const config = await initConfig({ network: globalOpts.network });
@@ -344,6 +427,7 @@ program
         newPublicKeys: options.newPublicKeys,
         availablePublishers: options.availablePublishers,
         network: config.NETWORK,
+        registry: options.registry,
         ...(options.output ? { outputPath: options.output } : {}),
       });
     },

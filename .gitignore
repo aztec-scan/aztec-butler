@@ -24,3 +24,5 @@ node_modules
 # TypeScript build output
 dist/
 *.tsbuildinfo
+
+SENSITIVE/*

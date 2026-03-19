@@ -7,13 +7,16 @@ import {
 } from "@aztec/ethereum";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import { STAKING_REGISTRY_ABI, HexString } from "../../types/index.js";
+import { OLLA_STAKING_PROVIDER_REGISTRY_ABI } from "../../types/generated/olla-staking-provider-registry-abi.js";
 import { ButlerConfig } from "../../core/config/index.js";
-import { extractAttesterCoinbasePairs } from "../../core/utils/keystoreOperations.js";
 import { SafeGlobalClient } from "../../core/components/SafeGlobalClient.js";
+import type { StakingRegistryTarget } from "../../types/index.js";
+import { checkAttesterDuplicatesAcrossRegistries } from "../utils/stakingRegistryChecks.js";
 
 interface AddKeysOptions {
   keystorePath: string;
   network: string;
+  registry: StakingRegistryTarget;
   // updateConfig option removed - deprecated with scraper config format
 }
 
@@ -21,17 +24,33 @@ const get0xString = (bn: bigint): HexString => {
   return `0x${bn.toString(16).padStart(64, "0")}`;
 };
 
+const resolveAttesterAddress = (value: string): string => {
+  if (value.startsWith("0x") && value.length === 42) {
+    return getAddress(value);
+  }
+  return getAddressFromPrivateKey(value as `0x${string}`);
+};
+
 const command = async (
   ethClient: EthereumClient,
   config: ButlerConfig,
   options: AddKeysOptions,
 ) => {
+  const selectedAdminAddress =
+    options.registry === "olla"
+      ? config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+      : config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
   assert(
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-    "Staking provider admin address must be provided.",
+    selectedAdminAddress,
+    `Staking provider admin address must be provided for '${options.registry}' registry.`,
   );
 
   console.log("\n=== Generating Add Keys Calldata ===\n");
+  const selectedRegistryAddress = ethClient.getStakingRegistryAddress(
+    options.registry,
+  );
+  console.log(`Registry target: ${options.registry}`);
+  console.log(`Registry address: ${selectedRegistryAddress}`);
 
   // 1. Load keystore (with lenient coinbase validation for this command)
   console.log(`Loading keystore: ${options.keystorePath}`);
@@ -48,7 +67,8 @@ const command = async (
 
   // 2. Get staking provider info
   const stakingProviderData = await ethClient.getStakingProvider(
-    config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+    selectedAdminAddress,
+    options.registry,
   );
 
   if (!stakingProviderData) {
@@ -63,38 +83,37 @@ const command = async (
   );
   console.log(`Staking Provider ID: ${stakingProviderData.providerId}`);
 
-  // 3. Check for duplicate attesters in provider queue
-  console.log("\nChecking for duplicate attesters in provider queue...");
-  const queueLength = await ethClient.getProviderQueueLength(
-    stakingProviderData.providerId,
-  );
-  console.log(`Provider queue length: ${queueLength}`);
-
+  // 3. Check for duplicate attesters in provider queue(s)
+  console.log("\nChecking for duplicate attesters across registries...");
   const attesterAddresses = keystore.data.validators.map((v: any) =>
-    getAddressFromPrivateKey(v.attester.eth as `0x${string}`),
+    resolveAttesterAddress(v.attester.eth),
   );
 
-  if (queueLength > 0n) {
-    const providerQueue = await ethClient.getProviderQueue(
-      stakingProviderData.providerId,
+  const { duplicates } = await checkAttesterDuplicatesAcrossRegistries(
+    ethClient,
+    {
+      ...(config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+        ? { native: config.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS }
+        : {}),
+      ...(config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS
+        ? { olla: config.OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS }
+        : {}),
+    },
+    attesterAddresses,
+  );
+
+  if (duplicates.size > 0) {
+    const duplicateLines = Array.from(duplicates.entries()).map(
+      ([attester, targets]) =>
+        `  - ${attester}: ${Array.from(targets.values()).join(", ")}`,
     );
-    console.log(`Loaded ${providerQueue.length} attester(s) from queue`);
-
-    // Check if any attesters are already in queue
-    const queueSet = new Set(providerQueue.map((addr) => addr.toLowerCase()));
-
-    for (const attesterAddr of attesterAddresses) {
-      if (queueSet.has(attesterAddr.toLowerCase())) {
-        throw new Error(
-          `FATAL: Attester ${attesterAddr} is already in provider queue!\n` +
-            `Cannot add keys that are already queued. This would result in an on-chain transaction failure.`,
-        );
-      }
-    }
-    console.log("✅ No duplicate attesters found");
-  } else {
-    console.log("✅ Queue is empty, no duplicates possible");
+    throw new Error(
+      "FATAL: Duplicate attester(s) found in staking provider queues across registries:\n" +
+        duplicateLines.join("\n") +
+        "\nCannot add keys that are already queued. This would result in an on-chain transaction failure.",
+    );
   }
+  console.log("✅ No duplicate attesters found across available registries");
 
   // 4. Generate registration data
   console.log("\nGenerating registration data...");
@@ -111,9 +130,7 @@ const command = async (
       BigInt(validator.attester.bls),
     );
 
-    const attesterAddr = getAddressFromPrivateKey(
-      validator.attester.eth as `0x${string}`,
-    );
+    const attesterAddr = resolveAttesterAddress(validator.attester.eth);
 
     keyStores.push({
       attester: getAddress(attesterAddr),
@@ -150,16 +167,28 @@ const command = async (
   );
 
   // 6. Generate calldata for each chunk
-  const callDataChunks = chunks.map((chunk, index) => ({
-    chunkNumber: index + 1,
-    attestersCount: chunk.length,
-    contractToCall: ethClient.getStakingRegistryAddress(),
-    callData: encodeFunctionData({
-      abi: STAKING_REGISTRY_ABI,
-      functionName: "addKeysToProvider",
-      args: [stakingProviderData.providerId, chunk],
-    }),
-  }));
+  const callDataChunks =
+    options.registry === "olla"
+      ? chunks.map((chunk, index) => ({
+          chunkNumber: index + 1,
+          attestersCount: chunk.length,
+          contractToCall: selectedRegistryAddress,
+          callData: encodeFunctionData({
+            abi: OLLA_STAKING_PROVIDER_REGISTRY_ABI,
+            functionName: "addKeysToProvider",
+            args: [chunk],
+          }),
+        }))
+      : chunks.map((chunk, index) => ({
+          chunkNumber: index + 1,
+          attestersCount: chunk.length,
+          contractToCall: selectedRegistryAddress,
+          callData: encodeFunctionData({
+            abi: STAKING_REGISTRY_ABI,
+            functionName: "addKeysToProvider",
+            args: [stakingProviderData.providerId, chunk],
+          }),
+        }));
 
   // Log calldata for each chunk
   for (const chunkData of callDataChunks) {

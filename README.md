@@ -79,6 +79,67 @@ See [src/server/state/index.ts](./src/server/state/index.ts) and [src/server/sta
 
 ## Configuration
 
+### Staking Registry Targeting
+
+Proposal-related CLI commands support selecting which staking registry to target:
+
+- `native` (default)
+- `olla`
+
+Supported commands:
+
+- `add-keys`
+- `get-provider-id`
+- `get-create-staking-provider-calldata`
+- `process-private-keys`
+- `prepare-deployment`
+
+Use `--registry <native|olla>` (defaults to `native` if omitted).
+
+Example:
+
+```bash
+# Default (native)
+aztec-butler get-provider-id 0xYourAdminAddress --network mainnet
+
+# Explicit Olla target
+aztec-butler get-provider-id 0xYourAdminAddress --network mainnet --registry olla
+```
+
+For Olla target support, configure:
+
+```bash
+OLLA_AZTEC_STAKING_REGISTRY_ADDRESS=0x...
+OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=0x...
+OLLA_REWARDS_COINBASE_ADDRESS=0x...
+```
+
+If required Olla variables are missing for the selected command and `--registry olla` is used, the CLI fails fast with a clear error.
+
+For `process-private-keys`, GCP Secret Manager naming uses Ethereum network naming derived from `ETHEREUM_CHAIN_ID` (not `NETWORK`):
+
+- `1` -> `mainnet`
+- `11155111` -> `sepolia`
+- any other chain -> `chain-<id>`
+
+Example: with `NETWORK=testnet` and `ETHEREUM_CHAIN_ID=11155111`, secrets are created as `web3signer-sepolia-...`.
+
+`process-private-keys` is now interruption-safe for GCP secret uploads: if a secret exists for a key but has no enabled versions, rerunning the command appends the missing version instead of skipping it.
+
+Duplicate checks for `add-keys` and `process-private-keys` are performed across both registries (where available), not only the selected target. If one registry is unavailable or unconfigured, Butler warns and continues checking the other registry.
+
+### Olla ABI Sync
+
+Olla ABI support is sourced from local `olla-core` artifacts via:
+
+```bash
+npm run sync:olla-abi
+```
+
+By default, the sync script reads from `../olla-core`. You can override this using `OLLA_CORE_PATH`.
+
+Note: scraper support/refactors are intentionally out of scope for this change.
+
 ### Unified Keys File Format
 
 Aztec Butler uses a unified configuration format for both validator nodes and the monitoring server. Keys files follow the naming convention:

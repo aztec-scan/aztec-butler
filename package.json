@@ -15,6 +15,7 @@
     "start:serve": "node dist/index.js serve",
     "dev:watch": "nodemon --exec \"tsc --noEmit && node --loader ts-node/esm src/index.ts\"",
     "type-check": "tsc --noEmit",
+    "sync:olla-abi": "node scripts/sync-olla-abi.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "echo \"Error: no test specified\" && exit 1",
