@@ -73,7 +73,10 @@ const OLLA_QUEUE_DRIPPED_EVENT = parseAbiItem(
 );
 const ADDRESS_MASK = (1n << 160n) - 1n;
 const LOG_RANGE_LIMIT = 50_000n;
-const OLLA_QUEUE_SCAN_START_BLOCK = 0n;
+const OLLA_QUEUE_SCAN_START_BLOCK_BY_CHAIN_ID: Record<number, bigint> = {
+  [sepolia.id]: 10421273n,
+  [mainnet.id]: 24690544n,
+};
 
 export interface EthereumClientConfig {
   rpcUrl: string;
@@ -486,17 +489,19 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     }
 
     const registryAddress = this.getStakingRegistryAddress("olla");
+    const queueScanStartBlock =
+      OLLA_QUEUE_SCAN_START_BLOCK_BY_CHAIN_ID[this.config.chainId] ?? 0n;
     const [addedLogs, drippedLogs] = await Promise.all([
       this.getLogsChunked({
         address: registryAddress,
         event: OLLA_KEYS_ADDED_EVENT,
-        fromBlock: OLLA_QUEUE_SCAN_START_BLOCK,
+        fromBlock: queueScanStartBlock,
         toBlock: latestBlock,
       }),
       this.getLogsChunked({
         address: registryAddress,
         event: OLLA_QUEUE_DRIPPED_EVENT,
-        fromBlock: OLLA_QUEUE_SCAN_START_BLOCK,
+        fromBlock: queueScanStartBlock,
         toBlock: latestBlock,
       }),
     ]);
