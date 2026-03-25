@@ -261,11 +261,6 @@ export const OLLA_STAKING_PROVIDER_REGISTRY_ABI = [
         "internalType": "struct IStakingManager.ProviderConfig",
         "components": [
           {
-            "name": "admin",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
             "name": "rewardsRecipient",
             "type": "address",
             "internalType": "address"
@@ -488,12 +483,6 @@ export const OLLA_STAKING_PROVIDER_REGISTRY_ABI = [
     "name": "ProviderSet",
     "inputs": [
       {
-        "name": "admin",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
         "name": "rewardsRecipient",
         "type": "address",
         "indexed": true,
@@ -675,6 +664,17 @@ export const OLLA_STAKING_PROVIDER_REGISTRY_ABI = [
     "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "StakingProviderRegistry__DuplicateAttester",
+    "inputs": [
+      {
+        "name": "attester",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",

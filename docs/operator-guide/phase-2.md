@@ -100,19 +100,19 @@ private keys directly to **GCP Secret Manager** using a Google service account
 JSON key (no user re-auth needed). Point `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` to the
 key file path in your `*-base.env`; the same key is used for Sheets exports.
 `GCP_PROJECT_ID` (or the `project_id` in the key) determines the target project.
-Secrets stored in **GCP Secret Manager** are created per key with incremental IDs
-and the public key appended:
+Secrets stored in **GCP Secret Manager** are created per key with names based on role and public key:
 
 ```
-web3signer-${network}-${keyType}-${att|pub}-${id}-${publicKey}
-# Example sequence (0-based IDs, pubkey truncated):
+web3signer-${network}-${keyType}-att-${id}-${publicKey}
+web3signer-${network}-eth-pub-${publicKey}
+# Example sequence (0-based IDs for attester secrets, pubkey truncated):
 # web3signer-sepolia-eth-att-0-0xabc...
 # web3signer-sepolia-bls-att-0-0xdef...
-# web3signer-sepolia-eth-pub-0-0x123...
+# web3signer-sepolia-eth-pub-0x123...
 # web3signer-sepolia-bls-att-1-0x456...
 ```
 
-If a secret for a given public key already exists, the command skips uploading that key again.
+Publisher secret names intentionally omit validator index/id semantics so the same publisher key can be reused across multiple validators. If a secret for a given public key already exists, the command skips uploading that key again.
 
 Networks are limited to `eth-mainnet` and `sepolia`. Set `GCP_PROJECT_ID` (or rely on `GOOGLE_CLOUD_PROJECT`) so the command knows
 which project to use. If GCP is unavailable in your environment, fall back to
@@ -131,6 +131,7 @@ vault kv put secret/aztec/validators/batch-2024-01 \
   ```
   WEB3SIGNER_URLS=https://sepolia-eth-web3signer,https://mainnet-eth-web3signer/reload
   ```
+
   Missing or failing URLs are logged; secrets are still uploaded.
 
 - [ ] Private keys stored in GCP Secret Manager / HSM / Vault

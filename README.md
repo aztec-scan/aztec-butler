@@ -124,6 +124,13 @@ For `process-private-keys`, GCP Secret Manager naming uses Ethereum network nami
 
 Example: with `NETWORK=testnet` and `ETHEREUM_CHAIN_ID=11155111`, secrets are created as `web3signer-sepolia-...`.
 
+Secret naming format:
+
+- Attester keys (ETH/BLS): `web3signer-<network>-<eth|bls>-att-<id>-<publicKey>`
+- Publisher keys (ETH): `web3signer-<network>-eth-pub-<publicKey>`
+
+Publisher secrets are keyed by publisher public address (no validator index in the secret name), so shared publishers across multiple validators reuse the same secret.
+
 `process-private-keys` is now interruption-safe for GCP secret uploads: if a secret exists for a key but has no enabled versions, rerunning the command appends the missing version instead of skipping it.
 
 Duplicate checks for `add-keys` and `process-private-keys` are performed across both registries (where available), not only the selected target. If one registry is unavailable or unconfigured, Butler warns and continues checking the other registry.

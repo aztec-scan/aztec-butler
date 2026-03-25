@@ -71,6 +71,7 @@ const OLLA_KEYS_ADDED_EVENT = parseAbiItem(
 const OLLA_QUEUE_DRIPPED_EVENT = parseAbiItem(
   "event QueueDripped(address indexed attester)",
 );
+const ZERO_ADDRESS = getAddress("0x0000000000000000000000000000000000000000");
 const ADDRESS_MASK = (1n << 160n) - 1n;
 const LOG_RANGE_LIMIT = 50_000n;
 const OLLA_QUEUE_SCAN_START_BLOCK_BY_CHAIN_ID: Record<number, bigint> = {
@@ -341,14 +342,41 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     if (target === "olla") {
       const stakingReg = this.getOllaStakingRegistryContract();
       const providerConfig = await stakingReg.read.getStakingProviderConfig();
-      if (providerConfig.admin.toLowerCase() !== adminAddress.toLowerCase()) {
-        this.providerDataCache.set(cacheKey, null);
-        return null;
+
+      let providerAdmin: string;
+      const providerConfigWithOptionalAdmin = providerConfig as {
+        admin?: string;
+        rewardsRecipient: string;
+      };
+
+      if (providerConfigWithOptionalAdmin.admin) {
+        providerAdmin = getAddress(providerConfigWithOptionalAdmin.admin);
+        if (providerAdmin.toLowerCase() !== adminAddress.toLowerCase()) {
+          this.providerDataCache.set(cacheKey, null);
+          return null;
+        }
+      } else {
+        // New Olla ABIs expose only rewardsRecipient in provider config.
+        // Verify the configured admin by checking STAKING_PROVIDER_ADMIN_ROLE.
+        const stakingProviderAdminRole =
+          await stakingReg.read.STAKING_PROVIDER_ADMIN_ROLE();
+        const normalizedAdminAddress = getAddress(adminAddress);
+        const isStakingProviderAdmin = await stakingReg.read.hasRole([
+          stakingProviderAdminRole,
+          normalizedAdminAddress,
+        ]);
+
+        if (!isStakingProviderAdmin) {
+          this.providerDataCache.set(cacheKey, null);
+          return null;
+        }
+
+        providerAdmin = normalizedAdminAddress;
       }
 
       const providerData: StakingProviderData = {
         providerId: 0n,
-        admin: providerConfig.admin,
+        admin: providerAdmin,
         takeRate: 0,
         rewardsRecipient: providerConfig.rewardsRecipient,
       };
@@ -378,6 +406,95 @@ supply: ${await stakingAssetContract.read.totalSupply()}
         this.providerDataCache.set(cacheKey, null);
         return null;
       }
+    }
+  }
+
+  /**
+   * Validate that staking-registry ABI bindings used by read paths are compatible.
+   * Throws a descriptive error when ABI drift is detected.
+   */
+  async validateStakingRegistryReadAbi(
+    target: StakingRegistryTarget = "native",
+  ): Promise<void> {
+    if (target === "olla") {
+      const stakingReg = this.getOllaStakingRegistryContract();
+
+      let providerConfig: unknown;
+      try {
+        providerConfig = await stakingReg.read.getStakingProviderConfig();
+      } catch (error) {
+        throw new Error(
+          `Failed to call Olla getStakingProviderConfig(): ${error instanceof Error ? error.message : String(error)}. This usually means your Olla registry ABI is stale; run 'npm run sync:olla-abi'.`,
+        );
+      }
+
+      if (
+        !providerConfig ||
+        typeof providerConfig !== "object" ||
+        !("rewardsRecipient" in providerConfig) ||
+        typeof (providerConfig as { rewardsRecipient?: unknown })
+          .rewardsRecipient !== "string"
+      ) {
+        throw new Error(
+          "Incompatible Olla registry ABI: getStakingProviderConfig() must return an object with a string rewardsRecipient field. Run 'npm run sync:olla-abi'.",
+        );
+      }
+
+      if (
+        "admin" in providerConfig &&
+        (providerConfig as { admin?: unknown }).admin !== undefined &&
+        typeof (providerConfig as { admin?: unknown }).admin !== "string"
+      ) {
+        throw new Error(
+          "Incompatible Olla registry ABI: getStakingProviderConfig().admin must be a string address when present. Run 'npm run sync:olla-abi'.",
+        );
+      }
+
+      if (!("admin" in providerConfig)) {
+        try {
+          const stakingProviderAdminRole =
+            await stakingReg.read.STAKING_PROVIDER_ADMIN_ROLE();
+          if (typeof stakingProviderAdminRole !== "string") {
+            throw new Error(
+              "STAKING_PROVIDER_ADMIN_ROLE() did not return a bytes32 value",
+            );
+          }
+          const hasRoleResult = await stakingReg.read.hasRole([
+            stakingProviderAdminRole,
+            ZERO_ADDRESS,
+          ]);
+          if (typeof hasRoleResult !== "boolean") {
+            throw new Error("hasRole() did not return a boolean");
+          }
+        } catch (error) {
+          throw new Error(
+            `Incompatible Olla registry ABI for admin verification path: ${error instanceof Error ? error.message : String(error)}. Run 'npm run sync:olla-abi'.`,
+          );
+        }
+      }
+
+      return;
+    }
+
+    const nativeRead = this.getNativeStakingRegistryContract().read as Record<
+      string,
+      unknown
+    >;
+    const requiredReadMethods = [
+      "providerConfigurations",
+      "getProviderQueueLength",
+      "getFirstIndexInQueue",
+      "getLastIndexInQueue",
+      "attesterInfo",
+    ];
+
+    const missingMethods = requiredReadMethods.filter(
+      (methodName) => typeof nativeRead[methodName] !== "function",
+    );
+    if (missingMethods.length > 0) {
+      throw new Error(
+        `Incompatible native staking registry ABI: missing read method(s): ${missingMethods.join(", ")}.`,
+      );
     }
   }
 

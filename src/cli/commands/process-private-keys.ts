@@ -140,9 +140,19 @@ const createSecretId = (
   secretNetwork: string,
   keyType: SecretKeyType,
   role: SecretRole,
-  id: number,
   publicKey: string,
-) => `web3signer-${secretNetwork}-${keyType}-${role}-${id}-${publicKey}`;
+  id?: number,
+) => {
+  if (role === "pub") {
+    return `web3signer-${secretNetwork}-${keyType}-${role}-${publicKey}`;
+  }
+
+  if (id === undefined) {
+    throw new Error("Secret id is required for attester secrets");
+  }
+
+  return `web3signer-${secretNetwork}-${keyType}-${role}-${id}-${publicKey}`;
+};
 
 const getEthereumNetworkName = (chainId: number): string => {
   switch (chainId) {
@@ -211,9 +221,15 @@ const getExistingSecretInfo = async (
   role: SecretRole,
 ) => {
   const parent = `projects/${ctx.projectId}`;
-  const prefixRegex = new RegExp(
+  const withIdRegex = new RegExp(
     `^web3signer-${ctx.secretNetwork}-${keyType}-${role}-(\\d+)-(0x[0-9a-fA-F]+)$`,
   );
+  const publisherWithoutIdRegex =
+    role === "pub"
+      ? new RegExp(
+          `^web3signer-${ctx.secretNetwork}-${keyType}-${role}-(0x[0-9a-fA-F]+)$`,
+        )
+      : null;
 
   let maxId = -1;
   const secretNamesByPublicKey = new Map<string, string[]>();
@@ -222,15 +238,22 @@ const getExistingSecretInfo = async (
   for await (const secret of iterable) {
     const fullName = secret.name ?? "";
     const secretId = fullName.split("/").pop() ?? "";
-    const match = prefixRegex.exec(secretId);
-    if (!match) continue;
+    let secretPublicKey: string | undefined;
 
-    const idNum = Number.parseInt(match[1] ?? "0", 10);
-    if (!Number.isNaN(idNum) && idNum > maxId) {
-      maxId = idNum;
+    const withIdMatch = withIdRegex.exec(secretId);
+    if (withIdMatch) {
+      const idNum = Number.parseInt(withIdMatch[1] ?? "0", 10);
+      if (!Number.isNaN(idNum) && idNum > maxId) {
+        maxId = idNum;
+      }
+      secretPublicKey = withIdMatch[2];
+    } else if (publisherWithoutIdRegex) {
+      const withoutIdMatch = publisherWithoutIdRegex.exec(secretId);
+      secretPublicKey = withoutIdMatch?.[1];
     }
 
-    const secretPublicKey = match[2];
+    if (!secretPublicKey) continue;
+
     if (secretPublicKey) {
       const normalizedPublicKey = secretPublicKey.toLowerCase();
       const secretName = `${parent}/secrets/${secretId}`;
@@ -288,8 +311,12 @@ const addSecretVersions = async (
         }
 
         if (hasEnabledVersion) {
+          const subject =
+            role === "pub"
+              ? `publisher key ${normalizedPublicKey}`
+              : `validator ${entry.validatorIndex}`;
           console.log(
-            `  ⚠️ Skipping ${role}/${keyType} for validator ${entry.validatorIndex}: public key already uploaded`,
+            `  ⚠️ Skipping ${role}/${keyType} for ${subject}: public key already uploaded`,
           );
           continue;
         }
@@ -302,8 +329,12 @@ const addSecretVersions = async (
 
           const secretId = reusedSecretName.split("/").pop() ?? "<unknown>";
           const versionId = version.name?.split("/").pop();
+          const subject =
+            role === "pub"
+              ? `publisher key ${normalizedPublicKey}`
+              : `validator ${entry.validatorIndex}`;
           console.log(
-            `  ➕ Added missing version ${versionId ?? "<unknown>"} to ${secretId} (validator ${entry.validatorIndex})`,
+            `  ➕ Added missing version ${versionId ?? "<unknown>"} to ${secretId} (${subject})`,
           );
           continue;
         }
@@ -313,17 +344,21 @@ const addSecretVersions = async (
         ctx.secretNetwork,
         keyType,
         role,
-        nextId,
         normalizedPublicKey,
+        role === "pub" ? undefined : nextId,
       );
-      nextId += 1;
+      if (role !== "pub") {
+        nextId += 1;
+      }
 
-      const labels = {
+      const labels: Record<string, string> = {
         network: ctx.secretNetwork,
         key_type: keyType,
         role,
-        validator_index: String(entry.validatorIndex),
       };
+      if (role === "att") {
+        labels.validator_index = String(entry.validatorIndex);
+      }
 
       const secretName = await ensureSecretExists(ctx, secretId, labels);
       const existing = secretNamesByPublicKey.get(normalizedPublicKey) ?? [];
@@ -336,8 +371,12 @@ const addSecretVersions = async (
       });
 
       const versionId = version.name?.split("/").pop();
+      const subject =
+        role === "pub"
+          ? `publisher key ${normalizedPublicKey}`
+          : `validator ${entry.validatorIndex}`;
       console.log(
-        `  ➕ Added version ${versionId ?? "<unknown>"} to ${secretId} (validator ${entry.validatorIndex})`,
+        `  ➕ Added version ${versionId ?? "<unknown>"} to ${secretId} (${subject})`,
       );
     }
   }
@@ -368,6 +407,15 @@ const command = async (
   );
   console.log(`Registry target: ${options.registry}`);
   console.log(`Registry address: ${selectedRegistryAddress}`);
+
+  try {
+    await ethClient.validateStakingRegistryReadAbi(options.registry);
+    console.log("✅ Staking registry ABI compatibility check passed");
+  } catch (error) {
+    throw new Error(
+      `Staking registry ABI compatibility check failed for '${options.registry}' registry: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   const allowedNetworks = ["mainnet", "testnet"] as const;
   if (
@@ -549,21 +597,42 @@ const command = async (
     );
   });
 
-  // Publisher keys - skip storing to GCP with warnings
-  console.log(
-    "\n⚠️  Skipping publisher private keys - will not be stored to GCP",
-  );
-  derivedKeys.forEach((keys, idx) => {
-    const validatorPublisherKeys = Array.isArray(
-      privateKeysData.validators[idx]!.publisher,
-    )
-      ? privateKeysData.validators[idx]!.publisher
-      : [privateKeysData.validators[idx]!.publisher];
+  console.log("\nCollecting publisher private keys for GCP upload...");
+  let totalPublisherKeys = 0;
+  privateKeysData.validators.forEach((validator, validatorIndex) => {
+    const validatorPublisherKeys = Array.isArray(validator.publisher)
+      ? validator.publisher
+      : [validator.publisher];
+
+    validatorPublisherKeys.forEach((publisherKey, publisherIndex) => {
+      let publisherAddress: string;
+      try {
+        const account = privateKeyToAccount(publisherKey as HexString);
+        publisherAddress = getAddress(account.address);
+      } catch (error) {
+        throw new Error(
+          `Validator ${validatorIndex}: malformed publisher private key at index ${publisherIndex} - ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      secretEntries.push({
+        role: "pub",
+        keyType: "eth",
+        key: publisherKey,
+        validatorIndex,
+        publicKey: publisherAddress,
+      });
+      totalPublisherKeys += 1;
+    });
 
     console.log(
-      `  ⚠️  Validator ${idx}: Skipping ${validatorPublisherKeys.length} publisher key(s)`,
+      `  ✅ Validator ${validatorIndex}: queued ${validatorPublisherKeys.length} publisher key(s)`,
     );
   });
+
+  console.log(
+    `Queued ${totalPublisherKeys} publisher private key(s) for upload`,
+  );
 
   await addSecretVersions(secretContext, secretEntries);
   console.log("✅ Stored private keys in GCP Secret Manager");
@@ -659,9 +728,7 @@ const command = async (
   console.log(
     `Public keys generated with: attester.eth, attester.bls, publisher (zero address), feeRecipient`,
   );
-  console.log(
-    `Publisher private keys were NOT stored to GCP (zero address used in output)`,
-  );
+  console.log(`Publisher private keys were stored to GCP Secret Manager`);
   console.log(`Excluded from output: coinbase`);
   console.log("\n✅ Process complete!");
 };

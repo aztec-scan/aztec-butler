@@ -149,6 +149,13 @@ If required Olla variables are missing and `--registry olla` is used, Butler exi
 
 So with `NETWORK=testnet` and `ETHEREUM_CHAIN_ID=11155111`, secrets are named `web3signer-sepolia-...`.
 
+Secret naming format:
+
+- Attester keys (ETH/BLS): `web3signer-<network>-<eth|bls>-att-<id>-<publicKey>`
+- Publisher keys (ETH): `web3signer-<network>-eth-pub-<publicKey>`
+
+Publisher secrets are keyed by publisher public address (no validator index in the secret name), which supports publisher sharing across validators.
+
 If a previous run is interrupted after creating a secret but before adding versions, rerunning `process-private-keys` now recovers by appending a missing version to that existing secret.
 
 Duplicate checks in `add-keys` and `process-private-keys` are executed across both registries (when available). If one registry is unavailable or not configured, Butler logs a warning and still checks the other registry.
