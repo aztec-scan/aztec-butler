@@ -41,6 +41,9 @@ If you're already familiar with the process:
 # Phase 1: Generate keys
 aztec validator-keys new --fee-recipient 0x0000000000000000000000000000000000000000000000000000000000000000 --publisher-count 1 --count 100 --coinbase 0x0000000000000000000000000000000000000000 --data-dir ./
 
+# Optional: create fresh publisher keys and upload to GCP
+aztec-butler new-publisher-keys -n 10 --network mainnet
+
 # Phase 2: Process private keys
 aztec-butler process-private-keys key1.json --network mainnet --registry native
 

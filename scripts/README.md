@@ -47,6 +47,31 @@ Collection of bash scripts for common Aztec Butler operations.
 
 ---
 
+### 1b. New Publisher Keys
+
+```bash
+./scripts/new-publisher-keys.sh -n 10
+
+# Custom output file for addresses
+./scripts/new-publisher-keys.sh -n 10 --output-addresses my-publishers.json
+```
+
+**What it does:**
+
+- Generates `n` new publisher private keys internally
+- Uploads private keys directly to GCP Secret Manager
+- Writes only publisher public addresses to a JSON file
+- Prints all generated addresses for operator funding
+
+**Output:**
+
+- Default addresses file: `new-publisher-keys-<network>-<timestamp>.json`
+- Or custom path via `--output-addresses`
+
+**Important:** Private keys are not written to disk by this command.
+
+---
+
 ### 2. Prepare Deployment
 
 ```bash

@@ -382,6 +382,30 @@ program
     },
   );
 
+// Command: new-publisher-keys
+program
+  .command("new-publisher-keys")
+  .description(
+    "Generate new publisher private keys, upload to GCP, and output addresses",
+  )
+  .requiredOption("-n, --count <count>", "Number of publisher keys to create")
+  .option(
+    "-o, --output-addresses <file>",
+    "Output file path for publisher addresses",
+  )
+  .action(async (options: { count: string; outputAddresses?: string }) => {
+    const globalOpts = program.opts();
+    const config = await initConfig({ network: globalOpts.network });
+    const count = Number.parseInt(options.count, 10);
+
+    await command.newPublisherKeys(config, {
+      count,
+      ...(options.outputAddresses
+        ? { outputAddressesFile: options.outputAddresses }
+        : {}),
+    });
+  });
+
 // Command: prepare-deployment
 program
   .command("prepare-deployment")

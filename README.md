@@ -91,6 +91,7 @@ Supported commands:
 - `add-keys`
 - `get-provider-id`
 - `get-create-staking-provider-calldata`
+- `new-publisher-keys`
 - `process-private-keys`
 - `prepare-deployment`
 

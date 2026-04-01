@@ -34,6 +34,29 @@ flowchart LR
 aztec-butler process-private-keys new-private-keys.json
 ```
 
+### 1b. Optional: Generate New Publisher Keys
+
+If you want fresh publisher keys for funding and assignment, generate them directly in Butler:
+
+```bash
+aztec-butler new-publisher-keys -n 10 --network mainnet
+```
+
+This command:
+
+- Generates `n` new publisher private keys
+- Uploads them to GCP Secret Manager as `web3signer-<network>-eth-pub-<publicKey>`
+- Writes publisher addresses to a JSON file
+  - Default: `new-publisher-keys-<network>-<timestamp>.json`
+  - Example: `new-publisher-keys-mainnet-20260501130000.json`
+- Prints all addresses to fund
+
+Custom output path for addresses:
+
+```bash
+aztec-butler new-publisher-keys -n 10 --output-addresses my-publishers.json --network mainnet
+```
+
 **Optional flags:**
 
 ```bash
