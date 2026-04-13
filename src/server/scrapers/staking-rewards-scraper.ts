@@ -4,6 +4,7 @@ import { AztecClient } from "../../core/components/AztecClient.js";
 import {
   EthereumClient,
   type RollupTimelineEntry,
+  type SplitAllocationData,
 } from "../../core/components/EthereumClient.js";
 import {
   getAttesterCoinbaseInfo,
@@ -52,6 +53,18 @@ export class StakingRewardsScraper extends AbstractScraper {
   // entry defines the rollup canonical from [firstBlock, nextFirstBlock).
   // Populated in init() from the Aztec Registry contract.
   private rollupTimeline: RollupTimelineEntry[] = [];
+  // Per-coinbase split allocation cache used by backfill. Populated
+  // once at the top of backfillHistory() (one getLogs sweep per
+  // coinbase) and cleared after the loop exits. Null outside of
+  // backfill, so live scrape always fetches fresh allocations.
+  //
+  // Known limitation: the cached split is the one active as of the
+  // latest block at backfill start. For the rare coinbase that
+  // changed its split mid-period, historical hours before the change
+  // will be attributed using the later split. Correct for the vast
+  // majority of coinbases that configure a split once and never
+  // touch it. Worth revisiting only if someone reports the drift.
+  private splitCache: Map<string, SplitAllocationData | null> | null = null;
 
   constructor(
     network: string,
@@ -285,11 +298,20 @@ export class StakingRewardsScraper extends AbstractScraper {
           { blockNumber },
         );
 
-        const splitData = await this.ethClient.getLatestSplitAllocations(
-          entry.coinbase,
-          this.startBlock,
-          blockNumber,
+        // During backfill, the per-coinbase split is read once up front
+        // (see backfillHistory) and reused for every historical hour.
+        // Live scrape (splitCache === null) still fetches fresh.
+        const cachedSplit = this.splitCache?.get(
+          entry.coinbase.toLowerCase(),
         );
+        const splitData =
+          cachedSplit !== undefined
+            ? cachedSplit
+            : await this.ethClient.getLatestSplitAllocations(
+                entry.coinbase,
+                this.startBlock,
+                blockNumber,
+              );
 
         const recipients: StakingRewardsRecipient[] =
           splitData?.recipients.map((recipient, idx) => ({
@@ -425,58 +447,94 @@ export class StakingRewardsScraper extends AbstractScraper {
       return;
     }
 
+    // Pre-fetch each coinbase's split allocation once. Splits rarely
+    // change after setup, so reading them once up front instead of
+    // re-scanning SplitUpdated logs per (coinbase × hour) eliminates
+    // the dominant RPC cost in backfill (~5 log queries per coinbase
+    // per hour → 0 during the loop).
+    console.log(
+      `[staking-rewards] Pre-fetching split allocations for ${coinbases.length} coinbase(s)...`,
+    );
+    this.splitCache = new Map<string, SplitAllocationData | null>();
+    for (const entry of coinbases) {
+      try {
+        const split = await this.ethClient.getLatestSplitAllocations(
+          entry.coinbase,
+          this.startBlock,
+          latestBlock,
+        );
+        this.splitCache.set(entry.coinbase.toLowerCase(), split);
+      } catch (error) {
+        // On failure, fall back to per-hour fetch for this coinbase —
+        // cache lookup returns undefined → collectRewardsForBlock
+        // takes the slow path for this coinbase only.
+        console.warn(
+          `[staking-rewards] Failed to pre-fetch split for ${entry.coinbase}, will fetch per-hour:`,
+          error,
+        );
+      }
+    }
+    console.log(
+      `[staking-rewards] Split cache populated (${this.splitCache.size}/${coinbases.length} coinbases)`,
+    );
+
     let consecutiveHistoricalStateErrors = 0;
     const MAX_CONSECUTIVE_ERRORS = 3; // Disable after 3 consecutive errors
 
-    for (let ts = backfillStartMs; ts <= now; ts += ONE_HOUR_MS) {
-      if (filledHours.has(ts)) {
-        continue;
-      }
-      try {
-        const { blockNumber, blockTimestampMs } =
-          await this.findBlockAtOrBeforeTimestamp(
-            ts,
-            this.startBlock,
-            latestBlock,
-          );
-
-        const { snapshots } = await this.collectRewardsForBlock(
-          blockNumber,
-          new Date(blockTimestampMs),
-          coinbases,
-          true,
-        );
-
-        recordStakingRewardsSnapshots(this.network, snapshots);
-        filledHours.add(ts);
-        consecutiveHistoricalStateErrors = 0; // Reset counter on success
-      } catch (error) {
-        if (this.isHistoricalStateError(error)) {
-          consecutiveHistoricalStateErrors++;
-
-          if (consecutiveHistoricalStateErrors >= MAX_CONSECUTIVE_ERRORS) {
-            console.warn(
-              `[staking-rewards] Historical state unavailable for ${MAX_CONSECUTIVE_ERRORS} consecutive snapshots. ` +
-                `Disabling backfill to avoid spamming the RPC node. ` +
-                `Configure ETHEREUM_ARCHIVE_NODE_URL with a proper archive node or adjust STAKING_REWARDS_SPLIT_FROM_BLOCK to enable backfill.`,
+    try {
+      for (let ts = backfillStartMs; ts <= now; ts += ONE_HOUR_MS) {
+        if (filledHours.has(ts)) {
+          continue;
+        }
+        try {
+          const { blockNumber, blockTimestampMs } =
+            await this.findBlockAtOrBeforeTimestamp(
+              ts,
+              this.startBlock,
+              latestBlock,
             );
-            this.backfillDisabled = true;
-            return; // Exit backfill early
-          }
 
-          console.warn(
-            `[staking-rewards] Historical state not available at ${new Date(ts).toISOString()} ` +
-              `(${consecutiveHistoricalStateErrors}/${MAX_CONSECUTIVE_ERRORS} consecutive errors before disabling backfill)`,
+          const { snapshots } = await this.collectRewardsForBlock(
+            blockNumber,
+            new Date(blockTimestampMs),
+            coinbases,
+            true,
           );
-        } else {
-          // For other errors, log and continue
-          console.error(
-            `[staking-rewards] Error during backfill at ${new Date(ts).toISOString()}:`,
-            error,
-          );
-          consecutiveHistoricalStateErrors = 0; // Reset on non-historical errors
+
+          recordStakingRewardsSnapshots(this.network, snapshots);
+          filledHours.add(ts);
+          consecutiveHistoricalStateErrors = 0; // Reset counter on success
+        } catch (error) {
+          if (this.isHistoricalStateError(error)) {
+            consecutiveHistoricalStateErrors++;
+
+            if (consecutiveHistoricalStateErrors >= MAX_CONSECUTIVE_ERRORS) {
+              console.warn(
+                `[staking-rewards] Historical state unavailable for ${MAX_CONSECUTIVE_ERRORS} consecutive snapshots. ` +
+                  `Disabling backfill to avoid spamming the RPC node. ` +
+                  `Configure ETHEREUM_ARCHIVE_NODE_URL with a proper archive node or adjust STAKING_REWARDS_SPLIT_FROM_BLOCK to enable backfill.`,
+              );
+              this.backfillDisabled = true;
+              return; // Exit backfill early
+            }
+
+            console.warn(
+              `[staking-rewards] Historical state not available at ${new Date(ts).toISOString()} ` +
+                `(${consecutiveHistoricalStateErrors}/${MAX_CONSECUTIVE_ERRORS} consecutive errors before disabling backfill)`,
+            );
+          } else {
+            // For other errors, log and continue
+            console.error(
+              `[staking-rewards] Error during backfill at ${new Date(ts).toISOString()}:`,
+              error,
+            );
+            consecutiveHistoricalStateErrors = 0; // Reset on non-historical errors
+          }
         }
       }
+    } finally {
+      // Clear the cache so live scrape always fetches fresh splits.
+      this.splitCache = null;
     }
 
     await this.exportAggregatesAndCoinbases();

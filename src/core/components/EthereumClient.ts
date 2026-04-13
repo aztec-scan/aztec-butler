@@ -61,7 +61,7 @@ type EntryQueueData = {
   moveWithLatestRollup: boolean;
 };
 
-type SplitAllocationData = {
+export type SplitAllocationData = {
   recipients: string[];
   allocations: bigint[];
   totalAllocation: bigint;
