@@ -245,16 +245,22 @@ export class EthereumClient {
   async getRollupTimeline(
     registryAddress: Address,
   ): Promise<RollupTimelineEntry[]> {
+    // Prefer the archive client for all calls in this path: the binary
+    // search for firstCodeBlock requires historical state support, and
+    // using a single client end-to-end avoids mixing latest-state views
+    // across two backends that may be slightly out of sync.
+    const client = this.archiveClient ?? this.client;
+
     const registry = getContract({
       address: registryAddress,
       abi: RegistryAbi,
-      client: this.client,
+      client,
     });
 
     const numVersions = (await registry.read.numberOfVersions()) as bigint;
     const entries: RollupTimelineEntry[] = [];
 
-    const latestBlock = await this.client.getBlockNumber();
+    const latestBlock = await client.getBlockNumber();
 
     for (let i = 0n; i < numVersions; i++) {
       const version = (await registry.read.getVersion([i])) as bigint;

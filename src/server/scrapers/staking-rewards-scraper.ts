@@ -97,19 +97,24 @@ export class StakingRewardsScraper extends AbstractScraper {
       this.rollupTimeline =
         await this.ethClient.getRollupTimeline(registryAddress);
       console.log(
-        `[staking-rewards] Rollup timeline (${this.rollupTimeline.length} versions):`,
+        `[staking-rewards] Rollup timeline (${this.rollupTimeline.length} versions, from registry):`,
       );
-      for (const entry of this.rollupTimeline) {
-        console.log(
-          `  version=${entry.version} rollup=${entry.rollup} firstBlock=${entry.firstBlock}`,
-        );
-      }
     } catch (error) {
       console.error(
-        "[staking-rewards] Failed to load rollup timeline from registry; falling back to single-rollup mode",
+        "[staking-rewards] Failed to load rollup timeline from registry; using known-mainnet fallback if applicable",
         error,
       );
-      this.rollupTimeline = [];
+      this.rollupTimeline = this.getFallbackRollupTimeline(nodeInfo.l1ChainId);
+      if (this.rollupTimeline.length > 0) {
+        console.log(
+          `[staking-rewards] Rollup timeline (${this.rollupTimeline.length} versions, from hardcoded fallback):`,
+        );
+      }
+    }
+    for (const entry of this.rollupTimeline) {
+      console.log(
+        `  version=${entry.version} rollup=${entry.rollup} firstBlock=${entry.firstBlock}`,
+      );
     }
 
     // Clip the configured start block forward to the earliest rollup
@@ -132,6 +137,37 @@ export class StakingRewardsScraper extends AbstractScraper {
     void this.backfillHistory().catch((error) => {
       console.error("[staking-rewards] Backfill failed:", error);
     });
+  }
+
+  /**
+   * Hardcoded rollup timeline for chains where registry discovery is
+   * unreliable. Only mainnet is known at time of writing. Used as a
+   * fallback when the dynamic registry fetch fails (e.g. public RPC
+   * rejects the binary-search getCode calls).
+   *
+   * Addresses and first-deployed blocks verified via on-chain query to
+   * the Aztec Registry at 0x35b22e09Ee0390539439E24f06Da43D83f90e298.
+   */
+  private getFallbackRollupTimeline(chainId: number): RollupTimelineEntry[] {
+    if (chainId === 1) {
+      return [
+        {
+          version: 0n,
+          rollup: getAddress(
+            "0x603bb2c05D474794ea97805e8De69bCcFb3bCA12",
+          ) as Address,
+          firstBlock: 23786836n,
+        },
+        {
+          version: 2934756905n,
+          rollup: getAddress(
+            "0xAe2001f7e21d5EcABf6234E9FDd1E76F50F74962",
+          ) as Address,
+          firstBlock: 24586322n,
+        },
+      ];
+    }
+    return [];
   }
 
   /**
