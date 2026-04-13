@@ -20,6 +20,65 @@ const getAccessToken = async (config: ButlerConfig) => {
   return accessToken.token;
 };
 
+const parseSheetName = (range: string): string => {
+  const bang = range.indexOf("!");
+  return bang === -1 ? range : range.slice(0, bang);
+};
+
+// Overwrite a sheet in place, clearing any stale trailing rows first so
+// shorter payloads don't leave ghost data from previous runs.
+const overwriteSheet = async (
+  spreadsheetId: string,
+  range: string,
+  rowsWithHeader: string[][],
+  token: string,
+  label: string,
+): Promise<void> => {
+  const sheetName = parseSheetName(range);
+
+  const clearRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:clear`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    },
+  );
+
+  if (!clearRes.ok && clearRes.status !== 400 && clearRes.status !== 404) {
+    const text = await clearRes.text();
+    throw new Error(
+      `Failed to clear ${label} (${clearRes.status}): ${text}`,
+    );
+  }
+
+  const putRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        range,
+        majorDimension: "ROWS",
+        values: rowsWithHeader,
+      }),
+    },
+  );
+
+  if (!putRes.ok) {
+    const text = await putRes.text();
+    throw new Error(
+      `Failed to update ${label} (${putRes.status}): ${text}`,
+    );
+  }
+};
+
 const formatDailyRows = (network: string) => {
   // One end-of-day row per date (latest snapshot per coinbase per day, summed)
   const snapshots = getStakingRewardsHistory(network).slice();
@@ -64,9 +123,6 @@ const formatDailyRows = (network: string) => {
         totalOur += snap.ourShare;
         totalOther += snap.otherShare;
       });
-      if (totalPending === 0n && totalOur === 0n && totalOther === 0n) {
-        return [] as string[][];
-      }
       return [
         [
           date,
@@ -120,13 +176,6 @@ const formatDailyPerCoinbaseRows = (network: string) => {
       Array.from(byCoinbase.entries())
         .sort(([a], [b]) => (a < b ? -1 : 1))
         .forEach(([, snap]) => {
-          if (
-            snap.pendingRewards === 0n &&
-            snap.ourShare === 0n &&
-            snap.otherShare === 0n
-          ) {
-            return;
-          }
           rows.push([
             date,
             snap.coinbase,
@@ -231,37 +280,18 @@ const formatDailyEarnedRows = (network: string) => {
 
   const rows = Array.from(perDateTotals.entries())
     .sort(([a], [b]) => (a < b ? -1 : 1))
-    .flatMap(([date, totals]) => {
-      const isZero =
-        totals.accruedPending === 0n &&
-        totals.accruedOur === 0n &&
-        totals.accruedOther === 0n &&
-        totals.withdrawalPending === 0n &&
-        totals.withdrawalOur === 0n &&
-        totals.withdrawalOther === 0n &&
-        totals.netPending === 0n &&
-        totals.netOur === 0n &&
-        totals.netOther === 0n;
-
-      if (isZero) {
-        return [] as string[][];
-      }
-
-      return [
-        [
-          date,
-          totals.accruedPending.toString(),
-          totals.accruedOur.toString(),
-          totals.accruedOther.toString(),
-          totals.withdrawalPending.toString(),
-          totals.withdrawalOur.toString(),
-          totals.withdrawalOther.toString(),
-          totals.netPending.toString(),
-          totals.netOur.toString(),
-          totals.netOther.toString(),
-        ],
-      ];
-    });
+    .map(([date, totals]) => [
+      date,
+      totals.accruedPending.toString(),
+      totals.accruedOur.toString(),
+      totals.accruedOther.toString(),
+      totals.withdrawalPending.toString(),
+      totals.withdrawalOur.toString(),
+      totals.withdrawalOther.toString(),
+      totals.netPending.toString(),
+      totals.netOur.toString(),
+      totals.netOther.toString(),
+    ]);
 
   return [header, ...rows];
 };
@@ -302,30 +332,16 @@ export const exportStakingRewardsDailyToSheets = async (
   }
 
   const range = config.GOOGLE_SHEETS_RANGE || "Daily!A1";
-
   const token = await getAccessToken(config);
   const rows = formatDailyRows(network);
 
-  const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${config.GOOGLE_SHEETS_SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
-    {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        range,
-        majorDimension: "ROWS",
-        values: rows,
-      }),
-    },
+  await overwriteSheet(
+    config.GOOGLE_SHEETS_SPREADSHEET_ID,
+    range,
+    rows,
+    token,
+    "Google Sheet daily",
   );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to update Google Sheet (${res.status}): ${text}`);
-  }
 
   console.log(
     `[sheets] Updated sheet ${config.GOOGLE_SHEETS_SPREADSHEET_ID} at range ${range} with ${rows.length - 1} daily rows`,
@@ -342,32 +358,16 @@ export const exportStakingRewardsDailyPerCoinbaseToSheets = async (
 
   const range =
     config.GOOGLE_SHEETS_DAILY_PER_COINBASE_RANGE || "DailyPerCoinbase!A1";
-
   const token = await getAccessToken(config);
   const rows = formatDailyPerCoinbaseRows(network);
 
-  const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${config.GOOGLE_SHEETS_SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
-    {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        range,
-        majorDimension: "ROWS",
-        values: rows,
-      }),
-    },
+  await overwriteSheet(
+    config.GOOGLE_SHEETS_SPREADSHEET_ID,
+    range,
+    rows,
+    token,
+    "Google Sheet DailyPerCoinbase",
   );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `Failed to update Google Sheet DailyPerCoinbase (${res.status}): ${text}`,
-    );
-  }
 
   console.log(
     `[sheets] Updated per-coinbase daily sheet ${config.GOOGLE_SHEETS_SPREADSHEET_ID} at range ${range} with ${rows.length - 1} rows`,
@@ -383,32 +383,16 @@ export const exportStakingRewardsDailyEarnedToSheets = async (
   }
 
   const range = config.GOOGLE_SHEETS_DAILY_EARNED_RANGE || "DailyEarned!A1";
-
   const token = await getAccessToken(config);
   const rows = formatDailyEarnedRows(network);
 
-  const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${config.GOOGLE_SHEETS_SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
-    {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        range,
-        majorDimension: "ROWS",
-        values: rows,
-      }),
-    },
+  await overwriteSheet(
+    config.GOOGLE_SHEETS_SPREADSHEET_ID,
+    range,
+    rows,
+    token,
+    "Google Sheet DailyEarned",
   );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `Failed to update Google Sheet DailyEarned (${res.status}): ${text}`,
-    );
-  }
 
   console.log(
     `[sheets] Updated daily earned sheet ${config.GOOGLE_SHEETS_SPREADSHEET_ID} at range ${range} with ${rows.length - 1} rows`,
@@ -424,32 +408,16 @@ export const exportCoinbasesToSheets = async (
   }
 
   const range = config.GOOGLE_SHEETS_COINBASES_RANGE || "Coinbases!A1";
-
   const token = await getAccessToken(config);
   const rows = formatCoinbaseRows(network);
 
-  const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${config.GOOGLE_SHEETS_SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
-    {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        range,
-        majorDimension: "ROWS",
-        values: rows,
-      }),
-    },
+  await overwriteSheet(
+    config.GOOGLE_SHEETS_SPREADSHEET_ID,
+    range,
+    rows,
+    token,
+    "Google Sheet coinbases",
   );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `Failed to update Google Sheet coinbases (${res.status}): ${text}`,
-    );
-  }
 
   console.log(
     `[sheets] Updated coinbases sheet ${config.GOOGLE_SHEETS_SPREADSHEET_ID} at range ${range} with ${rows.length - 1} rows`,
