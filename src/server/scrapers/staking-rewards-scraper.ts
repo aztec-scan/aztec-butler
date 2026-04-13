@@ -11,7 +11,6 @@ import {
   getStakingRewardsHistory,
   updateStakingRewardsData,
   recordStakingRewardsSnapshots,
-  getLatestStakingRewardsSnapshotTimestamp,
   AttesterState,
 } from "../state/index.js";
 import {
@@ -359,28 +358,44 @@ export class StakingRewardsScraper extends AbstractScraper {
 
     const startBlockData = await this.getBlockWithFallback(this.startBlock);
     const startTimestampMs = Number(startBlockData.timestamp) * 1000;
-
-    const lastSnapshotTimestamp =
-      getLatestStakingRewardsSnapshotTimestamp(this.network)?.getTime() ?? null;
-
-    const effectiveStartMs = lastSnapshotTimestamp
-      ? lastSnapshotTimestamp + ONE_HOUR_MS
-      : startTimestampMs;
-    const backfillStartMs = alignTimestampToHour(effectiveStartMs);
+    const backfillStartMs = alignTimestampToHour(startTimestampMs);
     const now = Date.now();
 
     if (backfillStartMs > now) {
       return;
     }
 
+    // Walk the entire [startBlock, now] range at hourly resolution and
+    // only backfill hours that are NOT already present in state. This
+    // makes backfill a gap-filler rather than a forward-extender — any
+    // restart resumes from wherever the gap is, regardless of whether
+    // the live scrape has already written a future-tagged snapshot.
+    const filledHours = new Set<number>();
+    for (const snap of getStakingRewardsHistory(this.network)) {
+      filledHours.add(alignTimestampToHour(snap.timestamp.getTime()));
+    }
+
+    const totalHours =
+      Math.floor((now - backfillStartMs) / ONE_HOUR_MS) + 1;
+    const missingHours = Math.max(0, totalHours - filledHours.size);
+
     console.log(
-      `[staking-rewards] Backfilling hourly snapshots from ${new Date(backfillStartMs).toISOString()} (start block ${this.startBlock})`,
+      `[staking-rewards] Backfilling hourly snapshots from ${new Date(backfillStartMs).toISOString()} ` +
+        `to ${new Date(now).toISOString()} — ${missingHours}/${totalHours} hours missing (start block ${this.startBlock})`,
     );
+
+    if (missingHours === 0) {
+      await this.exportAggregatesAndCoinbases();
+      return;
+    }
 
     let consecutiveHistoricalStateErrors = 0;
     const MAX_CONSECUTIVE_ERRORS = 3; // Disable after 3 consecutive errors
 
     for (let ts = backfillStartMs; ts <= now; ts += ONE_HOUR_MS) {
+      if (filledHours.has(ts)) {
+        continue;
+      }
       try {
         const { blockNumber, blockTimestampMs } =
           await this.findBlockAtOrBeforeTimestamp(
@@ -397,6 +412,7 @@ export class StakingRewardsScraper extends AbstractScraper {
         );
 
         recordStakingRewardsSnapshots(this.network, snapshots);
+        filledHours.add(ts);
         consecutiveHistoricalStateErrors = 0; // Reset counter on success
       } catch (error) {
         if (this.isHistoricalStateError(error)) {
