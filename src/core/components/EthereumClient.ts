@@ -3,7 +3,12 @@ import {
   GSEContract,
   type ViemPublicClient,
 } from "@aztec/ethereum";
-import { GovernanceAbi, GSEAbi, RollupAbi } from "@aztec/l1-artifacts";
+import {
+  GovernanceAbi,
+  GSEAbi,
+  RegistryAbi,
+  RollupAbi,
+} from "@aztec/l1-artifacts";
 import {
   createPublicClient,
   encodeFunctionData,
@@ -62,6 +67,13 @@ type SplitAllocationData = {
   totalAllocation: bigint;
 };
 
+export type RollupTimelineEntry = {
+  version: bigint;
+  rollup: Address;
+  // First L1 block number at which the rollup contract has bytecode.
+  firstBlock: bigint;
+};
+
 const SPLIT_UPDATED_EVENT = parseAbiItem(
   "event SplitUpdated((address[] recipients,uint256[] allocations,uint256 totalAllocation,uint16 distributorFee) split)",
 );
@@ -98,6 +110,12 @@ export class EthereumClient {
   private readonly config: EthereumClientConfig;
   private rollupContract?: RollupContract;
   private archiveRollupContract?: RollupContract;
+  // Per-address cached rollup contracts. Used when different historical
+  // blocks require different rollup addresses (e.g. after a rollup
+  // upgrade registered via the Aztec Registry).
+  private rollupContractsByAddress: Map<string, RollupContract> = new Map();
+  private archiveRollupContractsByAddress: Map<string, RollupContract> =
+    new Map();
   private nativeStakingRegistryContract?: StakingRegistryContract;
   private ollaStakingRegistryContract?: OllaStakingProviderRegistryContract;
   private providerDataCache: Map<string, StakingProviderData | null> =
@@ -184,6 +202,106 @@ export class EthereumClient {
       return this.archiveRollupContract;
     }
     return this.getRollupContract();
+  }
+
+  /**
+   * Build (or return cached) rollup contract pointing at a specific address.
+   * Used by the staking-rewards scraper to call historical rollups by block.
+   * Both branches assume the rollup ABI is shared across versions.
+   */
+  getRollupContractAt(
+    rollupAddress: Address,
+    useArchive: boolean,
+  ): RollupContract {
+    const key = rollupAddress.toLowerCase();
+    const cache =
+      useArchive && this.archiveClient
+        ? this.archiveRollupContractsByAddress
+        : this.rollupContractsByAddress;
+    const client =
+      useArchive && this.archiveClient ? this.archiveClient : this.client;
+
+    const cached = cache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const contract = getContract({
+      address: rollupAddress,
+      abi: RollupAbi,
+      client,
+    });
+    cache.set(key, contract);
+    return contract;
+  }
+
+  /**
+   * Fetch the full rollup version timeline from the Aztec Registry and,
+   * for each rollup, binary-search the L1 block at which the rollup
+   * contract was first deployed. The result is sorted ascending by
+   * firstBlock, so entries[i].firstBlock..entries[i+1].firstBlock defines
+   * the block range over which that rollup is queryable.
+   */
+  async getRollupTimeline(
+    registryAddress: Address,
+  ): Promise<RollupTimelineEntry[]> {
+    const registry = getContract({
+      address: registryAddress,
+      abi: RegistryAbi,
+      client: this.client,
+    });
+
+    const numVersions = (await registry.read.numberOfVersions()) as bigint;
+    const entries: RollupTimelineEntry[] = [];
+
+    const latestBlock = await this.client.getBlockNumber();
+
+    for (let i = 0n; i < numVersions; i++) {
+      const version = (await registry.read.getVersion([i])) as bigint;
+      const rollup = (await registry.read.getRollup([version])) as Address;
+      const firstBlock = await this.findFirstCodeBlock(
+        rollup,
+        latestBlock,
+      );
+      entries.push({ version, rollup, firstBlock });
+    }
+
+    entries.sort((a, b) =>
+      a.firstBlock < b.firstBlock ? -1 : a.firstBlock > b.firstBlock ? 1 : 0,
+    );
+
+    return entries;
+  }
+
+  /**
+   * Binary-search the earliest L1 block number at which `address` has
+   * non-empty bytecode. Assumes the contract is still deployed at
+   * `upperBound` — throws if not. ~log2(N) eth_getCode calls.
+   */
+  private async findFirstCodeBlock(
+    address: Address,
+    upperBound: bigint,
+  ): Promise<bigint> {
+    const client = this.archiveClient ?? this.client;
+    const top = await client.getCode({ address, blockNumber: upperBound });
+    if (!top || top === "0x") {
+      throw new Error(
+        `Contract ${address} has no code at block ${upperBound}; cannot determine deployment block`,
+      );
+    }
+
+    let low = 0n;
+    let high = upperBound;
+    while (low < high) {
+      const mid = (low + high) / 2n;
+      const code = await client.getCode({ address, blockNumber: mid });
+      if (!code || code === "0x") {
+        low = mid + 1n;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
   }
 
   /**

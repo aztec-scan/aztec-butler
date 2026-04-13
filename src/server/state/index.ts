@@ -374,6 +374,7 @@ type SerializedStakingRewardsSnapshot = {
   lastUpdated: string;
   blockNumber: string;
   timestamp: string;
+  rollupAddress?: string;
 };
 
 const serializeStakingRewardsHistory = (
@@ -395,6 +396,9 @@ const serializeStakingRewardsHistory = (
     lastUpdated: snapshot.lastUpdated.toISOString(),
     blockNumber: snapshot.blockNumber.toString(),
     timestamp: snapshot.timestamp.toISOString(),
+    ...(snapshot.rollupAddress
+      ? { rollupAddress: snapshot.rollupAddress }
+      : {}),
   }));
 };
 
@@ -420,6 +424,7 @@ const deserializeStakingRewardsHistory = (
         lastUpdated: new Date(entry.lastUpdated),
         blockNumber: BigInt(entry.blockNumber),
         timestamp: new Date(entry.timestamp),
+        rollupAddress: entry.rollupAddress,
       });
       state.stakingRewardsHistory.push(parsed);
     } catch (error) {

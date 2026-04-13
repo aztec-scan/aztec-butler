@@ -28,6 +28,10 @@ export const StakingRewardsSnapshotSchema =
   StakingRewardsEntrySchema.extend({
     blockNumber: z.bigint(),
     timestamp: z.date(),
+    // The rollup contract this snapshot was read from. Optional for
+    // backward compatibility with snapshots persisted before rollup
+    // tracking was added.
+    rollupAddress: HexStringSchema.optional(),
   });
 
 export const StakingRewardsDailyAggregateSchema = z.object({

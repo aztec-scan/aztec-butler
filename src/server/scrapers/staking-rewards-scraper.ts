@@ -1,7 +1,10 @@
 import { AbstractScraper } from "./base-scraper.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import { AztecClient } from "../../core/components/AztecClient.js";
-import { EthereumClient } from "../../core/components/EthereumClient.js";
+import {
+  EthereumClient,
+  type RollupTimelineEntry,
+} from "../../core/components/EthereumClient.js";
 import {
   getAttesterCoinbaseInfo,
   getAttesterStates,
@@ -17,7 +20,7 @@ import {
   type StakingRewardsRecipient,
   type StakingRewardsSnapshot,
 } from "../../types/index.js";
-import { getAddress } from "viem";
+import { getAddress, type Address } from "viem";
 import {
   exportStakingRewardsDailyToSheets,
   exportCoinbasesToSheets,
@@ -46,6 +49,10 @@ export class StakingRewardsScraper extends AbstractScraper {
   private safeAddress: string;
   private startBlock: bigint;
   private backfillDisabled: boolean = false;
+  // Ascending-by-firstBlock timeline of Aztec rollup versions. Each
+  // entry defines the rollup canonical from [firstBlock, nextFirstBlock).
+  // Populated in init() from the Aztec Registry contract.
+  private rollupTimeline: RollupTimelineEntry[] = [];
 
   constructor(
     network: string,
@@ -79,6 +86,46 @@ export class StakingRewardsScraper extends AbstractScraper {
       rollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
     });
 
+    // Build the rollup version timeline from the Aztec Registry so that
+    // backfill can dispatch each historical block to the rollup that was
+    // canonical at that block. Without this, calls against the current
+    // rollup for blocks before its deployment return "0x" and snapshots
+    // are silently lost.
+    const registryAddress = getAddress(
+      nodeInfo.l1ContractAddresses.registryAddress.toString() as `0x${string}`,
+    );
+    try {
+      this.rollupTimeline =
+        await this.ethClient.getRollupTimeline(registryAddress);
+      console.log(
+        `[staking-rewards] Rollup timeline (${this.rollupTimeline.length} versions):`,
+      );
+      for (const entry of this.rollupTimeline) {
+        console.log(
+          `  version=${entry.version} rollup=${entry.rollup} firstBlock=${entry.firstBlock}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        "[staking-rewards] Failed to load rollup timeline from registry; falling back to single-rollup mode",
+        error,
+      );
+      this.rollupTimeline = [];
+    }
+
+    // Clip the configured start block forward to the earliest rollup
+    // deployment — scraping before any rollup exists is guaranteed to
+    // fail with empty responses.
+    if (this.rollupTimeline.length > 0) {
+      const oldestRollupBlock = this.rollupTimeline[0]!.firstBlock;
+      if (this.startBlock < oldestRollupBlock) {
+        console.log(
+          `[staking-rewards] Clipping start block ${this.startBlock} -> ${oldestRollupBlock} (oldest rollup deployment)`,
+        );
+        this.startBlock = oldestRollupBlock;
+      }
+    }
+
     console.log(
       `Staking rewards scraper initialized (target Safe ${this.safeAddress})`,
     );
@@ -86,6 +133,27 @@ export class StakingRewardsScraper extends AbstractScraper {
     void this.backfillHistory().catch((error) => {
       console.error("[staking-rewards] Backfill failed:", error);
     });
+  }
+
+  /**
+   * Return the rollup address that was canonical at the given L1 block.
+   * Falls back to the ethClient's configured rollup address if the
+   * timeline is empty (registry unavailable) or the block predates any
+   * known rollup.
+   */
+  private rollupForBlock(block: bigint): Address | null {
+    if (this.rollupTimeline.length === 0) {
+      return null;
+    }
+    let selected: RollupTimelineEntry | null = null;
+    for (const entry of this.rollupTimeline) {
+      if (block >= entry.firstBlock) {
+        selected = entry;
+      } else {
+        break;
+      }
+    }
+    return selected ? selected.rollup : null;
   }
 
   async scrape(): Promise<void> {
@@ -143,9 +211,24 @@ export class StakingRewardsScraper extends AbstractScraper {
 
     const rewardsMap: StakingRewardsMap = new Map();
     const snapshots: StakingRewardsSnapshot[] = [];
-    const rollupContract = useArchiveClient
-      ? this.ethClient.getRollupContractForHistorical()
-      : this.ethClient.getRollupContract();
+
+    // Pick the rollup contract that was canonical at this block. If the
+    // timeline is empty (registry unavailable), fall back to the single
+    // rollup address the node reported at init time.
+    const rollupAddressAtBlock = this.rollupForBlock(blockNumber);
+    if (rollupAddressAtBlock === null && this.rollupTimeline.length > 0) {
+      // Block predates every known rollup deployment — skip silently.
+      return { rewardsMap, snapshots, totalOurShare: 0n };
+    }
+    const rollupContract = rollupAddressAtBlock
+      ? this.ethClient.getRollupContractAt(
+          rollupAddressAtBlock,
+          useArchiveClient,
+        )
+      : useArchiveClient
+        ? this.ethClient.getRollupContractForHistorical()
+        : this.ethClient.getRollupContract();
+
     let totalOurShare = 0n;
     for (const entry of coinbases) {
       try {
@@ -220,6 +303,9 @@ export class StakingRewardsScraper extends AbstractScraper {
           ...parsedEntry,
           blockNumber,
           timestamp,
+          ...(rollupAddressAtBlock
+            ? { rollupAddress: rollupAddressAtBlock }
+            : {}),
         });
         totalOurShare += ourShare;
       } catch (error) {
