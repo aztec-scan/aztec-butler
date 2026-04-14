@@ -156,10 +156,17 @@ export class StakingRewardsScraper extends AbstractScraper {
    * Hardcoded rollup timeline for chains where registry discovery is
    * unreliable. Only mainnet is known at time of writing. Used as a
    * fallback when the dynamic registry fetch fails (e.g. public RPC
-   * rejects the binary-search getCode calls).
+   * rejects the CanonicalRollupUpdated event scan).
    *
-   * Addresses and first-deployed blocks verified via on-chain query to
-   * the Aztec Registry at 0x35b22e09Ee0390539439E24f06Da43D83f90e298.
+   * firstBlock values are CANONICALIZATION blocks — the block at which
+   * the Registry emitted CanonicalRollupUpdated for that version, not
+   * the block at which the rollup contract was first deployed. A new
+   * rollup is typically deployed weeks before it is canonicalized, and
+   * during that window rewards still flow through the previous rollup,
+   * so dispatching by deployment block creates a silent backfill gap.
+   *
+   * Verified via CanonicalRollupUpdated event scan against the Aztec
+   * Registry at 0x35b22e09Ee0390539439E24f06Da43D83f90e298.
    */
   private getFallbackRollupTimeline(chainId: number): RollupTimelineEntry[] {
     if (chainId === 1) {
@@ -169,14 +176,14 @@ export class StakingRewardsScraper extends AbstractScraper {
           rollup: getAddress(
             "0x603bb2c05D474794ea97805e8De69bCcFb3bCA12",
           ) as Address,
-          firstBlock: 23786836n,
+          firstBlock: 23786837n,
         },
         {
           version: 2934756905n,
           rollup: getAddress(
             "0xAe2001f7e21d5EcABf6234E9FDd1E76F50F74962",
           ) as Address,
-          firstBlock: 24586322n,
+          firstBlock: 24767552n,
         },
       ];
     }

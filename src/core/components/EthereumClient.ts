@@ -6,7 +6,6 @@ import {
 import {
   GovernanceAbi,
   GSEAbi,
-  RegistryAbi,
   RollupAbi,
 } from "@aztec/l1-artifacts";
 import {
@@ -76,6 +75,9 @@ export type RollupTimelineEntry = {
 
 const SPLIT_UPDATED_EVENT = parseAbiItem(
   "event SplitUpdated((address[] recipients,uint256[] allocations,uint256 totalAllocation,uint16 distributorFee) split)",
+);
+const CANONICAL_ROLLUP_UPDATED_EVENT = parseAbiItem(
+  "event CanonicalRollupUpdated(address indexed instance, uint256 indexed version)",
 );
 const OLLA_KEYS_ADDED_EVENT = parseAbiItem(
   "event KeysAddedToProvider(address[] attesters)",
@@ -236,41 +238,52 @@ export class EthereumClient {
   }
 
   /**
-   * Fetch the full rollup version timeline from the Aztec Registry and,
-   * for each rollup, binary-search the L1 block at which the rollup
-   * contract was first deployed. The result is sorted ascending by
-   * firstBlock, so entries[i].firstBlock..entries[i+1].firstBlock defines
-   * the block range over which that rollup is queryable.
+   * Fetch the Aztec rollup canonicalization timeline by scanning the
+   * Registry's CanonicalRollupUpdated events. Each entry's firstBlock
+   * is the L1 block at which that rollup version became CANONICAL —
+   * not the block at which the rollup contract was deployed. These
+   * differ: a new rollup is typically deployed days or weeks before it
+   * is promoted to canonical, and during that window rewards still
+   * flow through the previous rollup. Dispatching historical queries
+   * by deployment block would send calls to a rollup that was not yet
+   * active, returning zero and producing a silent gap in the backfill.
+   *
+   * The result is sorted ascending by firstBlock, so
+   * entries[i].firstBlock..entries[i+1].firstBlock defines the block
+   * range over which that rollup was canonical.
    */
   async getRollupTimeline(
     registryAddress: Address,
   ): Promise<RollupTimelineEntry[]> {
-    // Prefer the archive client for all calls in this path: the binary
-    // search for firstCodeBlock requires historical state support, and
-    // using a single client end-to-end avoids mixing latest-state views
-    // across two backends that may be slightly out of sync.
+    // Prefer the archive client end-to-end: the one-time binary search
+    // for the Registry's deployment block needs historical state, and
+    // using a single client avoids mixing views across two backends
+    // that may be slightly out of sync.
     const client = this.archiveClient ?? this.client;
-
-    const registry = getContract({
-      address: registryAddress,
-      abi: RegistryAbi,
-      client,
-    });
-
-    const numVersions = (await registry.read.numberOfVersions()) as bigint;
-    const entries: RollupTimelineEntry[] = [];
 
     const latestBlock = await client.getBlockNumber();
 
-    for (let i = 0n; i < numVersions; i++) {
-      const version = (await registry.read.getVersion([i])) as bigint;
-      const rollup = (await registry.read.getRollup([version])) as Address;
-      const firstBlock = await this.findFirstCodeBlock(
-        rollup,
-        latestBlock,
-      );
-      entries.push({ version, rollup, firstBlock });
-    }
+    // Locate the Registry's own deployment block so the event scan has
+    // a bounded fromBlock. Scanning from 0 on mainnet would be ~500
+    // chunked getLogs calls (25M blocks / 50k per chunk). The binary
+    // search is ~25 calls regardless of chain height.
+    const registryDeployBlock = await this.findFirstCodeBlock(
+      registryAddress,
+      latestBlock,
+    );
+
+    const logs = await this.getLogsChunked({
+      address: registryAddress,
+      event: CANONICAL_ROLLUP_UPDATED_EVENT,
+      fromBlock: registryDeployBlock,
+      toBlock: latestBlock,
+    });
+
+    const entries: RollupTimelineEntry[] = logs.map((log) => ({
+      version: log.args.version as bigint,
+      rollup: getAddress(log.args.instance as string) as Address,
+      firstBlock: log.blockNumber as bigint,
+    }));
 
     entries.sort((a, b) =>
       a.firstBlock < b.firstBlock ? -1 : a.firstBlock > b.firstBlock ? 1 : 0,
