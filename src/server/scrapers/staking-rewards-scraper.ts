@@ -12,6 +12,7 @@ import {
   getStakingRewardsHistory,
   updateStakingRewardsData,
   recordStakingRewardsSnapshots,
+  purgeStakingRewardsSnapshotsBeforeBlock,
   AttesterState,
 } from "../state/index.js";
 import {
@@ -53,18 +54,22 @@ export class StakingRewardsScraper extends AbstractScraper {
   // entry defines the rollup canonical from [firstBlock, nextFirstBlock).
   // Populated in init() from the Aztec Registry contract.
   private rollupTimeline: RollupTimelineEntry[] = [];
-  // Per-coinbase split allocation cache used by backfill. Populated
-  // once at the top of backfillHistory() (one getLogs sweep per
-  // coinbase) and cleared after the loop exits. Null outside of
-  // backfill, so live scrape always fetches fresh allocations.
+  // Per-coinbase split allocation history cache used by backfill.
+  // Populated once at the top of backfillHistory() (one getLogs sweep
+  // per coinbase over the full [startBlock, latestBlock] range) and
+  // cleared after the loop exits. Null outside of backfill, so live
+  // scrape always fetches fresh allocations.
   //
-  // Known limitation: the cached split is the one active as of the
-  // latest block at backfill start. For the rare coinbase that
-  // changed its split mid-period, historical hours before the change
-  // will be attributed using the later split. Correct for the vast
-  // majority of coinbases that configure a split once and never
-  // touch it. Worth revisiting only if someone reports the drift.
-  private splitCache: Map<string, SplitAllocationData | null> | null = null;
+  // Each entry is the ascending-by-block timeline of SplitUpdated
+  // events for that coinbase. Historical hours are attributed using
+  // the split that was active at the hour's block — the most recent
+  // entry with block <= blockNumber. This preserves the one-time-fetch
+  // performance win while correctly handling coinbases whose splits
+  // have changed over the backfill window.
+  private splitHistoryCache: Map<
+    string,
+    Array<{ block: bigint; split: SplitAllocationData }>
+  > | null = null;
 
   constructor(
     network: string,
@@ -305,20 +310,28 @@ export class StakingRewardsScraper extends AbstractScraper {
           { blockNumber },
         );
 
-        // During backfill, the per-coinbase split is read once up front
-        // (see backfillHistory) and reused for every historical hour.
-        // Live scrape (splitCache === null) still fetches fresh.
-        const cachedSplit = this.splitCache?.get(
+        // During backfill, the per-coinbase split history is read once
+        // up front (see backfillHistory) and looked up by block for
+        // each historical hour. Live scrape (splitHistoryCache === null)
+        // still fetches fresh via getLatestSplitAllocations.
+        const history = this.splitHistoryCache?.get(
           entry.coinbase.toLowerCase(),
         );
-        const splitData =
-          cachedSplit !== undefined
-            ? cachedSplit
-            : await this.ethClient.getLatestSplitAllocations(
-                entry.coinbase,
-                this.startBlock,
-                blockNumber,
-              );
+        let splitData: SplitAllocationData | null;
+        if (history !== undefined) {
+          // Most recent split whose SplitUpdated event is at-or-before
+          // this hour's block is the one active at that hour. Empty
+          // history (coinbase with no SplitUpdated event in range)
+          // resolves to null, same as the live path.
+          splitData =
+            history.findLast((h) => h.block <= blockNumber)?.split ?? null;
+        } else {
+          splitData = await this.ethClient.getLatestSplitAllocations(
+            entry.coinbase,
+            this.startBlock,
+            blockNumber,
+          );
+        }
 
         const recipients: StakingRewardsRecipient[] =
           splitData?.recipients.map((recipient, idx) => ({
@@ -454,36 +467,89 @@ export class StakingRewardsScraper extends AbstractScraper {
       return;
     }
 
-    // Pre-fetch each coinbase's split allocation once. Splits rarely
-    // change after setup, so reading them once up front instead of
-    // re-scanning SplitUpdated logs per (coinbase × hour) eliminates
-    // the dominant RPC cost in backfill (~5 log queries per coinbase
-    // per hour → 0 during the loop).
+    // Pre-fetch each coinbase's full split allocation history once.
+    // One getLogs sweep per coinbase over the full [startBlock,
+    // latestBlock] range replaces ~5 log queries per (coinbase × hour)
+    // during the loop. Historical hours are later resolved against
+    // this timeline by block number, so coinbases whose splits change
+    // mid-period are attributed correctly.
     console.log(
-      `[staking-rewards] Pre-fetching split allocations for ${coinbases.length} coinbase(s)...`,
+      `[staking-rewards] Pre-fetching split history for ${coinbases.length} coinbase(s)...`,
     );
-    this.splitCache = new Map<string, SplitAllocationData | null>();
+    this.splitHistoryCache = new Map<
+      string,
+      Array<{ block: bigint; split: SplitAllocationData }>
+    >();
     for (const entry of coinbases) {
       try {
-        const split = await this.ethClient.getLatestSplitAllocations(
+        const history = await this.ethClient.getSplitHistory(
           entry.coinbase,
           this.startBlock,
           latestBlock,
         );
-        this.splitCache.set(entry.coinbase.toLowerCase(), split);
+        this.splitHistoryCache.set(entry.coinbase.toLowerCase(), history);
       } catch (error) {
         // On failure, fall back to per-hour fetch for this coinbase —
         // cache lookup returns undefined → collectRewardsForBlock
         // takes the slow path for this coinbase only.
         console.warn(
-          `[staking-rewards] Failed to pre-fetch split for ${entry.coinbase}, will fetch per-hour:`,
+          `[staking-rewards] Failed to pre-fetch split history for ${entry.coinbase}, will fetch per-hour:`,
           error,
         );
       }
     }
+    const totalVersions = Array.from(
+      this.splitHistoryCache.values(),
+    ).reduce((sum, h) => sum + h.length, 0);
     console.log(
-      `[staking-rewards] Split cache populated (${this.splitCache.size}/${coinbases.length} coinbases)`,
+      `[staking-rewards] Split history cache populated (${this.splitHistoryCache.size}/${coinbases.length} coinbases, ${totalVersions} split versions total)`,
     );
+
+    // Targeted invalidation: snapshots written under the prior
+    // single-split cache used the then-latest split for every
+    // historical hour. For coinbases whose split has since changed
+    // (history length >= 2), hours before the most recent change
+    // were attributed with the wrong split. Purge those snapshots so
+    // the backfill loop below refills them using the correct
+    // per-block split from splitHistoryCache. Coinbases with a single
+    // (or zero) split version were correct under both strategies —
+    // leave them alone.
+    let totalPurged = 0;
+    const purgedHourTimestamps = new Set<number>();
+    for (const entry of coinbases) {
+      const history = this.splitHistoryCache.get(
+        entry.coinbase.toLowerCase(),
+      );
+      if (!history || history.length < 2) {
+        continue;
+      }
+      const thresholdBlock = history[history.length - 1]!.block;
+      const { removed, removedTimestampsMs } =
+        purgeStakingRewardsSnapshotsBeforeBlock(
+          this.network,
+          entry.coinbase,
+          thresholdBlock,
+        );
+      if (removed > 0) {
+        totalPurged += removed;
+        for (const ts of removedTimestampsMs) {
+          purgedHourTimestamps.add(alignTimestampToHour(ts));
+        }
+      }
+    }
+    if (totalPurged > 0) {
+      // filledHours was built from the pre-purge snapshot set. Any
+      // hour that contained a purged snapshot must be re-run; drop
+      // it so the loop below doesn't skip it. Hours where only
+      // non-purged coinbases had snapshots stay filled (per the
+      // existing "any snapshot at this hour = filled" contract).
+      for (const hour of purgedHourTimestamps) {
+        filledHours.delete(hour);
+      }
+      console.log(
+        `[staking-rewards] Invalidated ${totalPurged} snapshot(s) across ${purgedHourTimestamps.size} hour(s) whose split has since changed; they will be re-backfilled with the corrected per-block split.`,
+      );
+    }
 
     let consecutiveHistoricalStateErrors = 0;
     const MAX_CONSECUTIVE_ERRORS = 3; // Disable after 3 consecutive errors
@@ -541,7 +607,7 @@ export class StakingRewardsScraper extends AbstractScraper {
       }
     } finally {
       // Clear the cache so live scrape always fetches fresh splits.
-      this.splitCache = null;
+      this.splitHistoryCache = null;
     }
 
     await this.exportAggregatesAndCoinbases();

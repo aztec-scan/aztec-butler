@@ -1117,6 +1117,43 @@ export const getStakingRewardsHistory = (
 };
 
 /**
+ * Purge staking rewards snapshots for a specific coinbase whose
+ * blockNumber is strictly less than thresholdBlock. Used by backfill
+ * to evict snapshots that were computed with an outdated split
+ * allocation so they can be refilled with the correct split.
+ *
+ * Returns the count of purged entries and the raw timestamps (ms
+ * since epoch) of the purged snapshots so the caller can invalidate
+ * its filled-hours index.
+ */
+export const purgeStakingRewardsSnapshotsBeforeBlock = (
+  network: string,
+  coinbase: string,
+  thresholdBlock: bigint,
+): { removed: number; removedTimestampsMs: number[] } => {
+  const state = getNetworkState(network);
+  const lowerCoinbase = coinbase.toLowerCase();
+  const removedTimestampsMs: number[] = [];
+  const remaining: StakingRewardsSnapshot[] = [];
+  for (const entry of state.stakingRewardsHistory) {
+    if (
+      entry.coinbase.toLowerCase() === lowerCoinbase &&
+      entry.blockNumber < thresholdBlock
+    ) {
+      removedTimestampsMs.push(entry.timestamp.getTime());
+      continue;
+    }
+    remaining.push(entry);
+  }
+  const removed = state.stakingRewardsHistory.length - remaining.length;
+  if (removed > 0) {
+    state.stakingRewardsHistory = remaining;
+    scheduleSaveStakingRewardsHistory(network);
+  }
+  return { removed, removedTimestampsMs };
+};
+
+/**
  * Get timestamp of latest staking rewards snapshot (if any)
  */
 export const getLatestStakingRewardsSnapshotTimestamp = (

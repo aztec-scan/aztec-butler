@@ -900,6 +900,76 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   }
 
   /**
+   * Fetch the full history of SplitUpdated events for a split
+   * (coinbase) contract, sorted ascending by block number.
+   *
+   * Unlike getLatestSplitAllocations which collapses history to the
+   * latest allocation, this returns every version so callers can
+   * resolve which split was active at any historical block — required
+   * for backfill to attribute historical hours to the correct split
+   * when a coinbase's allocation has changed over time.
+   */
+  async getSplitHistory(
+    splitAddress: string,
+    fromBlock?: bigint,
+    toBlock?: bigint,
+  ): Promise<Array<{ block: bigint; split: SplitAllocationData }>> {
+    const address = getAddress(splitAddress);
+    const latestBlock = toBlock ?? (await this.client.getBlockNumber());
+    const lowerBound = fromBlock ?? 0n;
+
+    const fetchLogs = async (
+      rangeFrom: bigint,
+      rangeTo: bigint,
+    ): Promise<any[]> => {
+      try {
+        return await this.client.getLogs({
+          address,
+          event: SPLIT_UPDATED_EVENT,
+          fromBlock: rangeFrom,
+          toBlock: rangeTo,
+        });
+      } catch (err) {
+        if (!this.archiveClient) {
+          throw err;
+        }
+        console.warn(
+          "[EthereumClient] Primary RPC getLogs failed, trying archive client...",
+          err,
+        );
+        return await this.archiveClient.getLogs({
+          address,
+          event: SPLIT_UPDATED_EVENT,
+          fromBlock: rangeFrom,
+          toBlock: rangeTo,
+        });
+      }
+    };
+
+    const history: Array<{ block: bigint; split: SplitAllocationData }> = [];
+    let cursor = lowerBound;
+    while (cursor <= latestBlock) {
+      const rangeEnd =
+        cursor + LOG_RANGE_LIMIT - 1n > latestBlock
+          ? latestBlock
+          : cursor + LOG_RANGE_LIMIT - 1n;
+      const logs = await fetchLogs(cursor, rangeEnd);
+      for (const log of logs) {
+        history.push({
+          block: log.blockNumber as bigint,
+          split: this.decodeSplitUpdatedData(log.data as Hex),
+        });
+      }
+      cursor = rangeEnd + 1n;
+    }
+
+    history.sort((a, b) =>
+      a.block < b.block ? -1 : a.block > b.block ? 1 : 0,
+    );
+    return history;
+  }
+
+  /**
    * Get staking provider configuration using memoized staking provider data
    * This method uses the cached providerId from getStakingProvider
    */
