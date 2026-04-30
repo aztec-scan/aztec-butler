@@ -28,7 +28,7 @@ function formatError(error: unknown): string {
   if (error instanceof Error) {
     // Check for nested cause
     let message = error.stack || error.message;
-    if (error.cause) {
+    if ("cause" in error && error.cause) {
       message += `\n\nCaused by: ${formatError(error.cause)}`;
     }
     return message;
@@ -217,6 +217,46 @@ program
       registry: options.registry,
     });
   });
+
+// Command: get-change-provider-admin-calldata
+program
+  .command("get-change-provider-admin-calldata")
+  .description(
+    "Generate calldata to update and accept native staking provider admin",
+  )
+  .requiredOption(
+    "--new-provider-admin-address <address>",
+    "New staking provider admin address",
+  )
+  .option(
+    "--old-provider-admin-address <address>",
+    "Current staking provider admin address (defaults to AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS)",
+  )
+  .option(
+    "--provider-id <id>",
+    "Staking provider ID (defaults to AZTEC_STAKING_PROVIDER_ID)",
+    parseBigInt,
+  )
+  .action(
+    async (options: {
+      newProviderAdminAddress: string;
+      oldProviderAdminAddress?: string;
+      providerId?: bigint;
+    }) => {
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
+      const ethClient = await initEthClient(config);
+      await command.getChangeProviderAdminCalldata(ethClient, config, {
+        newProviderAdminAddress: options.newProviderAdminAddress,
+        ...(options.oldProviderAdminAddress
+          ? { oldProviderAdminAddress: options.oldProviderAdminAddress }
+          : {}),
+        ...(options.providerId !== undefined
+          ? { providerId: options.providerId }
+          : {}),
+      });
+    },
+  );
 
 // Command: check-publisher-eth
 program

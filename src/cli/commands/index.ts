@@ -4,6 +4,7 @@ export { default as getPublisherEth } from "./get-publisher-eth.js";
 export { default as getProviderId } from "./get-provider-id.js";
 export { default as getCreateStakingProviderCallData } from "./get-create-staking-provider-calldata.js";
 export { default as getAddKeysToStakingProviderCalldata } from "./get-add-keys-to-staking-provider-calldata.js";
+export { default as getChangeProviderAdminCalldata } from "./get-change-provider-admin-calldata.js";
 export { default as scrapeCoinbases } from "./scrape-coinbases.js";
 export { default as scrapeAttesterStatus } from "./scrape-attester-status.js";
 export { default as processPrivateKeys } from "./process-private-keys.js";

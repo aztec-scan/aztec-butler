@@ -81,6 +81,25 @@ export const STAKING_REGISTRY_ABI = [
   },
   {
     type: "function",
+    inputs: [
+      { internalType: "uint256", name: "_providerIdentifier", type: "uint256" },
+      { internalType: "address", name: "_newAdmin", type: "address" },
+    ],
+    name: "updateProviderAdmin",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [
+      { internalType: "uint256", name: "_providerIdentifier", type: "uint256" },
+    ],
+    name: "acceptProviderAdmin",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     name: "addKeysToProvider",
     inputs: [
       {
