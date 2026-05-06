@@ -77,21 +77,8 @@ export class ScraperManager {
         continue;
       }
 
-      // Run immediately on start
-      try {
-        console.log(
-          `  - Running initial scrape for ${scraper.name} [${scraper.network}]...`,
-        );
-        await scraper.scrape();
-      } catch (error) {
-        console.error(
-          `  ✗ Initial scrape failed for ${scraper.name} [${scraper.network}]:`,
-          error,
-        );
-        // Continue with other scrapers
-      }
-
-      // Schedule periodic scraping
+      // Schedule periodic scraping before the initial scrape so one slow
+      // scraper cannot block all later scrapers from starting.
       const handle = setInterval(() => {
         void (async () => {
           try {
@@ -111,6 +98,21 @@ export class ScraperManager {
       console.log(
         `  ✓ ${scraper.name} scraper [${scraper.network}] scheduled (interval: ${intervalMs / 1000}s)`,
       );
+
+      void (async () => {
+        try {
+          console.log(
+            `  - Running initial scrape for ${scraper.name} [${scraper.network}]...`,
+          );
+          await scraper.scrape();
+        } catch (error) {
+          console.error(
+            `  ✗ Initial scrape failed for ${scraper.name} [${scraper.network}]:`,
+            error,
+          );
+          // Continue with other scrapers
+        }
+      })();
     }
 
     console.log("All scrapers started successfully");
