@@ -5,6 +5,7 @@ import {
   STAKING_REGISTRY_ABI,
   type StakingRegistryTarget,
 } from "../../types/index.js";
+import { OLLA_STAKING_PROVIDER_REGISTRY_ABI } from "../../types/generated/olla-staking-provider-registry-abi.js";
 import { ButlerConfig } from "../../core/config/index.js";
 
 const DEFAULT_COMISSION_RATE_PERCENTAGE = 10;
@@ -37,6 +38,8 @@ const command = async (
     console.log(
       "Olla staking provider is configured during deployment/initialization; registerProvider calldata is not applicable.",
     );
+    const configuredRewardsRecipient =
+      config.OLLA_AZTEC_STAKING_PROVIDER_REWARDS_RECIPIENT_ADDRESS;
     const providerData = await ethClient.getStakingProvider(
       stakingProviderAdminAddress,
       options.registry,
@@ -46,6 +49,37 @@ const command = async (
       console.log(
         `${providerData.providerId} - Admin: ${providerData.admin}, Rewards Recipient: ${providerData.rewardsRecipient}`,
       );
+      if (configuredRewardsRecipient) {
+        const rewardsRecipientAddress = getAddress(configuredRewardsRecipient);
+        if (
+          rewardsRecipientAddress.toLowerCase() ===
+          providerData.rewardsRecipient.toLowerCase()
+        ) {
+          console.log(
+            "Configured Olla rewards recipient already matches chain.",
+          );
+        } else {
+          console.log(
+            "SET OLLA PROVIDER REWARDS RECIPIENT CALL DATA:",
+            JSON.stringify(
+              {
+                contractToCall: stakingRegistryAddress,
+                callData: encodeFunctionData({
+                  abi: OLLA_STAKING_PROVIDER_REGISTRY_ABI,
+                  functionName: "setProviderRewardsRecipient",
+                  args: [rewardsRecipientAddress],
+                }),
+              },
+              null,
+              2,
+            ),
+          );
+        }
+      } else {
+        console.log(
+          "Set OLLA_AZTEC_STAKING_PROVIDER_REWARDS_RECIPIENT_ADDRESS to generate calldata for a different Olla rewards recipient.",
+        );
+      }
     } else {
       console.log(
         "Configured admin does not match on-chain Olla provider config. Check OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS.",
