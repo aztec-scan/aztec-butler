@@ -301,6 +301,17 @@ export class SafeGlobalClient {
    * are processed sequentially to avoid nonce conflicts.
    */
   async proposeTransaction(proposal: MultisigProposal): Promise<void> {
+    return this.proposeTransactions([proposal]);
+  }
+
+  /**
+   * Public API: propose a batched Safe transaction.
+   */
+  async proposeTransactions(proposals: MultisigProposal[]): Promise<void> {
+    if (proposals.length === 0) {
+      throw new Error("Cannot propose an empty Safe transaction batch");
+    }
+
     // Ensure queue keeps flowing even if previous tasks failed
     this.proposalQueue = this.proposalQueue
       .catch((err) => {
@@ -311,7 +322,7 @@ export class SafeGlobalClient {
       })
       .then(async () => {
         await new Promise((res) => setTimeout(res, 500)); // 500ms
-        await this._proposeTransactionInternal(proposal);
+        await this._proposeTransactionsInternal(proposals);
       });
 
     return this.proposalQueue;
@@ -321,12 +332,13 @@ export class SafeGlobalClient {
    * Internal implementation that actually talks to Safe.
    * This is always called via the queue above.
    */
-  private async _proposeTransactionInternal(
-    proposal: MultisigProposal,
+  private async _proposeTransactionsInternal(
+    proposals: MultisigProposal[],
   ): Promise<void> {
     let nextNonce: string | undefined;
     let safeTxHash: string | undefined;
     let signatureLength: number | undefined;
+    const firstProposal = proposals[0]!;
 
     try {
       console.log("[SafeGlobalClient] Starting transaction proposal...");
@@ -341,7 +353,7 @@ export class SafeGlobalClient {
       await this.runSenderPreflightCheck();
 
       // check if a similar transaction is already being proposed
-      if (this.isBeingProposed(proposal)) {
+      if (proposals.length === 1 && this.isBeingProposed(firstProposal)) {
         console.log(
           "[SafeGlobalClient] Similar transaction already proposed in wallet",
         );
@@ -349,14 +361,18 @@ export class SafeGlobalClient {
       }
 
       // Create Safe transaction data
-      const safeTransactionData: MetaTransactionData = {
-        to: proposal.to,
-        value: proposal.value || "0",
-        data: proposal.data,
-        operation: (proposal.operation || 0) as OperationType,
-      };
+      const safeTransactionData: MetaTransactionData[] = proposals.map(
+        (proposal) => ({
+          to: proposal.to,
+          value: proposal.value || "0",
+          data: proposal.data,
+          operation: (proposal.operation || 0) as OperationType,
+        }),
+      );
 
-      console.log("[SafeGlobalClient] Creating Safe transaction...");
+      console.log(
+        `[SafeGlobalClient] Creating Safe transaction with ${proposals.length} call(s)...`,
+      );
       nextNonce = await this.apiKit.getNextNonce(this.config.safeAddress);
       console.log(
         "[SafeGlobalClient] Creating Safe transaction with nonce:",
@@ -365,7 +381,7 @@ export class SafeGlobalClient {
 
       // Create the Safe transaction
       const safeTransaction = await this.protocolKit.createTransaction({
-        transactions: [safeTransactionData],
+        transactions: safeTransactionData,
         options: {
           nonce: Number(nextNonce),
         },
@@ -388,7 +404,7 @@ export class SafeGlobalClient {
       );
 
       console.log(
-        `[SafeGlobalClient] Proposing safe transaction ${proposal.to} ${proposal.value} ${proposal.data}`,
+        `[SafeGlobalClient] Proposing safe transaction batch with ${proposals.length} call(s)`,
       );
 
       // Propose transaction to the Safe Transaction Service
@@ -421,7 +437,7 @@ export class SafeGlobalClient {
       }
 
       const formattedError = this.formatProposalContextError(
-        proposal,
+        firstProposal,
         context,
         error,
       );

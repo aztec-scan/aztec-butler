@@ -582,6 +582,15 @@ program
     "--max-accepted-usd <usd>",
     "Maximum gas cost in USD to mark claimable (default: 0.1)",
   )
+  .option(
+    "--propose-to-safe",
+    "Propose claimable reward transactions to Safe",
+    false,
+  )
+  .option(
+    "--safe-address <address>",
+    "Safe address to propose to (defaults to SAFE_ADDRESS)",
+  )
   .option("--json", "Output JSON", false)
   .action(
     async (options: {
@@ -591,6 +600,8 @@ program
       extraGas?: bigint;
       maxAcceptedPercentage?: string;
       maxAcceptedUsd?: string;
+      proposeToSafe: boolean;
+      safeAddress?: string;
       json: boolean;
     }) => {
       const globalOpts = program.opts();
@@ -625,6 +636,8 @@ program
         ...(options.maxAcceptedUsd !== undefined
           ? { maxAcceptedUsd: options.maxAcceptedUsd }
           : {}),
+        proposeToSafe: options.proposeToSafe,
+        ...(options.safeAddress ? { safeAddress: options.safeAddress } : {}),
         json: options.json,
       });
     },

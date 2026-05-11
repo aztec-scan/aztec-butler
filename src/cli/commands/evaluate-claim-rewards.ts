@@ -1,5 +1,6 @@
 import { RollupAbi } from "@aztec/l1-artifacts";
 import {
+  encodeFunctionData,
   formatEther,
   formatUnits,
   getAddress,
@@ -9,6 +10,10 @@ import {
   type PublicClient,
 } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
+import {
+  SafeGlobalClient,
+  type MultisigProposal,
+} from "../../core/components/SafeGlobalClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import { loadCoinbaseCache } from "../../core/utils/scraperConfigOperations.js";
 
@@ -91,6 +96,8 @@ interface EvaluateClaimRewardsOptions {
   extraGas?: bigint;
   maxAcceptedPercentage?: string;
   maxAcceptedUsd?: string;
+  proposeToSafe?: boolean;
+  safeAddress?: string;
   json?: boolean;
 }
 
@@ -344,6 +351,101 @@ const getAztecSpotPrices = async (
   };
 };
 
+const buildClaimRewardsSafeTransactions = ({
+  rows,
+  splits,
+  rollup,
+  stakingAsset,
+  warehouse,
+  rewardsRecipient,
+}: {
+  rows: ClaimRewardsEvaluationRow[];
+  splits: Map<string, SplitData>;
+  rollup: Address;
+  stakingAsset: Address;
+  warehouse: Address;
+  rewardsRecipient: Address;
+}): MultisigProposal[] => {
+  const transactions: MultisigProposal[] = [];
+
+  for (const row of rows.filter((entry) => entry.worthClaiming)) {
+    const split = splits.get(row.coinbase.toLowerCase());
+    if (!split) {
+      throw new Error(
+        `Cannot propose claim for ${row.coinbase}: no SplitUpdated event found`,
+      );
+    }
+
+    transactions.push({
+      to: rollup,
+      value: "0",
+      data: encodeFunctionData({
+        abi: RollupAbi,
+        functionName: "claimSequencerRewards",
+        args: [row.coinbase],
+      }),
+    });
+    transactions.push({
+      to: row.coinbase,
+      value: "0",
+      data: encodeFunctionData({
+        abi: PULL_SPLIT_ABI,
+        functionName: "distribute",
+        args: [
+          {
+            recipients: split.recipients,
+            allocations: split.allocations,
+            totalAllocation: split.totalAllocation,
+            distributorFee: split.distributorFee,
+          },
+          stakingAsset,
+          rewardsRecipient,
+        ],
+      }),
+    });
+    transactions.push({
+      to: warehouse,
+      value: "0",
+      data: encodeFunctionData({
+        abi: SPLITS_WAREHOUSE_ABI,
+        functionName: "withdraw",
+        args: [rewardsRecipient, stakingAsset],
+      }),
+    });
+  }
+
+  return transactions;
+};
+
+const proposeClaimRewardsToSafe = async ({
+  config,
+  safeAddress,
+  transactions,
+}: {
+  config: ButlerConfig;
+  safeAddress: Address;
+  transactions: MultisigProposal[];
+}) => {
+  if (!config.MULTISIG_PROPOSER_PRIVATE_KEY) {
+    throw new Error(
+      "MULTISIG_PROPOSER_PRIVATE_KEY must be configured to propose to Safe.",
+    );
+  }
+  if (!config.SAFE_API_KEY) {
+    throw new Error("SAFE_API_KEY must be configured to propose to Safe.");
+  }
+
+  const safeClient = new SafeGlobalClient({
+    safeAddress,
+    chainId: config.ETHEREUM_CHAIN_ID,
+    rpcUrl: config.ETHEREUM_NODE_URL,
+    proposerPrivateKey: config.MULTISIG_PROPOSER_PRIVATE_KEY,
+    safeApiKey: config.SAFE_API_KEY,
+  });
+
+  await safeClient.proposeTransactions(transactions);
+};
+
 const command = async (
   ethClient: EthereumClient,
   config: ButlerConfig,
@@ -354,6 +456,10 @@ const command = async (
       console.error(`[evaluate-claim-rewards] ${message}`);
     }
   };
+
+  if (options.json && options.proposeToSafe) {
+    throw new Error("--json cannot be combined with --propose-to-safe");
+  }
 
   if (!config.AZTEC_STAKING_PROVIDER_REWARDS_RECIPIENT) {
     throw new Error(
@@ -376,6 +482,10 @@ const command = async (
   const warehouse = getAddress(
     options.warehouse ?? DEFAULT_SPLITS_WAREHOUSE_ADDRESS,
   );
+  const safeAddress = options.safeAddress ?? config.SAFE_ADDRESS;
+  if (options.proposeToSafe && !safeAddress) {
+    throw new Error("SAFE_ADDRESS or --safe-address must be set to propose to Safe.");
+  }
   logProgress("Fetching gas price from RPC...");
   const gasPrice = await client.getGasPrice();
   const extraGas = options.extraGas ?? 0n;
@@ -586,6 +696,9 @@ const command = async (
   console.log(`Rollup: ${rollup}`);
   console.log(`Staking asset: ${stakingAsset}`);
   console.log(`Splits warehouse: ${warehouse}`);
+  if (options.proposeToSafe && safeAddress) {
+    console.log(`Proposal Safe: ${getAddress(safeAddress)}`);
+  }
   console.log(`Gas price: ${gasPrice} wei (${Number(gasPrice) / 1e9} gwei)`);
   console.log(`AZTEC/ETH spot: ${formatEth(spotPrices.aztecEthWei)}`);
   console.log(`AZTEC/USDC spot: ${formatUsdc(spotPrices.aztecUsdcUnits)}`);
@@ -644,6 +757,34 @@ const command = async (
     `Total net value: ${formatEth(totals.netValueWei)} (${formatUsdc(totals.netValueUsdc)})`,
   );
   console.log(`Worth claiming: ${totals.worthClaiming}/${rows.length}`);
+
+  if (options.proposeToSafe) {
+    const transactions = buildClaimRewardsSafeTransactions({
+      rows,
+      splits,
+      rollup,
+      stakingAsset,
+      warehouse,
+      rewardsRecipient,
+    });
+
+    if (transactions.length === 0) {
+      console.log("\nNo claimable rewards, skipping Safe proposal.");
+      return;
+    }
+
+    console.log(
+      `\nProposing ${transactions.length} Safe call(s) for ${totals.worthClaiming} claimable coinbase(s)...`,
+    );
+    await proposeClaimRewardsToSafe({
+      config,
+      safeAddress: getAddress(safeAddress!),
+      transactions,
+    });
+    console.log(
+      `Safe proposal submitted: https://app.safe.global/transactions/queue?safe=eth:${getAddress(safeAddress!)}`,
+    );
+  }
 };
 
 export default command;
