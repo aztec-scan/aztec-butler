@@ -1,9 +1,11 @@
 import { RollupAbi } from "@aztec/l1-artifacts";
 import {
   formatEther,
+  formatUnits,
   getAddress,
   parseAbiItem,
   type Address,
+  type Hex,
   type PublicClient,
 } from "viem";
 import type { EthereumClient } from "../../core/components/EthereumClient.js";
@@ -13,8 +15,18 @@ import { loadCoinbaseCache } from "../../core/utils/scraperConfigOperations.js";
 const DEFAULT_SPLITS_WAREHOUSE_ADDRESS = getAddress(
   "0x8fb66f38cf86a3d5e8768f8f1754a24a6c661fb8",
 );
+const UNISWAP_V4_STATE_VIEW_ADDRESS = getAddress(
+  "0x7ffe42c4a5deea5b0fec41c94c136cf115597227",
+);
+const AZTEC_ETH_POOL_ID =
+  "0xce2899b16743cfd5a954d8122d5e07f410305b1aebee39fd73d9f3b9ebf10c2f";
+const AZTEC_USDC_POOL_ID =
+  "0xb9a92743434e0703a7801200aaa0d21432b15fbb6905a45a74e52f384caf6c23";
 const ZERO_ADDRESS = getAddress("0x0000000000000000000000000000000000000000");
 const LOG_RANGE_LIMIT = 50_000n;
+const Q192 = 1n << 192n;
+const AZTEC_DECIMALS_FACTOR = 10n ** 18n;
+const BASIS_POINTS_DENOMINATOR = 10_000n;
 
 const SPLIT_UPDATED_EVENT = parseAbiItem(
   "event SplitUpdated((address[] recipients,uint256[] allocations,uint256 totalAllocation,uint16 distributorFee) split)",
@@ -56,6 +68,21 @@ const SPLITS_WAREHOUSE_ABI = [
   },
 ] as const;
 
+const UNISWAP_V4_STATE_VIEW_ABI = [
+  {
+    type: "function",
+    name: "getSlot0",
+    inputs: [{ name: "poolId", type: "bytes32" }],
+    outputs: [
+      { name: "sqrtPriceX96", type: "uint160" },
+      { name: "tick", type: "int24" },
+      { name: "protocolFee", type: "uint24" },
+      { name: "lpFee", type: "uint24" },
+    ],
+    stateMutability: "view",
+  },
+] as const;
+
 interface EvaluateClaimRewardsOptions {
   network: string;
   rollup?: string;
@@ -83,7 +110,17 @@ type EstimateResult =
   | { gas: bigint; error?: never }
   | { gas: 0n; error: string };
 
-const formatWei = (value: bigint): string => `${formatEther(value)} ETH`;
+type AztecSpotPrices = {
+  aztecEthWei: bigint;
+  aztecUsdcUnits: bigint;
+  ethUsdcUnits: bigint;
+};
+
+const formatEth = (value: bigint): string => `${formatEther(value)} ETH`;
+const formatAztec = (value: bigint): string => `${formatEther(value)} AZTEC`;
+const formatUsdc = (value: bigint): string => `$${formatUnits(value, 6)}`;
+const formatPercentBps = (value: bigint): string =>
+  `${formatUnits(value, 2)}%`;
 
 const estimateOrZero = async (
   estimate: () => Promise<bigint>,
@@ -212,6 +249,46 @@ const getStakingAsset = async (
   });
 };
 
+const getAztecPriceInToken0 = async (
+  client: PublicClient,
+  poolId: Hex,
+): Promise<bigint> => {
+  const [sqrtPriceX96] = await client.readContract({
+    address: UNISWAP_V4_STATE_VIEW_ADDRESS,
+    abi: UNISWAP_V4_STATE_VIEW_ABI,
+    functionName: "getSlot0",
+    args: [poolId],
+  });
+  const sqrtPrice = BigInt(sqrtPriceX96);
+
+  if (sqrtPrice === 0n) {
+    throw new Error(`Uniswap V4 pool ${poolId} returned zero sqrtPriceX96`);
+  }
+
+  // Pools are token0 (ETH/USDC) < token1 (AZTEC). This returns token0 raw
+  // units for exactly 1 AZTEC (1e18 token1 raw units).
+  return (AZTEC_DECIMALS_FACTOR * Q192) / (sqrtPrice * sqrtPrice);
+};
+
+const getAztecSpotPrices = async (
+  client: PublicClient,
+): Promise<AztecSpotPrices> => {
+  const [aztecEthWei, aztecUsdcUnits] = await Promise.all([
+    getAztecPriceInToken0(client, AZTEC_ETH_POOL_ID),
+    getAztecPriceInToken0(client, AZTEC_USDC_POOL_ID),
+  ]);
+
+  if (aztecEthWei === 0n) {
+    throw new Error("AZTEC/ETH spot price rounded to zero");
+  }
+
+  return {
+    aztecEthWei,
+    aztecUsdcUnits,
+    ethUsdcUnits: (aztecUsdcUnits * 10n ** 18n) / aztecEthWei,
+  };
+};
+
 const command = async (
   ethClient: EthereumClient,
   config: ButlerConfig,
@@ -243,6 +320,7 @@ const command = async (
     : await client.getGasPrice();
   const extraGas = options.extraGas ?? 0n;
   const minNetWei = options.minNetWei ?? 0n;
+  const spotPrices = await getAztecSpotPrices(client);
   const coinbases = await getUniqueCoinbases(options.network);
   const splits = await getLatestSplits(
     client,
@@ -322,7 +400,17 @@ const command = async (
 
     const estimatedGas = claim.gas + distribute.gas + withdraw.gas + extraGas;
     const gasCostWei = estimatedGas * gasPrice;
-    const netWei = recipientRewards - gasCostWei;
+    const rewardValueWei =
+      (recipientRewards * spotPrices.aztecEthWei) / AZTEC_DECIMALS_FACTOR;
+    const rewardValueUsdc =
+      (recipientRewards * spotPrices.aztecUsdcUnits) / AZTEC_DECIMALS_FACTOR;
+    const gasCostUsdc = (gasCostWei * spotPrices.ethUsdcUnits) / 10n ** 18n;
+    const netValueWei = rewardValueWei - gasCostWei;
+    const netValueUsdc = rewardValueUsdc - gasCostUsdc;
+    const gasCostPercentBps =
+      rewardValueWei > 0n
+        ? (gasCostWei * BASIS_POINTS_DENOMINATOR) / rewardValueWei
+        : 0n;
     rows.push({
       coinbase,
       pendingRewards: pendingRewards.toString(),
@@ -336,20 +424,66 @@ const command = async (
       estimatedGas: estimatedGas.toString(),
       gasPriceWei: gasPrice.toString(),
       gasCostWei: gasCostWei.toString(),
-      netWei: netWei.toString(),
-      worthClaiming: netWei >= minNetWei,
+      gasCostUsdc: gasCostUsdc.toString(),
+      gasCostPercentBps: gasCostPercentBps.toString(),
+      rewardValueWei: rewardValueWei.toString(),
+      rewardValueUsdc: rewardValueUsdc.toString(),
+      netValueWei: netValueWei.toString(),
+      netValueUsdc: netValueUsdc.toString(),
+      worthClaiming: netValueWei >= minNetWei,
       errors: [claim.error, distribute.error, withdraw.error].filter(Boolean),
     });
   }
 
   rows.sort((a, b) =>
-    BigInt(b.netWei) < BigInt(a.netWei) ? -1 : 1,
+    BigInt(b.netValueWei) < BigInt(a.netValueWei) ? -1 : 1,
+  );
+
+  const totals = rows.reduce(
+    (sum, row) => ({
+      gasCostWei: sum.gasCostWei + BigInt(row.gasCostWei),
+      gasCostUsdc: sum.gasCostUsdc + BigInt(row.gasCostUsdc),
+      rewardValueWei: sum.rewardValueWei + BigInt(row.rewardValueWei),
+      rewardValueUsdc: sum.rewardValueUsdc + BigInt(row.rewardValueUsdc),
+      netValueWei: sum.netValueWei + BigInt(row.netValueWei),
+      netValueUsdc: sum.netValueUsdc + BigInt(row.netValueUsdc),
+      worthClaiming: sum.worthClaiming + (row.worthClaiming ? 1 : 0),
+    }),
+    {
+      gasCostWei: 0n,
+      gasCostUsdc: 0n,
+      rewardValueWei: 0n,
+      rewardValueUsdc: 0n,
+      netValueWei: 0n,
+      netValueUsdc: 0n,
+      worthClaiming: 0,
+    },
   );
 
   if (options.json) {
     console.log(
       JSON.stringify(
-        { rewardsRecipient, rollup, stakingAsset, warehouse, rows },
+        {
+          rewardsRecipient,
+          rollup,
+          stakingAsset,
+          warehouse,
+          spotPrices: {
+            aztecEthWei: spotPrices.aztecEthWei.toString(),
+            aztecUsdcUnits: spotPrices.aztecUsdcUnits.toString(),
+            ethUsdcUnits: spotPrices.ethUsdcUnits.toString(),
+          },
+          totals: {
+            gasCostWei: totals.gasCostWei.toString(),
+            gasCostUsdc: totals.gasCostUsdc.toString(),
+            rewardValueWei: totals.rewardValueWei.toString(),
+            rewardValueUsdc: totals.rewardValueUsdc.toString(),
+            netValueWei: totals.netValueWei.toString(),
+            netValueUsdc: totals.netValueUsdc.toString(),
+            worthClaiming: totals.worthClaiming,
+          },
+          rows,
+        },
         null,
         2,
       ),
@@ -363,17 +497,40 @@ const command = async (
   console.log(`Staking asset: ${stakingAsset}`);
   console.log(`Splits warehouse: ${warehouse}`);
   console.log(`Gas price: ${gasPrice} wei (${Number(gasPrice) / 1e9} gwei)`);
+  console.log(`AZTEC/ETH spot: ${formatEth(spotPrices.aztecEthWei)}`);
+  console.log(`AZTEC/USDC spot: ${formatUsdc(spotPrices.aztecUsdcUnits)}`);
+  console.log(`ETH/USDC implied: ${formatUsdc(spotPrices.ethUsdcUnits)}`);
   if (extraGas > 0n) {
     console.log(`Extra gas buffer: ${extraGas}`);
   }
+  console.log(
+    `Total gas cost: ${formatEth(totals.gasCostWei)} (${formatUsdc(totals.gasCostUsdc)})`,
+  );
+  console.log(
+    `Total reward value: ${formatEth(totals.rewardValueWei)} (${formatUsdc(totals.rewardValueUsdc)})`,
+  );
+  console.log(
+    `Total net value: ${formatEth(totals.netValueWei)} (${formatUsdc(totals.netValueUsdc)})`,
+  );
+  console.log(`Worth claiming: ${totals.worthClaiming}/${rows.length}`);
   console.log("");
 
   for (const row of rows) {
     console.log(`${row.worthClaiming ? "CLAIM" : "SKIP"} ${row.coinbase}`);
-    console.log(`  pending rewards: ${formatWei(BigInt(row.pendingRewards))}`);
-    console.log(`  recipient share: ${formatWei(BigInt(row.recipientRewards))}`);
-    console.log(`  gas: ${row.estimatedGas} (${formatWei(BigInt(row.gasCostWei))})`);
-    console.log(`  net: ${formatWei(BigInt(row.netWei))}`);
+    console.log(`  pending rewards: ${formatAztec(BigInt(row.pendingRewards))}`);
+    console.log(`  recipient share: ${formatAztec(BigInt(row.recipientRewards))}`);
+    console.log(
+      `  reward value: ${formatEth(BigInt(row.rewardValueWei))} (${formatUsdc(BigInt(row.rewardValueUsdc))})`,
+    );
+    console.log(
+      `  gas: ${row.estimatedGas} (${formatEth(BigInt(row.gasCostWei))}, ${formatUsdc(BigInt(row.gasCostUsdc))})`,
+    );
+    console.log(
+      `  gas/rewards: ${formatPercentBps(BigInt(row.gasCostPercentBps))}`,
+    );
+    console.log(
+      `  net value: ${formatEth(BigInt(row.netValueWei))} (${formatUsdc(BigInt(row.netValueUsdc))})`,
+    );
     if (row.errors.length > 0) {
       console.log(`  estimate warnings: ${row.errors.length}`);
     }
