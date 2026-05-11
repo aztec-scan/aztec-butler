@@ -172,8 +172,7 @@ function buildConfig(network: string) {
     SAFE_ADDRESS: parseConfigField(
       "SAFE_ADDRESS",
       z.string().startsWith("0x").length(42).optional(),
-      process.env.SAFE_ADDRESS ||
-        process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+      process.env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
     ),
     SAFE_PROPOSALS_ENABLED: parseConfigField(
       "SAFE_PROPOSALS_ENABLED",

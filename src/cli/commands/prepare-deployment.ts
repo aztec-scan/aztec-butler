@@ -336,7 +336,7 @@ const command = async (
   ): KeystoreValidator[] => {
     return validators.map((v, i) => ({
       ...v,
-      publisher: publishers[i % publishers.length]!,
+      publisher: [publishers[i % publishers.length]!],
     }));
   };
 
@@ -351,11 +351,10 @@ const command = async (
       continue;
     }
 
-    const outputPath = await generateVersionedFilename(
-      options.network,
-      serverId,
-      outputDir,
-    );
+    const outputPath =
+      options.outputPath && serverIds.length === 1
+        ? options.outputPath
+        : await generateVersionedFilename(options.network, serverId, outputDir);
 
     const validatorsWithPublishers = assignPublishers(
       mergedValidators,
