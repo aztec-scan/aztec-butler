@@ -64,6 +64,7 @@ export type SplitAllocationData = {
   recipients: string[];
   allocations: bigint[];
   totalAllocation: bigint;
+  distributorFee: number;
 };
 
 export type RollupTimelineEntry = {
@@ -1342,6 +1343,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     const addressesOffsetBytes = words[tupleBaseIndex] ?? 0n;
     const allocationsOffsetBytes = words[tupleBaseIndex + 1] ?? 0n;
     const totalAllocation = words[tupleBaseIndex + 2] ?? 0n;
+    const distributorFee = Number(words[tupleBaseIndex + 3] ?? 0n);
 
     const addressesIndex = tupleBaseIndex + Number(addressesOffsetBytes / 32n);
     const allocationsIndex =
@@ -1381,6 +1383,7 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
       recipients,
       allocations,
       totalAllocation,
+      distributorFee,
     };
   }
 

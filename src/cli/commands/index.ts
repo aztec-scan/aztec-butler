@@ -12,3 +12,4 @@ export { default as newPublisherKeys } from "./new-publisher-keys.js";
 export { default as prepareDeployment } from "./prepare-deployment.js";
 export { default as getQueueStats } from "./get-queue-stats.js";
 export { default as checkHosts } from "./check-hosts.js";
+export { default as evaluateClaimRewards } from "./evaluate-claim-rewards.js";

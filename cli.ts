@@ -97,6 +97,10 @@ function parseBigInt(value: string): bigint {
   return BigInt(value);
 }
 
+function parseOptionalBigInt(value: string): bigint {
+  return BigInt(value);
+}
+
 /**
  * Helper to collect multiple values for repeatable options
  */
@@ -555,6 +559,70 @@ program
       const globalOpts = program.opts();
       const config = await initConfig({ network: globalOpts.network });
       await command.checkHosts(config, options);
+    },
+  );
+
+// Command: evaluate-claim-rewards
+program
+  .command("evaluate-claim-rewards")
+  .description("Evaluate whether coinbase rewards are worth claiming")
+  .option("--rollup <address>", "Rollup contract address")
+  .option("--staking-asset <address>", "Staking rewards token address")
+  .option("--warehouse <address>", "SplitsWarehouse address")
+  .option("--gas-price-gwei <gwei>", "Override gas price in gwei")
+  .option(
+    "--extra-gas <gas>",
+    "Extra gas units to add per coinbase",
+    parseOptionalBigInt,
+  )
+  .option(
+    "--min-net-wei <wei>",
+    "Minimum net wei to mark claimable",
+    parseOptionalBigInt,
+  )
+  .option("--json", "Output JSON", false)
+  .action(
+    async (options: {
+      rollup?: string;
+      stakingAsset?: string;
+      warehouse?: string;
+      gasPriceGwei?: string;
+      extraGas?: bigint;
+      minNetWei?: bigint;
+      json: boolean;
+    }) => {
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
+      const ethClient = options.rollup
+        ? new EthereumClient({
+            rpcUrl: config.ETHEREUM_NODE_URL,
+            ...(config.ETHEREUM_ARCHIVE_NODE_URL
+              ? { archiveRpcUrl: config.ETHEREUM_ARCHIVE_NODE_URL }
+              : {}),
+            chainId: config.ETHEREUM_CHAIN_ID,
+            rollupAddress: options.rollup as `0x${string}`,
+            ...(config.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS
+              ? {
+                  ollaStakingRegistryAddress:
+                    config.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS as `0x${string}`,
+                }
+              : {}),
+          })
+        : await initEthClient(config);
+      await command.evaluateClaimRewards(ethClient, config, {
+        network: config.NETWORK,
+        ...(options.rollup ? { rollup: options.rollup } : {}),
+        ...(options.stakingAsset ? { stakingAsset: options.stakingAsset } : {}),
+        ...(options.warehouse ? { warehouse: options.warehouse } : {}),
+        ...(options.gasPriceGwei ? { gasPriceGwei: options.gasPriceGwei } : {}),
+        ...(options.extraGas !== undefined
+          ? { extraGas: options.extraGas }
+          : {}),
+        ...(options.minNetWei !== undefined
+          ? { minNetWei: options.minNetWei }
+          : {}),
+        json: options.json,
+      });
     },
   );
 
