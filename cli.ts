@@ -569,16 +569,18 @@ program
   .option("--rollup <address>", "Rollup contract address")
   .option("--staking-asset <address>", "Staking rewards token address")
   .option("--warehouse <address>", "SplitsWarehouse address")
-  .option("--gas-price-gwei <gwei>", "Override gas price in gwei")
   .option(
     "--extra-gas <gas>",
     "Extra gas units to add per coinbase",
     parseOptionalBigInt,
   )
   .option(
-    "--min-net-wei <wei>",
-    "Minimum net wei to mark claimable",
-    parseOptionalBigInt,
+    "--max-accepted-percentage <percentage>",
+    "Maximum gas cost as percentage of rewards to mark claimable (default: 3)",
+  )
+  .option(
+    "--max-accepted-usd <usd>",
+    "Maximum gas cost in USD to mark claimable (default: 0.1)",
   )
   .option("--json", "Output JSON", false)
   .action(
@@ -586,9 +588,9 @@ program
       rollup?: string;
       stakingAsset?: string;
       warehouse?: string;
-      gasPriceGwei?: string;
       extraGas?: bigint;
-      minNetWei?: bigint;
+      maxAcceptedPercentage?: string;
+      maxAcceptedUsd?: string;
       json: boolean;
     }) => {
       const globalOpts = program.opts();
@@ -614,12 +616,14 @@ program
         ...(options.rollup ? { rollup: options.rollup } : {}),
         ...(options.stakingAsset ? { stakingAsset: options.stakingAsset } : {}),
         ...(options.warehouse ? { warehouse: options.warehouse } : {}),
-        ...(options.gasPriceGwei ? { gasPriceGwei: options.gasPriceGwei } : {}),
         ...(options.extraGas !== undefined
           ? { extraGas: options.extraGas }
           : {}),
-        ...(options.minNetWei !== undefined
-          ? { minNetWei: options.minNetWei }
+        ...(options.maxAcceptedPercentage !== undefined
+          ? { maxAcceptedPercentage: options.maxAcceptedPercentage }
+          : {}),
+        ...(options.maxAcceptedUsd !== undefined
+          ? { maxAcceptedUsd: options.maxAcceptedUsd }
           : {}),
         json: options.json,
       });

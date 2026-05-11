@@ -88,9 +88,9 @@ interface EvaluateClaimRewardsOptions {
   rollup?: string;
   stakingAsset?: string;
   warehouse?: string;
-  gasPriceGwei?: string;
   extraGas?: bigint;
-  minNetWei?: bigint;
+  maxAcceptedPercentage?: string;
+  maxAcceptedUsd?: string;
   json?: boolean;
 }
 
@@ -116,11 +116,57 @@ type AztecSpotPrices = {
   ethUsdcUnits: bigint;
 };
 
+type ClaimRewardsEvaluationRow = {
+  coinbase: Address;
+  pendingRewards: string;
+  recipientAllocation: string;
+  totalAllocation: string;
+  recipientRewards: string;
+  claimGas: string;
+  distributeGas: string;
+  withdrawGas: string;
+  extraGas: string;
+  estimatedGas: string;
+  gasPriceWei: string;
+  gasCostWei: string;
+  gasCostUsdc: string;
+  gasCostPercentBps: string;
+  rewardValueWei: string;
+  rewardValueUsdc: string;
+  netValueWei: string;
+  netValueUsdc: string;
+  acceptedByPercentage: boolean;
+  acceptedByUsd: boolean;
+  worthClaiming: boolean;
+  errors: string[];
+};
+
 const formatEth = (value: bigint): string => `${formatEther(value)} ETH`;
 const formatAztec = (value: bigint): string => `${formatEther(value)} AZTEC`;
 const formatUsdc = (value: bigint): string => `$${formatUnits(value, 6)}`;
 const formatPercentBps = (value: bigint): string =>
   `${formatUnits(value, 2)}%`;
+const isString = (value: unknown): value is string => typeof value === "string";
+
+const parseDecimalUnits = (
+  value: string,
+  decimals: number,
+  label: string,
+): bigint => {
+  if (!/^\d+(\.\d+)?$/.test(value)) {
+    throw new Error(`${label} must be a non-negative decimal number`);
+  }
+
+  const parts = value.split(".");
+  const whole = parts[0] ?? "0";
+  const fraction = parts[1] ?? "";
+  if (fraction.length > decimals) {
+    throw new Error(`${label} supports at most ${decimals} decimal places`);
+  }
+
+  return BigInt(whole) * 10n ** BigInt(decimals) +
+    BigInt(fraction.padEnd(decimals, "0") || "0");
+};
 
 const estimateOrZero = async (
   estimate: () => Promise<bigint>,
@@ -163,11 +209,13 @@ const getLatestSplits = async (
   client: PublicClient,
   coinbases: CoinbaseEntry[],
   configuredFromBlock?: bigint,
+  onProgress?: (message: string) => void,
 ): Promise<Map<string, SplitData>> => {
   if (coinbases.length === 0) {
     return new Map();
   }
 
+  onProgress?.("Fetching latest block for SplitUpdated log scan...");
   const latestBlock = await client.getBlockNumber();
   const minCoinbaseBlock = coinbases.reduce(
     (min, entry) => entry.firstBlock < min ? entry.firstBlock : min,
@@ -178,13 +226,18 @@ const getLatestSplits = async (
     : configuredFromBlock ?? minCoinbaseBlock;
   const addresses = coinbases.map((entry) => entry.coinbase);
   const splits = new Map<string, SplitData>();
+  const totalRanges = (latestBlock - fromBlock) / LOG_RANGE_LIMIT + 1n;
 
   let cursor = fromBlock;
+  let rangeIndex = 1n;
   while (cursor <= latestBlock) {
     const toBlock =
       cursor + LOG_RANGE_LIMIT - 1n > latestBlock
         ? latestBlock
         : cursor + LOG_RANGE_LIMIT - 1n;
+    onProgress?.(
+      `Scanning SplitUpdated logs ${rangeIndex}/${totalRanges}: blocks ${cursor}-${toBlock}`,
+    );
     const logs = await client.getLogs({
       address: addresses,
       event: SPLIT_UPDATED_EVENT,
@@ -206,8 +259,10 @@ const getLatestSplits = async (
     }
 
     cursor = toBlock + 1n;
+    rangeIndex += 1n;
   }
 
+  onProgress?.(`Found latest split data for ${splits.size}/${coinbases.length} coinbases.`);
   return splits;
 };
 
@@ -294,6 +349,12 @@ const command = async (
   config: ButlerConfig,
   options: EvaluateClaimRewardsOptions,
 ) => {
+  const logProgress = (message: string) => {
+    if (!options.json) {
+      console.error(`[evaluate-claim-rewards] ${message}`);
+    }
+  };
+
   if (!config.AZTEC_STAKING_PROVIDER_REWARDS_RECIPIENT) {
     throw new Error(
       "AZTEC_STAKING_PROVIDER_REWARDS_RECIPIENT must be configured.",
@@ -315,21 +376,36 @@ const command = async (
   const warehouse = getAddress(
     options.warehouse ?? DEFAULT_SPLITS_WAREHOUSE_ADDRESS,
   );
-  const gasPrice = options.gasPriceGwei
-    ? BigInt(Math.round(Number(options.gasPriceGwei) * 1_000_000_000))
-    : await client.getGasPrice();
+  logProgress("Fetching gas price from RPC...");
+  const gasPrice = await client.getGasPrice();
   const extraGas = options.extraGas ?? 0n;
-  const minNetWei = options.minNetWei ?? 0n;
+  const maxAcceptedPercentageBps = parseDecimalUnits(
+    options.maxAcceptedPercentage ?? "3",
+    2,
+    "max-accepted-percentage",
+  );
+  const maxAcceptedUsdUnits = parseDecimalUnits(
+    options.maxAcceptedUsd ?? "0.1",
+    6,
+    "max-accepted-usd",
+  );
+  logProgress("Fetching AZTEC spot prices from Uniswap V4...");
   const spotPrices = await getAztecSpotPrices(client);
+  logProgress("Loading cached coinbases...");
   const coinbases = await getUniqueCoinbases(options.network);
+  logProgress(`Loaded ${coinbases.length} unique cached coinbases.`);
   const splits = await getLatestSplits(
     client,
     coinbases,
     config.STAKING_REWARDS_SPLIT_FROM_BLOCK,
+    logProgress,
   );
 
-  const rows = [];
-  for (const { coinbase } of coinbases) {
+  const rows: ClaimRewardsEvaluationRow[] = [];
+  for (const [index, { coinbase }] of coinbases.entries()) {
+    logProgress(
+      `Evaluating coinbase ${index + 1}/${coinbases.length}: ${coinbase}`,
+    );
     const pendingRewards = await client.readContract({
       address: rollup,
       abi: RollupAbi,
@@ -411,6 +487,10 @@ const command = async (
       rewardValueWei > 0n
         ? (gasCostWei * BASIS_POINTS_DENOMINATOR) / rewardValueWei
         : 0n;
+    const acceptedByPercentage =
+      rewardValueWei > 0n && gasCostPercentBps <= maxAcceptedPercentageBps;
+    const acceptedByUsd =
+      rewardValueWei > 0n && gasCostUsdc <= maxAcceptedUsdUnits;
     rows.push({
       coinbase,
       pendingRewards: pendingRewards.toString(),
@@ -430,17 +510,21 @@ const command = async (
       rewardValueUsdc: rewardValueUsdc.toString(),
       netValueWei: netValueWei.toString(),
       netValueUsdc: netValueUsdc.toString(),
-      worthClaiming: netValueWei >= minNetWei,
-      errors: [claim.error, distribute.error, withdraw.error].filter(Boolean),
+      acceptedByPercentage,
+      acceptedByUsd,
+      worthClaiming: acceptedByPercentage || acceptedByUsd,
+      errors: [claim.error, distribute.error, withdraw.error].filter(isString),
     });
   }
 
+  logProgress("Sorting evaluation results...");
   rows.sort((a, b) =>
     BigInt(b.netValueWei) < BigInt(a.netValueWei) ? -1 : 1,
   );
 
   const totals = rows.reduce(
     (sum, row) => ({
+      recipientRewards: sum.recipientRewards + BigInt(row.recipientRewards),
       gasCostWei: sum.gasCostWei + BigInt(row.gasCostWei),
       gasCostUsdc: sum.gasCostUsdc + BigInt(row.gasCostUsdc),
       rewardValueWei: sum.rewardValueWei + BigInt(row.rewardValueWei),
@@ -450,6 +534,7 @@ const command = async (
       worthClaiming: sum.worthClaiming + (row.worthClaiming ? 1 : 0),
     }),
     {
+      recipientRewards: 0n,
       gasCostWei: 0n,
       gasCostUsdc: 0n,
       rewardValueWei: 0n,
@@ -473,7 +558,12 @@ const command = async (
             aztecUsdcUnits: spotPrices.aztecUsdcUnits.toString(),
             ethUsdcUnits: spotPrices.ethUsdcUnits.toString(),
           },
+          thresholds: {
+            maxAcceptedPercentageBps: maxAcceptedPercentageBps.toString(),
+            maxAcceptedUsdUnits: maxAcceptedUsdUnits.toString(),
+          },
           totals: {
+            recipientRewards: totals.recipientRewards.toString(),
             gasCostWei: totals.gasCostWei.toString(),
             gasCostUsdc: totals.gasCostUsdc.toString(),
             rewardValueWei: totals.rewardValueWei.toString(),
@@ -500,22 +590,15 @@ const command = async (
   console.log(`AZTEC/ETH spot: ${formatEth(spotPrices.aztecEthWei)}`);
   console.log(`AZTEC/USDC spot: ${formatUsdc(spotPrices.aztecUsdcUnits)}`);
   console.log(`ETH/USDC implied: ${formatUsdc(spotPrices.ethUsdcUnits)}`);
+  console.log(
+    `Claim thresholds: gas/rewards <= ${formatPercentBps(maxAcceptedPercentageBps)} OR gas <= ${formatUsdc(maxAcceptedUsdUnits)}`,
+  );
   if (extraGas > 0n) {
     console.log(`Extra gas buffer: ${extraGas}`);
   }
-  console.log(
-    `Total gas cost: ${formatEth(totals.gasCostWei)} (${formatUsdc(totals.gasCostUsdc)})`,
-  );
-  console.log(
-    `Total reward value: ${formatEth(totals.rewardValueWei)} (${formatUsdc(totals.rewardValueUsdc)})`,
-  );
-  console.log(
-    `Total net value: ${formatEth(totals.netValueWei)} (${formatUsdc(totals.netValueUsdc)})`,
-  );
-  console.log(`Worth claiming: ${totals.worthClaiming}/${rows.length}`);
   console.log("");
 
-  for (const row of rows) {
+  const printRow = (row: ClaimRewardsEvaluationRow) => {
     console.log(`${row.worthClaiming ? "CLAIM" : "SKIP"} ${row.coinbase}`);
     console.log(`  pending rewards: ${formatAztec(BigInt(row.pendingRewards))}`);
     console.log(`  recipient share: ${formatAztec(BigInt(row.recipientRewards))}`);
@@ -529,12 +612,38 @@ const command = async (
       `  gas/rewards: ${formatPercentBps(BigInt(row.gasCostPercentBps))}`,
     );
     console.log(
+      `  accepted by: ${row.acceptedByPercentage ? "percentage" : "-"}, ${row.acceptedByUsd ? "usd" : "-"}`,
+    );
+    console.log(
       `  net value: ${formatEth(BigInt(row.netValueWei))} (${formatUsdc(BigInt(row.netValueUsdc))})`,
     );
     if (row.errors.length > 0) {
       console.log(`  estimate warnings: ${row.errors.length}`);
     }
+  };
+
+  console.log("=== Skipped Coinbases ===\n");
+  for (const row of rows.filter((row) => !row.worthClaiming)) {
+    printRow(row);
   }
+
+  console.log("\n=== Claimable Coinbases ===\n");
+  for (const row of rows.filter((row) => row.worthClaiming)) {
+    printRow(row);
+  }
+
+  console.log("\n=== Summary ===\n");
+  console.log(`Total AZTEC received: ${formatAztec(totals.recipientRewards)}`);
+  console.log(
+    `Total gas cost: ${formatEth(totals.gasCostWei)} (${formatUsdc(totals.gasCostUsdc)})`,
+  );
+  console.log(
+    `Total reward value: ${formatEth(totals.rewardValueWei)} (${formatUsdc(totals.rewardValueUsdc)})`,
+  );
+  console.log(
+    `Total net value: ${formatEth(totals.netValueWei)} (${formatUsdc(totals.netValueUsdc)})`,
+  );
+  console.log(`Worth claiming: ${totals.worthClaiming}/${rows.length}`);
 };
 
 export default command;
