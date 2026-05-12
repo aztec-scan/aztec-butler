@@ -517,7 +517,7 @@ program
   .requiredOption("--keys-file <path>", "Path to keys file to update")
   .option(
     "--increment-version",
-    "Create a new version instead of overwriting",
+    "Deprecated for nested registered-key files; updates the canonical file in place",
     false,
   )
   .action(async (options: { keysFile: string; incrementVersion?: boolean }) => {

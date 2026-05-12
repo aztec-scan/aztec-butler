@@ -4,7 +4,6 @@ import type { EthereumClient } from "../../core/components/EthereumClient.js";
 import type { ButlerConfig } from "../../core/config/index.js";
 import {
   loadKeysFile,
-  generateVersionedFilename,
   getDataDir,
 } from "../../core/utils/keysFileOperations.js";
 import { loadCoinbaseCache } from "../../core/utils/scraperConfigOperations.js";
@@ -17,6 +16,7 @@ interface FillCoinbasesOptions {
 }
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const NATIVE_REGISTERED_KEYS_FILE = "native-registered-keys.json";
 
 const command = async (
   _ethClient: EthereumClient,
@@ -32,6 +32,13 @@ const command = async (
   const keysFilePath = path.isAbsolute(options.keysFile)
     ? options.keysFile
     : path.join(getDataDir(), options.keysFile);
+
+  if (path.basename(keysFilePath) !== NATIVE_REGISTERED_KEYS_FILE) {
+    throw new Error(
+      `fill-coinbases only supports ${NATIVE_REGISTERED_KEYS_FILE}. ` +
+        `Non-native registries such as Olla use a single configured coinbase and should not be filled from the native coinbase cache.`,
+    );
+  }
 
   let keystore: Keystore;
   try {
@@ -129,30 +136,17 @@ const command = async (
   }
 
   // 6. Determine output path
-  let outputPath: string;
   if (options.incrementVersion) {
-    // Extract server ID from filename and generate new version
-    const filename = path.basename(keysFilePath);
-    const match = filename.match(/^([^-]+)-keys-([^-]+)-v\d+\.json$/);
-    if (!match) {
-      throw new Error(
-        `Cannot increment version: Keys file doesn't match naming pattern [network]-keys-[serverId]-v[N].json`,
-      );
-    }
-    const network = match[1];
-    const serverId = match[2];
-    const dir = path.dirname(keysFilePath);
-
-    outputPath = await generateVersionedFilename(network!, serverId!, dir);
-    console.log(`\nWill create new version: ${path.basename(outputPath)}`);
-  } else {
-    // Overwrite existing file
-    outputPath = keysFilePath;
-    console.log(`\nWill update existing file: ${path.basename(outputPath)}`);
+    console.warn(
+      `\n⚠️  --increment-version is ignored for nested registered-key files. ` +
+        `Updating ${NATIVE_REGISTERED_KEYS_FILE} in place so server discovery keeps loading the canonical file.`,
+    );
   }
+  const outputPath = keysFilePath;
+  console.log(`\nWill update existing file: ${path.basename(outputPath)}`);
 
   // 7. Write updated keys file
-  if (addedCount > 0 || options.incrementVersion) {
+  if (addedCount > 0) {
     await fs.writeFile(outputPath, JSON.stringify(keystore, null, 2) + "\n");
     console.log(`✅ Wrote updated keys file: ${outputPath}`);
   } else {
