@@ -14,6 +14,7 @@ interface ProcessPrivateKeysOptions {
   privateKeyFile: string;
   outputFile?: string;
   registry: StakingRegistryTarget;
+  uploadPublisherKeys?: boolean;
 }
 
 interface PrivateKeyValidator {
@@ -472,19 +473,6 @@ const command = async (
         throw new Error(`Validator ${i}: missing feeRecipient`);
       }
 
-      // Validate publisher keys (string or array)
-      if (validator.publisher === undefined || validator.publisher === null) {
-        throw new Error(`Validator ${i}: missing publisher private key(s)`);
-      }
-
-      const validatorPublisherKeys = Array.isArray(validator.publisher)
-        ? validator.publisher
-        : [validator.publisher];
-
-      if (validatorPublisherKeys.length === 0) {
-        throw new Error(`Validator ${i}: missing publisher private key(s)`);
-      }
-
       // Derive ETH address from private key
       let ethAddress: string;
       try {
@@ -597,42 +585,56 @@ const command = async (
     );
   });
 
-  console.log("\nCollecting publisher private keys for GCP upload...");
-  let totalPublisherKeys = 0;
-  privateKeysData.validators.forEach((validator, validatorIndex) => {
-    const validatorPublisherKeys = Array.isArray(validator.publisher)
-      ? validator.publisher
-      : [validator.publisher];
-
-    validatorPublisherKeys.forEach((publisherKey, publisherIndex) => {
-      let publisherAddress: string;
-      try {
-        const account = privateKeyToAccount(publisherKey as HexString);
-        publisherAddress = getAddress(account.address);
-      } catch (error) {
+  if (options.uploadPublisherKeys) {
+    console.log("\nCollecting publisher private keys for GCP upload...");
+    let totalPublisherKeys = 0;
+    privateKeysData.validators.forEach((validator, validatorIndex) => {
+      if (validator.publisher === undefined || validator.publisher === null) {
         throw new Error(
-          `Validator ${validatorIndex}: malformed publisher private key at index ${publisherIndex} - ${error instanceof Error ? error.message : String(error)}`,
+          `Validator ${validatorIndex}: missing publisher private key(s)`,
         );
       }
 
-      secretEntries.push({
-        role: "pub",
-        keyType: "eth",
-        key: publisherKey,
-        validatorIndex,
-        publicKey: publisherAddress,
+      const validatorPublisherKeys = Array.isArray(validator.publisher)
+        ? validator.publisher
+        : [validator.publisher];
+
+      if (validatorPublisherKeys.length === 0) {
+        throw new Error(
+          `Validator ${validatorIndex}: missing publisher private key(s)`,
+        );
+      }
+
+      validatorPublisherKeys.forEach((publisherKey, publisherIndex) => {
+        let publisherAddress: string;
+        try {
+          const account = privateKeyToAccount(publisherKey as HexString);
+          publisherAddress = getAddress(account.address);
+        } catch (error) {
+          throw new Error(
+            `Validator ${validatorIndex}: malformed publisher private key at index ${publisherIndex} - ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+
+        secretEntries.push({
+          role: "pub",
+          keyType: "eth",
+          key: publisherKey,
+          validatorIndex,
+          publicKey: publisherAddress,
+        });
+        totalPublisherKeys += 1;
       });
-      totalPublisherKeys += 1;
+
+      console.log(
+        `  ✅ Validator ${validatorIndex}: queued ${validatorPublisherKeys.length} publisher key(s)`,
+      );
     });
 
     console.log(
-      `  ✅ Validator ${validatorIndex}: queued ${validatorPublisherKeys.length} publisher key(s)`,
+      `Queued ${totalPublisherKeys} publisher private key(s) for upload`,
     );
-  });
-
-  console.log(
-    `Queued ${totalPublisherKeys} publisher private key(s) for upload`,
-  );
+  }
 
   await addSecretVersions(secretContext, secretEntries);
   console.log("✅ Stored private keys in GCP Secret Manager");
@@ -728,9 +730,17 @@ const command = async (
   console.log(
     `Public keys generated with: attester.eth, attester.bls, publisher (zero address), feeRecipient`,
   );
-  console.log(`Publisher private keys were stored to GCP Secret Manager`);
+  if (options.uploadPublisherKeys) {
+    console.log(`Publisher private keys were stored to GCP Secret Manager`);
+  }
   console.log(`Excluded from output: coinbase`);
   console.log("\n✅ Process complete!");
+
+  if (!options.uploadPublisherKeys) {
+    console.warn(
+      "⚠️  Publisher private keys were not uploaded. To upload generated publisher keys to GCP Secret Manager, rerun with --upload-publisher-keys.",
+    );
+  }
 };
 
 export default command;

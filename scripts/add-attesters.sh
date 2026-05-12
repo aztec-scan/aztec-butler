@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-KEYS_FILE=""
+TARGET_FILES=()
 COUNT=""
 REGISTRY=""
 NETWORK=""
@@ -16,13 +16,16 @@ SAFE_PROPOSAL=true
 usage() {
   cat <<'EOF'
 Usage: ./scripts/add-attesters.sh \
-  --keys-file <path> \
   --count <number> \
   --registry <native|olla> \
   --network <mainnet|testnet> \
   --state-folder <path> \
   [--google-secrets] \
-  [--no-safe-proposal]
+  [--no-safe-proposal] \
+  <keys-file> [<keys-file> ...]
+
+Backward-compatible form: --keys-file <path> may be used one or more times
+instead of positional key files.
 
 This script is resumable. Without --google-secrets it stops after generating
 new private keys so you can review before uploading secrets.
@@ -32,7 +35,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keys-file)
-      KEYS_FILE="$2"
+      TARGET_FILES+=("$2")
       shift 2
       ;;
     --count)
@@ -64,15 +67,14 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "Error: unknown option: $1" >&2
-      usage >&2
-      exit 1
+      TARGET_FILES+=("$1")
+      shift
       ;;
   esac
 done
 
-if [[ -z "$KEYS_FILE" || -z "$COUNT" || -z "$REGISTRY" || -z "$NETWORK" || -z "$STATE_FOLDER" ]]; then
-  echo "Error: --keys-file, --count, --registry, --network, and --state-folder are required" >&2
+if [[ ${#TARGET_FILES[@]} -eq 0 || -z "$COUNT" || -z "$REGISTRY" || -z "$NETWORK" || -z "$STATE_FOLDER" ]]; then
+  echo "Error: at least one keys file plus --count, --registry, --network, and --state-folder are required" >&2
   usage >&2
   exit 1
 fi
@@ -92,71 +94,104 @@ if [[ "$NETWORK" != "mainnet" && "$NETWORK" != "testnet" ]]; then
   exit 1
 fi
 
-KEYS_FILE_ABS="$(realpath "$KEYS_FILE")"
 STATE_FOLDER_ABS="$(mkdir -p "$STATE_FOLDER" && realpath "$STATE_FOLDER")"
 
-if [[ ! -f "$KEYS_FILE_ABS" ]]; then
-  echo "Error: keys file not found: $KEYS_FILE" >&2
-  exit 1
-fi
+TARGET_FILES_ABS=()
+for target_file in "${TARGET_FILES[@]}"; do
+  if [[ ! -f "$target_file" ]]; then
+    echo "Error: keys file not found: $target_file" >&2
+    exit 1
+  fi
+  target_file_abs="$(realpath "$target_file")"
+  TARGET_FILES_ABS+=("$target_file_abs")
+done
 
-readarray -t METADATA < <(node - "$KEYS_FILE_ABS" "$NETWORK" "$COUNT" <<'NODE'
-const path = require("node:path");
-const file = process.argv[2];
-const network = process.argv[3];
-const count = process.argv[4];
-const base = path.basename(file);
-const match = base.match(/^(.+)-keys-(.+)-v(\d+)\.json$/);
-if (!match) {
-  console.error(`Invalid keys filename format: ${base}. Expected <network>-keys-<server>-v<N>.json`);
-  process.exit(1);
-}
-const fileNetwork = match[1];
-const serverId = match[2];
-if (fileNetwork !== network) {
-  console.error(`Keys file network '${fileNetwork}' does not match --network '${network}'`);
-  process.exit(1);
-}
-const stem = `${network}-${serverId}-${count}`.replace(/[^a-zA-Z0-9._-]/g, "-");
-console.log(serverId);
-console.log(stem);
-NODE
-)
-
-SERVER_ID="${METADATA[0]}"
-RUN_STEM="${METADATA[1]}"
-RUN_DIR="$STATE_FOLDER_ABS/add-attesters-$REGISTRY-$RUN_STEM"
+RUN_DIR="$STATE_FOLDER_ABS/$NETWORK/$REGISTRY"
+BACKUP_DIR="$RUN_DIR/backups"
+PREPARED_DIR="$RUN_DIR/prepared"
+PUBLISHERS_DIR="$RUN_DIR/publishers"
+REPLACED_DIR="$RUN_DIR/replaced"
 
 NEW_PRIVATE_KEYS="$RUN_DIR/new-private-keys.json"
 PUBLIC_KEYS="$RUN_DIR/public-new-private-keys.json"
 AVAILABLE_PUBLISHERS="$RUN_DIR/available_publisher_addresses.json"
 ADD_KEYS_LOG="$RUN_DIR/add-keys.log"
+TARGET_STATE_FILE="$RUN_DIR/targets.txt"
+COUNT_STATE_FILE="$RUN_DIR/count.txt"
+RUN_COMPLETE_MARKER="$RUN_DIR/run-complete.done"
 
-mkdir -p "$RUN_DIR"
+mkdir -p "$RUN_DIR" "$BACKUP_DIR" "$PREPARED_DIR" "$PUBLISHERS_DIR" "$REPLACED_DIR"
 
-PREPARED_KEYS_FILE_STATE="$RUN_DIR/prepared-output-path.txt"
-if [[ -f "$PREPARED_KEYS_FILE_STATE" ]]; then
-  PREPARED_KEYS_FILE="$(<"$PREPARED_KEYS_FILE_STATE")"
+CURRENT_TARGETS_FILE="$RUN_DIR/current-targets.txt"
+printf '%s\n' "${TARGET_FILES_ABS[@]}" > "$CURRENT_TARGETS_FILE"
+
+if [[ -f "$TARGET_STATE_FILE" ]]; then
+  if ! cmp -s "$TARGET_STATE_FILE" "$CURRENT_TARGETS_FILE"; then
+    echo "Error: state folder is already tied to a different target file set." >&2
+    echo "Existing targets:" >&2
+    sed 's/^/  /' "$TARGET_STATE_FILE" >&2
+    echo "Current targets:" >&2
+    sed 's/^/  /' "$CURRENT_TARGETS_FILE" >&2
+    echo "Remove state folder to start a new run: $RUN_DIR" >&2
+    exit 1
+  fi
 else
-  PREPARED_KEYS_FILE="$(node - "$KEYS_FILE_ABS" "$NETWORK" "$SERVER_ID" <<'NODE'
+  cp "$CURRENT_TARGETS_FILE" "$TARGET_STATE_FILE"
+fi
+
+if [[ -f "$COUNT_STATE_FILE" ]]; then
+  STORED_COUNT="$(<"$COUNT_STATE_FILE")"
+  if [[ "$STORED_COUNT" != "$COUNT" ]]; then
+    echo "Error: state folder is already tied to count=$STORED_COUNT, but current count=$COUNT" >&2
+    echo "Remove state folder to start a new run: $RUN_DIR" >&2
+    exit 1
+  fi
+else
+  printf '%s\n' "$COUNT" > "$COUNT_STATE_FILE"
+fi
+
+if [[ -f "$RUN_COMPLETE_MARKER" ]]; then
+  echo "This run is already complete for the current target file set." >&2
+  echo "Remove state folder to start a new run:" >&2
+  echo "  $RUN_DIR" >&2
+  exit 1
+fi
+
+for i in "${!TARGET_FILES_ABS[@]}"; do
+  target_file="${TARGET_FILES_ABS[$i]}"
+  backup_file="$BACKUP_DIR/target-$i-$(basename "$target_file")"
+  if [[ ! -f "$backup_file" ]]; then
+    cp "$target_file" "$backup_file"
+  fi
+done
+
+node - "$BACKUP_DIR" "${#TARGET_FILES_ABS[@]}" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
-const [file, network, serverId] = process.argv.slice(2);
-const dir = path.dirname(file);
-const escapedNetwork = network.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const escapedServer = serverId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const regex = new RegExp(`^${escapedNetwork}-keys-${escapedServer}-v(\\d+)\\.json$`);
-let highest = 0;
-for (const entry of fs.readdirSync(dir)) {
-  const match = entry.match(regex);
-  if (!match) continue;
-  highest = Math.max(highest, Number(match[1]));
+const backupDir = process.argv[2];
+const count = Number(process.argv[3]);
+const attestersFor = (file) => {
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  return (data.validators || []).map((validator) => validator.attester?.eth?.toLowerCase()).filter(Boolean).sort();
+};
+let reference = null;
+for (let i = 0; i < count; i += 1) {
+  const file = fs.readdirSync(backupDir).find((entry) => entry.startsWith(`target-${i}-`));
+  if (!file) {
+    console.error(`Missing backup for target ${i}`);
+    process.exit(1);
+  }
+  const attesters = attestersFor(path.join(backupDir, file));
+  if (!reference) {
+    reference = attesters;
+    continue;
+  }
+  if (attesters.length !== reference.length || attesters.some((value, index) => value !== reference[index])) {
+    console.error(`Target ${i} does not have the same attester set as target 0`);
+    process.exit(1);
+  }
 }
-console.log(path.join(dir, `${network}-keys-${serverId}-v${highest + 1}.json`));
 NODE
-)"
-  printf '%s\n' "$PREPARED_KEYS_FILE" > "$PREPARED_KEYS_FILE_STATE"
-fi
 
 adopt_generated_private_keys() {
   if [[ -f "$NEW_PRIVATE_KEYS" ]]; then
@@ -174,7 +209,7 @@ const excluded = new Set([
   "new-private-keys.json",
 ]);
 const candidates = fs.readdirSync(dir)
-  .filter((file) => file.endsWith(".json") && !excluded.has(file))
+  .filter((file) => file.endsWith(".json") && !file.startsWith("prepared-") && !excluded.has(file))
   .map((file) => path.join(dir, file));
 if (candidates.length === 1) {
   console.log(candidates[0]);
@@ -191,6 +226,18 @@ NODE
 print_progress_summary() {
   echo ""
   echo "=== Progress Summary ==="
+
+  local backup_count prepared_count replaced_count
+  backup_count="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'target-*' | wc -l | tr -d ' ')"
+  prepared_count="$(find "$PREPARED_DIR" -maxdepth 1 -type f -name 'target-*' | wc -l | tr -d ' ')"
+  replaced_count="$(find "$REPLACED_DIR" -maxdepth 1 -type f -name 'target-*.done' | wc -l | tr -d ' ')"
+
+  if [[ "$backup_count" == "${#TARGET_FILES_ABS[@]}" ]]; then
+    echo "✅ Step 0: original keys files backed up ($backup_count/${#TARGET_FILES_ABS[@]})"
+    echo "   $BACKUP_DIR"
+  else
+    echo "❌ Step 0 TODO: back up original keys files ($backup_count/${#TARGET_FILES_ABS[@]})"
+  fi
 
   if [[ -f "$NEW_PRIVATE_KEYS" ]]; then
     echo "✅ Step 1: private attester keys generated"
@@ -215,43 +262,52 @@ print_progress_summary() {
     echo "❌ Step 3 TODO: extract existing publisher addresses"
   fi
 
-  if [[ -f "$PREPARED_KEYS_FILE" ]]; then
-    echo "✅ Step 4: bumped keys file created"
-    echo "   $PREPARED_KEYS_FILE"
+  if [[ "$prepared_count" == "${#TARGET_FILES_ABS[@]}" ]]; then
+    echo "✅ Step 4: replacement keys files prepared in state directory ($prepared_count/${#TARGET_FILES_ABS[@]})"
+    echo "   $PREPARED_DIR"
   else
-    echo "❌ Step 4 TODO: create bumped keys file"
-    echo "   Target: $PREPARED_KEYS_FILE"
+    echo "❌ Step 4 TODO: prepare replacement keys files in state directory ($prepared_count/${#TARGET_FILES_ABS[@]})"
+  fi
+
+  if [[ "$replaced_count" == "${#TARGET_FILES_ABS[@]}" ]]; then
+    echo "✅ Step 5: production keys files replaced in place ($replaced_count/${#TARGET_FILES_ABS[@]})"
+  else
+    echo "❌ Step 5 TODO: replace production keys files before Safe proposal ($replaced_count/${#TARGET_FILES_ABS[@]})"
   fi
 
   if [[ -f "$ADD_KEYS_LOG" ]]; then
-    echo "✅ Step 5: add-keys calldata generated"
+    echo "✅ Step 6: add-keys calldata generated"
     echo "   $ADD_KEYS_LOG"
   else
-    echo "❌ Step 5 TODO: generate add-keys calldata from new private keys"
+    echo "❌ Step 6 TODO: generate add-keys calldata from new private keys"
   fi
 
   if [[ -f "$ADD_KEYS_LOG" ]]; then
     local add_keys_output
     add_keys_output="$(<"$ADD_KEYS_LOG")"
     if [[ "$add_keys_output" == *"All transactions successfully proposed to Safe multisig"* ]]; then
-      echo "✅ Step 6: Safe proposal submitted"
+      echo "✅ Step 7: Safe proposal submitted"
     elif [[ "$add_keys_output" == *"Failed to propose transaction to Safe"* ]]; then
-      echo "❌ Step 6 TODO: Safe proposal failed; fix proposer owner/delegate config and rerun"
+      echo "❌ Step 7 TODO: Safe proposal failed; fix proposer owner/delegate config and rerun"
     elif [[ "$SAFE_PROPOSAL" == true ]]; then
-      echo "❌ Step 6 TODO: Safe proposal not submitted; enable SAFE_PROPOSALS_ENABLED=true and rerun"
+      echo "❌ Step 7 TODO: Safe proposal not submitted; enable SAFE_PROPOSALS_ENABLED=true and rerun"
     else
-      echo "❌ Step 6 TODO: Safe proposal skipped by --no-safe-proposal"
+      echo "❌ Step 7 TODO: Safe proposal skipped by --no-safe-proposal"
     fi
   else
-    echo "❌ Step 6 TODO: propose add-keys transaction to Safe"
+    echo "❌ Step 7 TODO: propose add-keys transaction to Safe"
   fi
 }
 
-CLI=(node --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));' cli.ts)
+CLI=(npx tsx cli.ts)
 
 echo "=== Add Attesters ==="
-echo "Keys file: $KEYS_FILE_ABS"
-echo "Prepared output: $PREPARED_KEYS_FILE"
+echo "Keys files: ${#TARGET_FILES_ABS[@]}"
+for target_file in "${TARGET_FILES_ABS[@]}"; do
+  echo "  - $target_file"
+done
+echo "Backups: $BACKUP_DIR"
+echo "Prepared outputs: $PREPARED_DIR"
 echo "Count: $COUNT"
 echo "Registry: $REGISTRY"
 echo "Network: $NETWORK"
@@ -288,7 +344,7 @@ if [[ "$GOOGLE_SECRETS" != true ]]; then
 Stopped before Google Secret Manager upload.
 
 Review the generated private keys, then rerun the same command with --google-secrets to continue:
-  $0 --keys-file "$KEYS_FILE_ABS" --count "$COUNT" --registry "$REGISTRY" --network "$NETWORK" --state-folder "$STATE_FOLDER_ABS" --google-secrets
+  $0 --count "$COUNT" --registry "$REGISTRY" --network "$NETWORK" --state-folder "$STATE_FOLDER_ABS" --google-secrets ${TARGET_FILES_ABS[*]}
 
 Private keys file:
   $NEW_PRIVATE_KEYS
@@ -305,50 +361,89 @@ else
 fi
 
 if [[ -f "$AVAILABLE_PUBLISHERS" ]]; then
-  echo "Step 3: reusing existing publisher address file: $AVAILABLE_PUBLISHERS"
+  echo "Step 3: reusing existing publisher address files: $PUBLISHERS_DIR"
 else
-  echo "Step 3: extracting existing publishers for server $SERVER_ID"
-  node - "$KEYS_FILE_ABS" "$SERVER_ID" "$AVAILABLE_PUBLISHERS" <<'NODE'
+  echo "Step 3: extracting existing publishers from each target backup"
+  node - "$BACKUP_DIR" "$PUBLISHERS_DIR" "$AVAILABLE_PUBLISHERS" "${#TARGET_FILES_ABS[@]}" <<'NODE'
 const fs = require("node:fs");
-const [file, serverId, output] = process.argv.slice(2);
-const data = JSON.parse(fs.readFileSync(file, "utf8"));
-const seen = new Set();
-const publishers = [];
-for (const validator of data.validators || []) {
-  const values = Array.isArray(validator.publisher) ? validator.publisher : [validator.publisher];
-  for (const value of values) {
-    if (typeof value !== "string") continue;
-    const key = value.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    publishers.push(value);
+const path = require("node:path");
+const [backupDir, publishersDir, aggregateOutput, countRaw] = process.argv.slice(2);
+const count = Number(countRaw);
+const aggregate = {};
+for (let i = 0; i < count; i += 1) {
+  const backupName = fs.readdirSync(backupDir).find((entry) => entry.startsWith(`target-${i}-`));
+  if (!backupName) {
+    console.error(`Missing backup for target ${i}`);
+    process.exit(1);
   }
+  const data = JSON.parse(fs.readFileSync(path.join(backupDir, backupName), "utf8"));
+  const seen = new Set();
+  const publishers = [];
+  for (const validator of data.validators || []) {
+    const values = Array.isArray(validator.publisher) ? validator.publisher : [validator.publisher];
+    for (const value of values) {
+      if (typeof value !== "string") continue;
+      const key = value.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      publishers.push(value);
+    }
+  }
+  if (publishers.length === 0) {
+    console.error(`No publishers found in backup ${backupName}`);
+    process.exit(1);
+  }
+  const group = `target-${i}`;
+  const output = path.join(publishersDir, `${group}.json`);
+  fs.writeFileSync(output, JSON.stringify({ [group]: publishers }, null, 2) + "\n");
+  aggregate[group] = publishers;
 }
-if (publishers.length === 0) {
-  console.error("No publishers found in production keys file");
-  process.exit(1);
-}
-fs.writeFileSync(output, JSON.stringify({ [serverId]: publishers }, null, 2) + "\n");
+fs.writeFileSync(aggregateOutput, JSON.stringify(aggregate, null, 2) + "\n");
 NODE
 fi
 
-if [[ -f "$PREPARED_KEYS_FILE" ]]; then
-  echo "Step 4: prepared keys file already exists: $PREPARED_KEYS_FILE"
-else
-  echo "Step 4: creating bumped keys file: $PREPARED_KEYS_FILE"
+echo "Step 4: preparing replacement keys files in state directory"
+for i in "${!TARGET_FILES_ABS[@]}"; do
+  target_file="${TARGET_FILES_ABS[$i]}"
+  backup_file="$BACKUP_DIR/target-$i-$(basename "$target_file")"
+  publisher_file="$PUBLISHERS_DIR/target-$i.json"
+  prepared_file="$PREPARED_DIR/target-$i-$(basename "$target_file")"
+  if [[ -f "$prepared_file" ]]; then
+    echo "  target-$i: already prepared: $prepared_file"
+    continue
+  fi
+  echo "  target-$i: preparing $prepared_file"
   "${CLI[@]}" --network "$NETWORK" prepare-deployment \
-    --production-keys "$KEYS_FILE_ABS" \
+    --production-keys "$backup_file" \
     --new-public-keys "$PUBLIC_KEYS" \
-    --available-publishers "$AVAILABLE_PUBLISHERS" \
+    --available-publishers "$publisher_file" \
     --registry "$REGISTRY" \
-    --output "$PREPARED_KEYS_FILE"
-fi
+    --output "$prepared_file"
+done
 
-echo "Step 5: generating add-keys calldata from new private keys"
+echo "Step 5: replacing production keys files before Safe proposal"
+for i in "${!TARGET_FILES_ABS[@]}"; do
+  target_file="${TARGET_FILES_ABS[$i]}"
+  prepared_file="$PREPARED_DIR/target-$i-$(basename "$target_file")"
+  replaced_marker="$REPLACED_DIR/target-$i.done"
+  if [[ -f "$replaced_marker" ]]; then
+    echo "  target-$i: already replaced: $target_file"
+    continue
+  fi
+  echo "  target-$i: replacing $target_file"
+  cp "$prepared_file" "$target_file"
+  printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$replaced_marker"
+done
+
+echo "Step 6: generating add-keys calldata from new private keys"
 if [[ "$SAFE_PROPOSAL" == true ]]; then
   "${CLI[@]}" --network "$NETWORK" add-keys "$NEW_PRIVATE_KEYS" --registry "$REGISTRY" | tee "$ADD_KEYS_LOG"
 else
   SAFE_PROPOSALS_ENABLED=false "${CLI[@]}" --network "$NETWORK" add-keys "$NEW_PRIVATE_KEYS" --registry "$REGISTRY" | tee "$ADD_KEYS_LOG"
+fi
+
+if [[ "$SAFE_PROPOSAL" != true ]] || [[ "$(<"$ADD_KEYS_LOG")" == *"All transactions successfully proposed to Safe multisig"* ]]; then
+  printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUN_COMPLETE_MARKER"
 fi
 
 echo ""

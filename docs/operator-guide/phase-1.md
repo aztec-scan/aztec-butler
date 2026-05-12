@@ -68,6 +68,8 @@ cat new-private-keys.json | jq '.'
 }
 ```
 
+**Publisher note:** The Aztec CLI includes generated publisher private keys in this file. `aztec-butler process-private-keys` ignores those publisher keys by default. Reuse existing/source publishers through `available_publisher_addresses.json`, or generate dedicated publisher keys with `aztec-butler new-publisher-keys` if you need fresh publishers.
+
 ### 3. Secure the Private Keys
 
 **🔴 CRITICAL SECURITY STEP**

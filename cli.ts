@@ -409,10 +409,18 @@ program
     "-o, --output <file>",
     "Output file path (default: public-[input-file].json)",
   )
+  .option(
+    "--upload-publisher-keys",
+    "Upload publisher private keys to GCP Secret Manager (disabled by default)",
+  )
   .action(
     async (
       privateKeyFile: string,
-      options: { output?: string; registry: StakingRegistryTarget },
+      options: {
+        output?: string;
+        registry: StakingRegistryTarget;
+        uploadPublisherKeys?: boolean;
+      },
     ) => {
       const globalOpts = program.opts();
       const config = await initConfig({ network: globalOpts.network });
@@ -421,6 +429,7 @@ program
       await command.processPrivateKeys(ethClient, config, {
         privateKeyFile,
         registry: options.registry,
+        uploadPublisherKeys: options.uploadPublisherKeys,
         ...(options.output ? { outputFile: options.output } : {}),
       });
     },

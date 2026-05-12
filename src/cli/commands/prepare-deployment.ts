@@ -33,6 +33,7 @@ const command = async (
 
   const isOllaRegistry = options.registry === "olla";
   const ollaRewardsCoinbaseAddress = config.OLLA_REWARDS_COINBASE_ADDRESS;
+  const nativeRewardsCoinbaseAddress = config.AZTEC_STAKING_PROVIDER_REWARDS_RECIPIENT;
 
   if (isOllaRegistry && !ollaRewardsCoinbaseAddress) {
     throw new Error(
@@ -249,6 +250,12 @@ const command = async (
     );
     console.log("Skipping coinbase cache loading for Olla registry");
   } else {
+    if (nativeRewardsCoinbaseAddress) {
+      console.log(
+        `\nUsing native rewards recipient as fallback coinbase for validators without coinbase: ${nativeRewardsCoinbaseAddress}`,
+      );
+    }
+
     // 5. Load coinbase cache (optional)
     console.log("\nLoading coinbase cache...");
     try {
@@ -266,7 +273,7 @@ const command = async (
       }
     } catch (error) {
       console.warn(
-        `⚠️  No coinbase cache found for network "${options.network}". Validators will be created without coinbase addresses.`,
+        `⚠️  No coinbase cache found for network "${options.network}". Validators without coinbase will use the native rewards recipient fallback if configured.`,
       );
       console.warn(
         `   Run 'aztec-butler scrape-coinbases --network ${options.network}' to create the cache, then use 'fill-coinbases' to add them.`,
@@ -293,7 +300,9 @@ const command = async (
 
     const coinbase = isOllaRegistry
       ? ollaRewardsCoinbaseAddress
-      : existingCoinbase || coinbaseMap.get(attester.eth.toLowerCase());
+      : existingCoinbase ||
+        coinbaseMap.get(attester.eth.toLowerCase()) ||
+        nativeRewardsCoinbaseAddress;
     if (coinbase) {
       entry.coinbase = coinbase;
     }

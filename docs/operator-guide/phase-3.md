@@ -36,6 +36,8 @@ flowchart TD
 
 The command automatically detects the number of servers from your `available_publisher_addresses.json` file.
 
+Use publisher addresses from the source files you intend to keep running, or from `aztec-butler new-publisher-keys` if you intentionally created fresh publishers. Publisher private keys generated inside the Phase 1 Aztec key file are not uploaded by Phase 2 unless `--upload-publisher-keys` was explicitly used.
+
 **Example available_publisher_addresses.json:**
 
 ```json
