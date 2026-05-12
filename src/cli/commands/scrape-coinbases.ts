@@ -35,7 +35,7 @@ const command = async (
   if (filesLoaded.length === 0) {
     throw new Error(
       `No keys files found for network "${options.network}".\n` +
-        `Expected pattern: ${options.network}-keys-*.json in data directory.`,
+        `Expected registered keys under ${options.network}/<host>/<source>-registered-keys.json in data directory.`,
     );
   }
 

@@ -151,19 +151,24 @@ By default, the sync script reads from `../olla-core`. You can override this usi
 
 Note: scraper support/refactors are intentionally out of scope for this change.
 
-### Unified Keys File Format
+### Registered Keys File Format
 
-Aztec Butler uses a unified configuration format for both validator nodes and the monitoring server. Keys files follow the naming convention:
+Aztec Butler server discovery uses registered-key files grouped by network, host, and source:
 
-```
-[network]-keys-[serverId]-v[version].json
+```text
+~/.local/share/aztec-butler/[network]/[host]/[source]-registered-keys.json
 ```
 
 Examples:
 
-- `mainnet-keys-A-v1.json`
-- `mainnet-keys-B-v2.json`
-- `testnet-keys-validator1-v3.json`
+- `~/.local/share/aztec-butler/mainnet/beast-3/native-registered-keys.json`
+- `~/.local/share/aztec-butler/testnet/beast-5/native-registered-keys.json`
+- `~/.local/share/aztec-butler/testnet/beast-5/olla-registered-keys.json`
+
+Source identity:
+
+- `native` uses the host as `serverId`, for example `beast-3`.
+- Non-native sources include the source in `serverId`, for example `beast-5-olla`.
 
 **File structure:**
 
@@ -187,7 +192,7 @@ Examples:
 
 **Server Auto-Discovery:**
 
-The monitoring server automatically discovers and merges all keys files matching the pattern `{network}-keys-*.json` in the data directory. For each server ID, only the highest version number is loaded to avoid conflicts.
+The monitoring server automatically discovers and merges all registered-key files matching `{network}/*/*-registered-keys.json` in the data directory. This supports multiple registries or providers for the same host without flattening source identity into a custom filename.
 
 **Workflow:**
 
@@ -208,14 +213,14 @@ The monitoring server automatically discovers and merges all keys files matching
    aztec-butler scrape-coinbases --network mainnet
 
    # Fill coinbases into keys files
-   aztec-butler fill-coinbases --network mainnet --keys-file mainnet-keys-A-v1.json
+   aztec-butler fill-coinbases --network mainnet --keys-file mainnet/beast-3/native-registered-keys.json
    ```
 
 3. **Deploy:**
 
    ```bash
    # Copy keys files to monitoring server's data directory
-   scp mainnet-keys-A-v1.json server:~/.local/share/aztec-butler/
+   scp native-registered-keys.json server:~/.local/share/aztec-butler/mainnet/beast-3/
 
    # Start monitoring server (auto-discovers keys files)
    aztec-butler start-server --network mainnet

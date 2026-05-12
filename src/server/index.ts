@@ -67,7 +67,7 @@ async function initializeNetwork(
   if (filesLoaded.length === 0) {
     console.warn(
       `[${network}] No keys files found. Server will start with empty attester/publisher lists.\n` +
-        `Expected file pattern: ${network}-keys-*.json in data directory.`,
+        `Expected registered keys under ${network}/<host>/<source>-registered-keys.json in data directory.`,
     );
   } else {
     console.log(
@@ -134,19 +134,21 @@ async function initializeNetwork(
   // Initialize file watcher
   const fileWatcher = new KeysFileWatcher({
     network,
-    onKeysFileChange: async (eventType, filePath) => {
+    onKeysFileChange: (eventType, filePath) => {
       console.log(
         `[${network}] Keys file ${eventType}: ${path.basename(filePath)}`,
       );
 
       // Debounce: wait a bit for multiple file changes
-      setTimeout(async () => {
-        const result = await configReloader.reload();
-        if (result.success) {
-          console.log(`[${network}] Config reloaded successfully`);
-        } else {
-          console.error(`[${network}] Config reload failed: ${result.error}`);
-        }
+      setTimeout(() => {
+        void (async () => {
+          const result = await configReloader.reload();
+          if (result.success) {
+            console.log(`[${network}] Config reloaded successfully`);
+          } else {
+            console.error(`[${network}] Config reload failed: ${result.error}`);
+          }
+        })();
       }, 1000);
     },
   });

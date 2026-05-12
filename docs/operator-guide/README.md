@@ -58,7 +58,7 @@ aztec-butler prepare-deployment \
 
 # Phase 3b: Fill coinbase addresses (if needed)
 aztec-butler --network mainnet scrape-coinbases
-aztec-butler --network mainnet fill-coinbases --keys-file mainnet-keys-A-v1.json
+aztec-butler --network mainnet fill-coinbases --keys-file mainnet/beast-3/native-registered-keys.json
 # Note: Coinbase is tracked separately for operational awareness but does not affect attester state transitions
 
 # Phase 4: Deploy to servers (manual/scripted)
@@ -104,13 +104,21 @@ Publishers are now managed per-server in `available_publisher_addresses.json`:
 - Server A/B/C/etc. are used for HA deployments
 - **No publisher address can appear in multiple server arrays**
 
-### Unified Keys File Format
+### Registered Keys File Format
 
-Starting with this version, Aztec Butler uses a unified configuration format for deployment. Keys files are automatically named using the pattern: `[network]-keys-[serverId]-v[version].json`
+Aztec Butler server discovery uses registered-key files grouped by network, host, and source:
 
-For example: `mainnet-keys-A-v1.json`, `mainnet-keys-B-v2.json`
+```text
+~/.local/share/aztec-butler/[network]/[host]/[source]-registered-keys.json
+```
 
-The monitoring server automatically discovers and loads all keys files for the configured network. See the [main README](../../README.md#configuration) for details about the unified configuration format.
+Examples:
+
+- `~/.local/share/aztec-butler/mainnet/beast-3/native-registered-keys.json`
+- `~/.local/share/aztec-butler/testnet/beast-5/native-registered-keys.json`
+- `~/.local/share/aztec-butler/testnet/beast-5/olla-registered-keys.json`
+
+The monitoring server automatically discovers and loads all registered-key files for the configured network. See the [main README](../../README.md#configuration) for details about the registered keys file format.
 
 ### Multi-Registry Key Proposals
 
@@ -178,7 +186,7 @@ Throughout the process, you'll work with these file types:
 | Private keys        | `.json`   | Private keys, public keys      | 🔴 **CRITICAL** |
 | Public keys         | `.json`   | Public keys only               | 🟡 Sensitive    |
 | Production keyfile  | `.json`   | Public keys + web3signer URL   | 🟢 Safe         |
-| Keys files          | `.json`   | `[network]-keys-[server]-v[N]` | 🟢 Safe         |
+| Keys files          | `.json`   | `[network]/[host]/[source]-registered-keys.json` | 🟢 Safe         |
 | Publisher addresses | `.json`   | Publisher addresses per server | 🟢 Safe         |
 | Coinbase cache      | `.json`   | Cached coinbase mappings       | 🟢 Safe         |
 

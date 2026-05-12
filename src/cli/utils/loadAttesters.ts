@@ -18,7 +18,7 @@ export async function loadAttestersForCLI(
   if (filesLoaded.length === 0) {
     throw new Error(
       `No keys files found for network "${network}".\n` +
-        `Expected pattern: ${network}-keys-*.json in data directory.\n` +
+        `Expected registered keys under ${network}/<host>/<source>-registered-keys.json in data directory.\n` +
         `Run 'aztec-butler prepare-deployment' to create keys files.`,
     );
   }

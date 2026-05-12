@@ -11,6 +11,15 @@ export const getDataDir = (): string => {
   return envPath(PACKAGE_NAME, { suffix: "" }).data;
 };
 
+export type KeySource = {
+  filePath: string;
+  network: string;
+  serverId: string;
+  host?: string;
+  source?: string;
+  format: "registered-nested";
+};
+
 /**
  * Escape special regex characters in a string
  */
@@ -54,54 +63,54 @@ export async function loadKeysFile(filePath: string): Promise<Keystore> {
 }
 
 /**
- * Auto-discover all keys files for a network
- * Pattern: {dataDir}/{network}-keys-*.json
+ * Auto-discover all registered key sources for a network.
+ * Pattern: {dataDir}/{network}/{host}/{source}-registered-keys.json
  *
- * Returns only the latest version per server ID to avoid conflicts.
+ * The native source keeps the host as serverId. Other sources include the
+ * source name so multiple registries on one host do not collide.
  */
-export async function discoverKeysFiles(network: string): Promise<string[]> {
-  const dataDir = getDataDir();
+export async function discoverKeysFiles(
+  network: string,
+  dataDir = getDataDir(),
+): Promise<KeySource[]> {
+  const networkDir = path.join(dataDir, network);
+  const keySources: KeySource[] = [];
 
   try {
-    const files = await fs.readdir(dataDir);
+    const hosts = await fs.readdir(networkDir, { withFileTypes: true });
 
-    // Group files by server ID
-    const serverFiles = new Map<
-      string,
-      Array<{ file: string; version: number }>
-    >();
+    for (const hostDirent of hosts) {
+      if (!hostDirent.isDirectory()) {
+        continue;
+      }
 
-    for (const file of files) {
-      const match = file.match(
-        new RegExp(`^${escapeRegex(network)}-keys-(.+)-v(\\d+)\\.json$`),
-      );
-      if (match) {
-        const serverId = match[1]!;
-        const version = parseInt(match[2]!, 10);
+      const host = hostDirent.name;
+      const hostDir = path.join(networkDir, host);
+      const files = await fs.readdir(hostDir, { withFileTypes: true });
 
-        if (!serverFiles.has(serverId)) {
-          serverFiles.set(serverId, []);
+      for (const fileDirent of files) {
+        if (!fileDirent.isFile()) {
+          continue;
         }
-        serverFiles.get(serverId)!.push({ file, version });
+
+        const match = fileDirent.name.match(/^(.+)-registered-keys\.json$/);
+        if (!match?.[1]) {
+          continue;
+        }
+
+        const source = match[1];
+        keySources.push({
+          filePath: path.join(hostDir, fileDirent.name),
+          network,
+          serverId: source === "native" ? host : `${host}-${source}`,
+          host,
+          source,
+          format: "registered-nested",
+        });
       }
     }
 
-    // Select highest version for each server
-    const selectedFiles: string[] = [];
-    for (const [serverId, versions] of serverFiles.entries()) {
-      const latest = versions.reduce((max, curr) =>
-        curr.version > max.version ? curr : max,
-      );
-      selectedFiles.push(path.join(dataDir, latest.file));
-
-      if (versions.length > 1) {
-        console.log(
-          `[${network}] Server ${serverId}: Found ${versions.length} versions, using v${latest.version}`,
-        );
-      }
-    }
-
-    return selectedFiles.sort();
+    return keySources.sort((a, b) => a.filePath.localeCompare(b.filePath));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return []; // Directory doesn't exist yet
@@ -114,7 +123,10 @@ export async function discoverKeysFiles(network: string): Promise<string[]> {
  * Load all keys files for a network and merge validators
  * Returns: merged attester list with coinbases, merged publisher list with server assignments and load counts
  */
-export async function loadAndMergeKeysFiles(network: string): Promise<{
+export async function loadAndMergeKeysFiles(
+  network: string,
+  dataDir = getDataDir(),
+): Promise<{
   attesters: Array<{
     address: string;
     coinbase?: string;
@@ -127,15 +139,21 @@ export async function loadAndMergeKeysFiles(network: string): Promise<{
   }>;
   filesLoaded: string[];
 }> {
-  const keyFiles = await discoverKeysFiles(network);
+  const keySources = await discoverKeysFiles(network, dataDir);
 
-  if (keyFiles.length === 0) {
+  if (keySources.length === 0) {
     console.warn(`No keys files found for network ${network}`);
     return { attesters: [], publishers: [], filesLoaded: [] };
   }
 
-  console.log(`Found ${keyFiles.length} keys file(s) for ${network}:`);
-  keyFiles.forEach((f) => console.log(`  - ${path.basename(f)}`));
+  console.log(
+    `Found ${keySources.length} registered key source(s) for ${network}:`,
+  );
+  keySources.forEach((source) => {
+    console.log(
+      `  - ${path.relative(dataDir, source.filePath)} (serverId=${source.serverId})`,
+    );
+  });
 
   const attesterMap = new Map<string, { address: string; coinbase?: string }>();
   const publisherMap = new Map<
@@ -143,9 +161,9 @@ export async function loadAndMergeKeysFiles(network: string): Promise<{
     { address: string; serverId: string; attesterCount: number }
   >();
 
-  for (const filePath of keyFiles) {
-    const keystore = await loadKeysFile(filePath);
-    const serverId = extractServerIdFromFilename(path.basename(filePath));
+  for (const keySource of keySources) {
+    const keystore = await loadKeysFile(keySource.filePath);
+    const serverId = keySource.serverId;
 
     for (const validator of keystore.validators) {
       const attesterAddr = validator.attester.eth.toLowerCase();
@@ -183,7 +201,9 @@ export async function loadAndMergeKeysFiles(network: string): Promise<{
   return {
     attesters: Array.from(attesterMap.values()),
     publishers: Array.from(publisherMap.values()),
-    filesLoaded: keyFiles.map((f) => path.basename(f)),
+    filesLoaded: keySources.map((source) =>
+      path.relative(dataDir, source.filePath),
+    ),
   };
 }
 
