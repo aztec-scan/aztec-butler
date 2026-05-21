@@ -19,7 +19,7 @@ aztec-butler agent --mode all    --network mainnet    # dev / test / single-box
 
 | Mode | Scrapers | Requires | Emits | Runs on |
 |---|---|---|---|---|
-| `node` | local keys, local status, publisher balances | `BUTLER_AGENT_HOST` | `host`-labelled local metrics only | every sequencer host |
+| `node` | local keys, local status, publisher balances, entry-queue ETA | `BUTLER_AGENT_HOST` | `host`-labelled local metrics only | every sequencer host |
 | `global` | global chain stats | archive RPC (when rewards is added); no `HOST` | `network`-labelled global metrics only | exactly one host per network |
 | `all` | everything | `HOST` + archive RPC | both | dev / test / single-box only |
 
@@ -44,6 +44,7 @@ The agent reads the standard per-network base env file
 | `BUTLER_AGENT_OTLP_EXPORT_INTERVAL_MS` | `30000` | OTLP export interval. |
 | `BUTLER_AGENT_SCRAPE_INTERVAL_MS` | `30000` | Local scraper interval (`node`/`all`). |
 | `BUTLER_AGENT_GLOBAL_SCRAPE_INTERVAL_MS` | `60000` | Global scraper interval (`global`/`all`). |
+| `BUTLER_AGENT_ENTRY_QUEUE_ETA_INTERVAL_MS` | `120000` | Entry-queue ETA scraper interval (`node`/`all`). |
 
 The per-scraper boolean toggles were removed — the run mode determines the
 scraper set.
@@ -162,6 +163,9 @@ deployment that is the **monitoring server**; the sequencer hosts run
 | `aztec_butler_attester_coinbase_configured` | `network, host, registry, attester_address` |
 | `aztec_butler_attester_lifecycle_state` | `network, host, registry, attester_address, state` |
 | `aztec_butler_attester_provider_queue_membership` | `network, host, registry, attester_address` |
+| `aztec_butler_attester_entry_queue_position` | `network, host, registry, attester_address` |
+| `aztec_butler_attester_entry_queue_eta_timestamp` | `network, host, registry, attester_address` |
+| `aztec_butler_next_missing_coinbase_eta_timestamp` | `network, host, attester_address` |
 | `aztec_butler_publisher_balance_wei` | `network, host, publisher_address` |
 | `aztec_butler_publisher_required_topup_wei` | `network, host, publisher_address` |
 | `aztec_butler_local_last_scraped_timestamp` | `network, host, scraper` |
@@ -190,6 +194,13 @@ Missing coinbases:
 
 ```promql
 aztec_butler_attester_coinbase_configured{network="mainnet", registry="olla"} == 0
+```
+
+Missing-coinbase ETA — alert when an attester will activate *without* a coinbase
+within the next 6 hours (the headline operational signal):
+
+```promql
+aztec_butler_next_missing_coinbase_eta_timestamp{network="mainnet"} - time() < 21600
 ```
 
 Local lifecycle breakdown:

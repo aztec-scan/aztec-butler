@@ -41,6 +41,7 @@ export const DEFAULT_OTLP_ENDPOINT = "http://127.0.0.1:4318/v1/metrics";
 const DEFAULT_OTLP_EXPORT_INTERVAL_MS = 30_000;
 const DEFAULT_SCRAPE_INTERVAL_MS = 30_000;
 const DEFAULT_GLOBAL_SCRAPE_INTERVAL_MS = 60_000;
+const DEFAULT_ENTRY_QUEUE_ETA_INTERVAL_MS = 120_000;
 
 export interface AgentConfig {
   network: string;
@@ -67,6 +68,8 @@ export interface AgentConfig {
   minEthPerAttester: string;
   scrapeIntervalMs: number;
   globalScrapeIntervalMs: number;
+  /** Interval for the per-host entry-queue ETA scraper (`node`/`all` mode). */
+  entryQueueEtaIntervalMs: number;
 
   // ── OTLP export ──────────────────────────────────────────────────────
   otlp: {
@@ -202,6 +205,11 @@ export const buildAgentConfig = (
       "BUTLER_AGENT_GLOBAL_SCRAPE_INTERVAL_MS",
       env.BUTLER_AGENT_GLOBAL_SCRAPE_INTERVAL_MS,
       DEFAULT_GLOBAL_SCRAPE_INTERVAL_MS,
+    ),
+    entryQueueEtaIntervalMs: positiveInt(
+      "BUTLER_AGENT_ENTRY_QUEUE_ETA_INTERVAL_MS",
+      env.BUTLER_AGENT_ENTRY_QUEUE_ETA_INTERVAL_MS,
+      DEFAULT_ENTRY_QUEUE_ETA_INTERVAL_MS,
     ),
     otlp: {
       enabled: parseBool(env.BUTLER_AGENT_OTLP_ENABLED, true),

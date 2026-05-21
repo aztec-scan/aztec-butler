@@ -22,6 +22,7 @@ import {
 } from "./config.js";
 import { registerAgentMetrics } from "./metrics/agent-metrics.js";
 import { initAgentMeterProvider, type AgentMeterProvider } from "./metrics/otlp.js";
+import { LocalEntryQueueEtaScraper } from "./scrapers/entry-queue-eta-scraper.js";
 import { GlobalStatsScraper } from "./scrapers/global-stats-scraper.js";
 import { LocalKeyScraper } from "./scrapers/local-key-scraper.js";
 import { LocalStatusScraper } from "./scrapers/local-status-scraper.js";
@@ -64,6 +65,10 @@ const buildScrapers = (config: AgentConfig, chain: AgentChainContext): Registere
     scrapers.push({
       scraper: new PublisherBalanceScraper(config, chain),
       intervalMs: config.scrapeIntervalMs,
+    });
+    scrapers.push({
+      scraper: new LocalEntryQueueEtaScraper(config, chain),
+      intervalMs: config.entryQueueEtaIntervalMs,
     });
   }
 

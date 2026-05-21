@@ -22,7 +22,7 @@ import {
   modeHasLocalScrapers,
   type AgentConfig,
 } from "../config.js";
-import { getAgentState } from "../state.js";
+import { getAgentState, type LocalAttesterRuntimeState } from "../state.js";
 
 /** Build attributes for a LOCAL metric — always carries `network` + `host`. */
 export const localAttributes = (
@@ -41,6 +41,31 @@ export const globalAttributes = (
     throw new Error("Global metrics must not carry a `host` attribute.");
   }
   return { network, ...extra };
+};
+
+/**
+ * Pick the local attester that will activate SOONEST without a coinbase
+ * configured — the headline ops signal. Considers only attesters that are in
+ * the entry queue (have an ETA) and lack a coinbase. Returns `undefined` when
+ * there is none (the healthy case).
+ *
+ * Pure function — unit tested.
+ */
+export const selectNextMissingCoinbase = (
+  keys: Iterable<LocalAttesterRuntimeState>,
+): LocalAttesterRuntimeState | undefined => {
+  let soonest: LocalAttesterRuntimeState | undefined;
+  for (const key of keys) {
+    if (key.coinbase) continue; // has a coinbase — fine
+    if (key.entryQueueEtaTimestamp === undefined) continue; // not in the entry queue
+    if (
+      soonest?.entryQueueEtaTimestamp === undefined ||
+      key.entryQueueEtaTimestamp < soonest.entryQueueEtaTimestamp
+    ) {
+      soonest = key;
+    }
+  }
+  return soonest;
 };
 
 const metricName = (suffix: string): string => `${PACKAGE_NAME}_${suffix}`;
@@ -127,6 +152,71 @@ const registerLocalMetrics = (meter: Meter): void => {
         localAttributes(local.network, local.host, {
           registry: key.registry,
           attester_address: key.attesterAddress,
+        }),
+      );
+    }
+  });
+
+  // ── local: entry queue position ─────────────────────────────────────────
+  const entryQueuePosition = meter.createObservableGauge(
+    metricName("attester_entry_queue_position"),
+    { description: "Index of the local attester in the global rollup entry queue (0 = next)" },
+  );
+  entryQueuePosition.addCallback((result) => {
+    const { local } = getAgentState();
+    for (const key of local.keys.values()) {
+      if (key.entryQueuePosition !== undefined) {
+        result.observe(
+          key.entryQueuePosition,
+          localAttributes(local.network, local.host, {
+            registry: key.registry,
+            attester_address: key.attesterAddress,
+          }),
+        );
+      }
+    }
+  });
+
+  // ── local: entry queue ETA ──────────────────────────────────────────────
+  const entryQueueEta = meter.createObservableGauge(
+    metricName("attester_entry_queue_eta_timestamp"),
+    {
+      description: "Estimated unix timestamp the local attester activates from the entry queue",
+      unit: "s",
+    },
+  );
+  entryQueueEta.addCallback((result) => {
+    const { local } = getAgentState();
+    for (const key of local.keys.values()) {
+      if (key.entryQueueEtaTimestamp !== undefined) {
+        result.observe(
+          key.entryQueueEtaTimestamp,
+          localAttributes(local.network, local.host, {
+            registry: key.registry,
+            attester_address: key.attesterAddress,
+          }),
+        );
+      }
+    }
+  });
+
+  // ── local: next missing-coinbase ETA (convenience — soonest only) ───────
+  const nextMissingCoinbase = meter.createObservableGauge(
+    metricName("next_missing_coinbase_eta_timestamp"),
+    {
+      description:
+        "Estimated unix timestamp the SOONEST local attester WITHOUT a coinbase activates",
+      unit: "s",
+    },
+  );
+  nextMissingCoinbase.addCallback((result) => {
+    const { local } = getAgentState();
+    const soonest = selectNextMissingCoinbase(local.keys.values());
+    if (soonest?.entryQueueEtaTimestamp !== undefined) {
+      result.observe(
+        soonest.entryQueueEtaTimestamp,
+        localAttributes(local.network, local.host, {
+          attester_address: soonest.attesterAddress,
         }),
       );
     }

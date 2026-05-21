@@ -1319,6 +1319,39 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     return attesters;
   }
 
+  /**
+   * Scan the entry queue from index 0, stopping as soon as every target
+   * attester has been located. Returns the ordered prefix of the queue that
+   * was scanned (index 0 first), which always contains the targets that are
+   * present in the queue.
+   *
+   * This bounds the RPC cost to the position of the last target rather than the
+   * full queue length — used by the agent's per-host entry-queue ETA scraper,
+   * which only needs its own attesters' positions.
+   *
+   * @param targets attester addresses to locate (case-insensitive)
+   */
+  async getQueuedAttestersUntilAllFound(targets: string[]): Promise<string[]> {
+    const remaining = new Set(targets.map((t) => t.toLowerCase()));
+    const scanned: string[] = [];
+    if (remaining.size === 0) {
+      return scanned;
+    }
+
+    const queueLength = await this.getEntryQueueLength();
+    for (let i = 0n; i < queueLength && remaining.size > 0; i++) {
+      try {
+        const entry = await this.getEntryQueueAt(i);
+        scanned.push(entry.attester);
+        remaining.delete(entry.attester.toLowerCase());
+      } catch (error) {
+        console.warn(`Failed to fetch queue entry at index ${i}:`, error);
+      }
+    }
+
+    return scanned;
+  }
+
   private decodeSplitUpdatedData(data: Hex): SplitAllocationData {
     const payload = data.startsWith("0x") ? data.slice(2) : data;
     if (!payload || payload.length % 64 !== 0) {

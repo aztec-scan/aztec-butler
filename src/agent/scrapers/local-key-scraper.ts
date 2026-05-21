@@ -66,6 +66,12 @@ export class LocalKeyScraper extends AbstractScraper {
       if (existing?.providerQueuePosition !== undefined) {
         next.providerQueuePosition = existing.providerQueuePosition;
       }
+      if (existing?.entryQueuePosition !== undefined) {
+        next.entryQueuePosition = existing.entryQueuePosition;
+      }
+      if (existing?.entryQueueEtaTimestamp !== undefined) {
+        next.entryQueueEtaTimestamp = existing.entryQueueEtaTimestamp;
+      }
       state.local.keys.set(addrKey, next);
     }
 

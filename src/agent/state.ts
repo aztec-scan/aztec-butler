@@ -24,6 +24,10 @@ export interface LocalAttesterRuntimeState {
   onChainView?: AttesterView;
   inProviderQueue: boolean;
   providerQueuePosition?: number;
+  /** Index in the global rollup entry queue (0 = next). Absent when not queued. */
+  entryQueuePosition?: number;
+  /** Estimated unix timestamp (s) this attester activates. Absent when not computable. */
+  entryQueueEtaTimestamp?: number;
   lastUpdated: Date;
 }
 

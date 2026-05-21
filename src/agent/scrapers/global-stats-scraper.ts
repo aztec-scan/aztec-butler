@@ -13,32 +13,13 @@ import { AbstractScraper } from "../../server/scrapers/base-scraper.js";
 import type { AgentChainContext } from "../chain.js";
 import type { AgentConfig } from "../config.js";
 import type { Registry } from "../keys/local-key-loader.js";
+import { computeQueueTiming } from "../queue-timing.js";
 import {
   getAgentState,
   markScraped,
   type EntryQueueStatsState,
   type ProviderQueueState,
 } from "../state.js";
-
-const DEFAULT_L2_BLOCK_TIME_SEC = 36;
-
-/** Fetch average L2 block time (ms) from Aztecscan; null on any failure. */
-async function fetchL2BlockTimeMs(): Promise<number | null> {
-  try {
-    const response = await fetch(
-      "https://api.aztecscan.xyz/v1/temporary-api-key/l2/stats/average-block-time",
-      { signal: AbortSignal.timeout(5000) },
-    );
-    if (!response.ok) return null;
-    const parsed = JSON.parse(await response.text());
-    const blockTimeMs = typeof parsed === "string" ? Number(parsed) : parsed;
-    return typeof blockTimeMs === "number" && isFinite(blockTimeMs) && blockTimeMs > 0
-      ? blockTimeMs
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 export class GlobalStatsScraper extends AbstractScraper {
   readonly name = "global_stats";
@@ -58,18 +39,8 @@ export class GlobalStatsScraper extends AbstractScraper {
     const nowSec = Math.floor(Date.now() / 1000);
 
     // ── entry queue ──────────────────────────────────────────────────────
-    const blockTimeMs = await fetchL2BlockTimeMs();
-    const blockTimeSec = blockTimeMs ? blockTimeMs / 1000 : DEFAULT_L2_BLOCK_TIME_SEC;
-
-    const [entryQueueLength, epochDurationSlots, flushSize] = await Promise.all([
-      eth.getEntryQueueLength(),
-      eth.getEpochDuration(),
-      eth.getEntryQueueFlushSize(),
-    ]);
-
-    const epochDurationSec = Number(epochDurationSlots) * blockTimeSec;
-    const timePerAttester =
-      flushSize > 0n ? epochDurationSec / Number(flushSize) : 0;
+    const entryQueueLength = await eth.getEntryQueueLength();
+    const { timePerAttesterSeconds: timePerAttester } = await computeQueueTiming(eth);
     const lastArrival =
       entryQueueLength > 0n && timePerAttester > 0
         ? nowSec + Math.floor(Number(entryQueueLength) * timePerAttester)
