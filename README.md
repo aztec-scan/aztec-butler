@@ -29,6 +29,28 @@ npm run build
 npm start -- serve --network mainnet
 ```
 
+## Agent Mode
+
+The **agent** is the local, read-only sequencer telemetry process. It runs on
+each sequencer host, reads that host's registered-key files, performs
+read-only L1/L2 checks, and pushes metrics to a local OpenTelemetry collector
+over OTLP. It runs no HTTP server and loads no private keys.
+
+```bash
+aztec-butler agent --network mainnet
+```
+
+Test it locally before deploying — no production access required:
+
+```bash
+scripts/agent-local-test.sh dry-run mainnet   # print metrics to stdout
+scripts/agent-local-test.sh once mainnet      # export into a local OTLP collector
+scripts/agent-local-test.sh logs              # inspect what arrived
+```
+
+See **[Agent Deployment Guide](./docs/agent-deployment.md)** for the full
+configuration reference, metrics, Grafana queries and systemd deployment.
+
 ## Attester State Diagram
 
 ```mermaid
@@ -76,6 +98,7 @@ See [src/server/state/index.ts](./src/server/state/index.ts) and [src/server/sta
 
 - **[Operator Guide](./docs/operator-guide/README.md)** - Complete guide for validator key management (generate, deploy, register)
 - **[Daemon Setup](./daemon/README.md)** - Run aztec-butler as a systemd service with Prometheus metrics
+- **[Agent Deployment Guide](./docs/agent-deployment.md)** - Run the local read-only telemetry agent with OTLP export
 
 ## Configuration
 

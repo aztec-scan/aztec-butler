@@ -1,0 +1,40 @@
+# OpenTelemetry Collector config for LOCAL agent testing.
+#
+# Receives OTLP metrics from `aztec-butler agent` and prints every metric
+# (with all labels) to the collector log via the `debug` exporter. This lets
+# you verify exactly what the agent exports before pointing it at a real
+# central metrics backend.
+#
+# It mirrors the production shape: agent -> local OTLP collector -> backend.
+# Here the "backend" is just stdout.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  # Prints received metrics + attributes to the collector log.
+  debug:
+    verbosity: detailed
+  # Uncomment to additionally expose a Prometheus scrape endpoint on :8889
+  # so you can curl the translated metrics:
+  # prometheus:
+  #   endpoint: 0.0.0.0:8889
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+      # exporters: [debug, prometheus]

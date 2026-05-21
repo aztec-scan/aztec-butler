@@ -1,0 +1,21 @@
+# Local OpenTelemetry collector for testing `aztec-butler agent`.
+#
+#   docker compose -f tests/local-otel/docker-compose.yml up -d
+#   docker compose -f tests/local-otel/docker-compose.yml logs -f
+#
+# The agent's default OTLP endpoint (http://127.0.0.1:4318/v1/metrics) targets
+# this collector. Pin the SAME collector version used in production.
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.107.0
+    container_name: aztec-butler-otel-test
+    restart: unless-stopped
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel/config.yaml:ro
+    ports:
+      # Bound to localhost only — this is a test harness, not a public surface.
+      - "127.0.0.1:4317:4317" # OTLP gRPC
+      - "127.0.0.1:4318:4318" # OTLP HTTP/protobuf
+      # - "127.0.0.1:8889:8889" # Prometheus scrape (if enabled in config)

@@ -40,6 +40,45 @@ program
     await startServer(options.network);
   });
 
+program
+  .command("agent")
+  .description(
+    "Run the local, read-only sequencer telemetry agent (OTLP export, no HTTP server)",
+  )
+  .requiredOption(
+    "--network <network>",
+    "Network to run the agent for (e.g., mainnet, testnet)",
+  )
+  .option(
+    "--once",
+    "Run a single scrape + export cycle then exit (for local testing)",
+  )
+  .option(
+    "--dry-run",
+    "Print metrics to stdout instead of pushing OTLP (for local testing)",
+  )
+  .option(
+    "--config <path>",
+    "Override the per-network base env file path",
+  )
+  .action(
+    async (options: {
+      network: string;
+      once?: boolean;
+      dryRun?: boolean;
+      config?: string;
+    }) => {
+      checkNodeVersion();
+      const { startAgent } = await import("./agent/index.js");
+      await startAgent({
+        network: options.network,
+        ...(options.once ? { once: true } : {}),
+        ...(options.dryRun ? { dryRun: true } : {}),
+        ...(options.config ? { configFilePath: options.config } : {}),
+      });
+    },
+  );
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   program.parseAsync(process.argv).catch((error) => {
     console.error("Fatal error:", error);

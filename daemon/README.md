@@ -2,6 +2,10 @@
 
 Scripts for manually setting up aztec-butler as a systemd service.
 
+> **Running the local telemetry agent instead?** Use `daemon/install-agent.sh`
+> and see [docs/agent-deployment.md](../docs/agent-deployment.md). The agent is
+> read-only, runs no HTTP server, and exports metrics over OTLP.
+
 ## Prerequisites
 
 - Node.js v22.0.0 or higher (install script handles this)

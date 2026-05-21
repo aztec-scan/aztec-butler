@@ -7,8 +7,8 @@ import {
   discoverKeysFiles,
   getDataDir,
   loadAndMergeKeysFiles,
-} from "../src/core/utils/keysFileOperations.js";
-import { isRegisteredKeysFile } from "../src/server/file-watcher.js";
+} from "../../src/core/utils/keysFileOperations.js";
+import { isRegisteredKeysFile } from "../../src/server/file-watcher.js";
 
 async function writeKeysFile(
   dataDir: string,
