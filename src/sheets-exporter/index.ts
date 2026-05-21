@@ -98,7 +98,8 @@ const prepareChain = async (config: SheetsExporterConfig): Promise<ChainContext>
   if (!config.archiveRpcUrl) {
     throw new Error(
       "sheets-exporter requires an archive RPC — set SHEETS_EXPORTER_ARCHIVE_RPC_URL " +
-        "(or ETHEREUM_ARCHIVE_NODE_URL). Coinbase discovery and --backfill need it.",
+        "(or ETHEREUM_ARCHIVE_NODE_URL) to a real archive node. Every run reads " +
+        "getSequencerRewards at past blocks; a non-archive node cannot serve that state.",
     );
   }
 

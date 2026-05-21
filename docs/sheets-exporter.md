@@ -70,8 +70,8 @@ fields below.
 | `GOOGLE_SHEETS_SPREADSHEET_ID` | *(required)* | Target spreadsheet ID (from its URL). |
 | `STAKING_REWARDS_SPLIT_FROM_BLOCK` | *(required)* | Start block for the `StakedWithProvider` scan **and** the `--backfill` day range. |
 | `AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` | *(required)* | Native provider admin — resolves the provider id for coinbase discovery. |
-| `SHEETS_EXPORTER_ARCHIVE_RPC_URL` | falls back to `ETHEREUM_ARCHIVE_NODE_URL` | Archive RPC for historical `getSequencerRewards` reads. Required for `--backfill`. A free dRPC endpoint works. |
-| `SHEETS_EXPORTER_MAX_RPS` | `8` | Backfill self-rate-limit (requests/sec) to stay under a free archive tier. Retries throttling with exponential backoff. |
+| `SHEETS_EXPORTER_ARCHIVE_RPC_URL` | falls back to `ETHEREUM_ARCHIVE_NODE_URL` | **Required — must be a real archive node.** Every run reads `getSequencerRewards` at past block heights (historical `eth_call`); a non-archive node prunes that state and cannot serve it. A free dRPC endpoint works for steady state; a paid archive is much faster for a large one-time backfill. |
+| `SHEETS_EXPORTER_MAX_RPS` | `8` | Self-rate-limit (requests/sec) to stay under the archive tier's limit. Retries throttling with exponential backoff. |
 | `SHEETS_EXPORTER_INTERVAL_MS` | `86400000` (daily) | Recurring-mode cycle interval. |
 | `SHEETS_EXPORTER_LEDGER_RANGE` | `RewardsLedger!A1` | Target range for the per-coinbase rows. |
 | `SHEETS_EXPORTER_DAILY_TOTAL_RANGE` | `RewardsDailyTotal!A1` | Target range for the daily-total rows. |
@@ -80,6 +80,13 @@ fields below.
 
 Shared network fields (`ETHEREUM_CHAIN_ID`, `ETHEREUM_NODE_URL`,
 `AZTEC_NODE_URL`) come from the `<network>-base.env`.
+
+> **Archive node is mandatory.** The ledger is balance-diff based — it reads
+> `getSequencerRewards(coinbase)` *at historical blocks*. That is state, not
+> logs, so a normal full node (which keeps only ~the last 128 blocks of state)
+> cannot answer it. Point `SHEETS_EXPORTER_ARCHIVE_RPC_URL` at a dedicated
+> archive endpoint — not at a sequencer/full node. `ETHEREUM_NODE_URL` may stay
+> on your own node (it is used only for current-head reads and `getLogs`).
 
 ### Fail-closed safety
 
