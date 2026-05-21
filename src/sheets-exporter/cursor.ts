@@ -23,6 +23,13 @@ export interface RewardsCursor {
   /** coinbase (lowercase) -> Σ getSequencerRewards across rollups, bigint as string. */
   balances: Record<string, string>;
   updatedAt: string;
+  /**
+   * A day (YYYY-MM-DD) whose Sheet write was started but not confirmed — set
+   * just before the append, cleared on commit. If present on load, that day's
+   * rows are ambiguous and get re-derived via an idempotent splice on the next
+   * run. Absent in normal (committed) state.
+   */
+  pendingDate?: string;
 }
 
 const cursorPath = (network: string, dataDir: string): string =>

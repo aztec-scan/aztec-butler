@@ -7,8 +7,8 @@
 #
 # The sheets-exporter is the event-sourced rewards accounting ledger (Part 2
 # Phase B). It runs on the monitoring server, reads chain state, and writes the
-# daily ledger to Google Sheets. The one-time historical `--backfill` is run
-# manually (see docs/sheets-exporter.md), not by this installer.
+# daily ledger to Google Sheets. The service is self-healing: on first start it
+# reconstructs the full history, and after downtime it catches up automatically.
 #
 set -e
 
@@ -118,6 +118,8 @@ echo "Useful commands:"
 echo "  Check status:  sudo systemctl status ${SERVICE_NAME}"
 echo "  Follow logs:   sudo journalctl -u ${SERVICE_NAME} -f"
 echo ""
-echo "Reminder: run the one-time historical backfill separately (in tmux):"
+echo "On first start the service does a cold-start catch-up (reconstructs the full"
+echo "history) — follow the logs for 'catch-up progress' lines."
+echo "Optionally pre-fill faster in tmux before/instead:"
 echo "  $NODE_PATH $INSTALL_DIR/dist/index.js sheets-exporter --network ${NETWORK} --backfill"
 echo "See docs/sheets-exporter.md."

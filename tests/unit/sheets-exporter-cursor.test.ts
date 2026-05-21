@@ -45,6 +45,22 @@ test("saveCursor / loadCursor round-trip", async () => {
   assert.deepEqual(loaded, cursor);
 });
 
+test("saveCursor / loadCursor round-trip — with a pendingDate marker", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rewards-cursor-"));
+  const cursor: RewardsCursor = {
+    network: "mainnet",
+    lastBlock: "23456789",
+    lastDate: "2026-05-20",
+    balances: { "0xaa": "1000" },
+    updatedAt: new Date().toISOString(),
+    pendingDate: "2026-05-21",
+  };
+  await saveCursor(cursor, dir);
+  const loaded = await loadCursor("mainnet", dir);
+  assert.deepEqual(loaded, cursor);
+  assert.equal(loaded?.pendingDate, "2026-05-21");
+});
+
 test("cursors are isolated per network", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rewards-cursor-"));
   await saveCursor(

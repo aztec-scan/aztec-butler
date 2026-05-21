@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SplitAllocationData } from "../../src/core/components/EthereumClient.js";
-import { buildLedgerRows, sumLedgerRows } from "../../src/core/components/rewards-ledger.js";
+import {
+  buildLedgerRows,
+  splitAt,
+  sumLedgerRows,
+  type SplitTimeline,
+} from "../../src/core/components/rewards-ledger.js";
 
 const DECIMALS = 18;
 /** whole tokens -> raw base units */
@@ -116,4 +121,49 @@ test("sumLedgerRows — totals across coinbases", () => {
   const total = sumLedgerRows(rows);
   assert.equal(total.accruedAztec, 100);
   assert.equal(total.ourShareAztec, 100);
+});
+
+// ── splitAt (timeline lookup) ───────────────────────────────────────────────
+
+const ver = (block: bigint, recipients: string[], allocs: bigint[], total: bigint) => ({
+  block,
+  split: split(recipients, allocs, total),
+});
+
+test("splitAt — coinbase absent from the timeline → null", () => {
+  assert.equal(splitAt(new Map() as SplitTimeline, "0xaa", 100n), null);
+});
+
+test("splitAt — empty history → null", () => {
+  const tl: SplitTimeline = new Map([["0xaa", []]]);
+  assert.equal(splitAt(tl, "0xaa", 100n), null);
+});
+
+test("splitAt — atBlock before the first version → null", () => {
+  const tl: SplitTimeline = new Map([["0xaa", [ver(100n, ["0xus"], [10_000n], 10_000n)]]]);
+  assert.equal(splitAt(tl, "0xaa", 50n), null);
+});
+
+test("splitAt — boundary is inclusive (atBlock == version block)", () => {
+  const v = ver(100n, ["0xus"], [10_000n], 10_000n);
+  const tl: SplitTimeline = new Map([["0xaa", [v]]]);
+  assert.equal(splitAt(tl, "0xaa", 100n), v.split);
+  assert.equal(splitAt(tl, "0xaa", 999n), v.split);
+});
+
+test("splitAt — picks the latest version with block <= atBlock", () => {
+  const v1 = ver(100n, ["0xus"], [10_000n], 10_000n);
+  const v2 = ver(200n, ["0xus", "0xother"], [5_000n, 5_000n], 10_000n);
+  const v3 = ver(300n, ["0xus"], [10_000n], 10_000n);
+  const tl: SplitTimeline = new Map([["0xaa", [v1, v2, v3]]]);
+  assert.equal(splitAt(tl, "0xaa", 150n), v1.split);
+  assert.equal(splitAt(tl, "0xaa", 200n), v2.split); // boundary → the newer version
+  assert.equal(splitAt(tl, "0xaa", 250n), v2.split);
+  assert.equal(splitAt(tl, "0xaa", 10_000n), v3.split);
+});
+
+test("splitAt — coinbase key is case-insensitive", () => {
+  const v = ver(100n, ["0xus"], [10_000n], 10_000n);
+  const tl: SplitTimeline = new Map([["0xaa", [v]]]);
+  assert.equal(splitAt(tl, "0xAA", 100n), v.split);
 });

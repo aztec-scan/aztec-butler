@@ -26,6 +26,11 @@ const LOG_CHUNK = 10_000n;
 export type RpcGate = <T>(fn: () => Promise<T>) => Promise<T>;
 const noGate: RpcGate = (fn) => fn();
 
+/** One `SplitUpdated` version: the allocation and the block it took effect. */
+export type SplitVersion = { block: bigint; split: SplitAllocationData };
+/** Per-coinbase (lowercase) `SplitUpdated` history, ascending by block. */
+export type SplitTimeline = Map<string, SplitVersion[]>;
+
 /** One coinbase's figures for a ledger period, in whole AZTEC. */
 export interface LedgerRow {
   coinbase: string;
@@ -133,6 +138,48 @@ const scanClaims = async (
   return claims;
 };
 
+/**
+ * Resolve each coinbase's full `SplitUpdated` history in one scan per coinbase
+ * (via `getSplitHistory`). The day loop then picks the active version with the
+ * pure {@link splitAt} — replacing a per-day `getLatestSplitAllocations` call
+ * with a per-run one, so cost is independent of the number of days.
+ */
+export const buildSplitTimelines = async (
+  eth: EthereumClient,
+  coinbases: string[],
+  splitScanFromBlock: bigint,
+  toBlock: bigint,
+  gate: RpcGate = noGate,
+): Promise<SplitTimeline> => {
+  const timelines: SplitTimeline = new Map();
+  for (const coinbase of coinbases) {
+    const history = await gate(() =>
+      eth.getSplitHistory(coinbase, splitScanFromBlock, toBlock).catch(() => []),
+    );
+    timelines.set(coinbase.toLowerCase(), history);
+  }
+  return timelines;
+};
+
+/**
+ * The split allocation in effect at `atBlock` — the latest version with
+ * `block <= atBlock`, or null if the coinbase had none yet. Pure — unit tested.
+ */
+export const splitAt = (
+  timelines: SplitTimeline,
+  coinbase: string,
+  atBlock: bigint,
+): SplitAllocationData | null => {
+  const history = timelines.get(coinbase.toLowerCase());
+  if (!history || history.length === 0) return null;
+  let active: SplitAllocationData | null = null;
+  for (const version of history) {
+    if (version.block > atBlock) break; // ascending — nothing later qualifies
+    active = version.split;
+  }
+  return active;
+};
+
 export interface LedgerPeriodParams {
   eth: EthereumClient;
   coinbases: string[];
@@ -144,22 +191,22 @@ export interface LedgerPeriodParams {
   prevBalances: Map<string, bigint>;
   startBlock: bigint;
   endBlock: bigint;
-  /** Start block for the `SplitUpdated` scan. */
-  splitScanFromBlock: bigint;
+  /** Per-coinbase `SplitUpdated` timelines — build once with buildSplitTimelines. */
+  splitTimelines: SplitTimeline;
   /** Historical period — read state at `endBlock` via the archive client. */
   historical?: boolean;
   gate?: RpcGate;
 }
 
 /**
- * Compute one ledger period: read balances + claims + splits, then apply the
- * `accrued = Δbalance + claims` formula.
+ * Compute one ledger period: read balances + claims, apply the split active at
+ * `endBlock` from the supplied timelines, then `accrued = Δbalance + claims`.
  */
 export const computeLedgerPeriod = async (
   params: LedgerPeriodParams,
 ): Promise<LedgerPeriodResult> => {
   const { eth, coinbases, rollups, rewardToken, ourRecipient, prevBalances } = params;
-  const { startBlock, endBlock, splitScanFromBlock } = params;
+  const { startBlock, endBlock, splitTimelines } = params;
   const gate = params.gate ?? noGate;
   const historical = params.historical ?? false;
 
@@ -191,21 +238,13 @@ export const computeLedgerPeriod = async (
     gate,
   );
 
-  // 3. Latest split allocation per coinbase, as of endBlock.
-  const splits = new Map<string, SplitAllocationData | null>();
-  for (const coinbase of coinbases) {
-    const split = await gate(() =>
-      eth.getLatestSplitAllocations(coinbase, splitScanFromBlock, endBlock).catch(() => null),
-    );
-    splits.set(coinbase.toLowerCase(), split);
-  }
-
+  // 3. Apply the split active at endBlock — a pure lookup into the timelines.
   const rows = buildLedgerRows(
     coinbases,
     prevBalances,
     endBalances,
     claims,
-    (coinbase) => splits.get(coinbase.toLowerCase()) ?? null,
+    (coinbase) => splitAt(splitTimelines, coinbase, endBlock),
     ourRecipient,
     rewardToken.decimals,
   );

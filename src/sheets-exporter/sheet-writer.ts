@@ -1,13 +1,14 @@
 /**
  * Google Sheets writer for the rewards ledger.
  *
- * Self-contained: service-account auth + write modes —
- *  - `overwriteSheet`: clear a tab then write from the origin (used by a full
- *    `--backfill`; idempotent — re-running rewrites the cells);
- *  - `appendRows`: append rows after existing data (used by the recurring
- *    exporter to add each new day);
+ * Self-contained: service-account auth + write helpers —
+ *  - `readSheet`: fetch a tab's current rows;
+ *  - `appendRows`: add rows after the existing data (the catch-up's hot path —
+ *    cost is independent of how large the tab has already grown);
+ *  - `overwriteSheet`: replace a tab's contents (write first, then clear any
+ *    stale trailing rows — safe to interrupt, never loses covered rows);
  *  - `spliceSheet`: replace only a date window, preserving every other row
- *    (used by a ranged `--backfill` to repair specific days).
+ *    (crash-repair of one day, and ranged `--backfill` corrections).
  */
 
 import fs from "node:fs/promises";
@@ -54,7 +55,11 @@ const sheetNameOf = (range: string): string => {
   return bang === -1 ? range : range.slice(0, bang);
 };
 
-/** Clear a tab, then write `rows` (header + data) from the range origin. */
+/**
+ * Replace a tab's contents with `rows` (header + data). Writes from the origin
+ * first, then clears any stale rows left below the new data. Constructive write
+ * before destructive clear — an interrupted call never loses covered rows.
+ */
 export const overwriteSheet = async (
   spreadsheetId: string,
   range: string,
@@ -62,13 +67,6 @@ export const overwriteSheet = async (
   token: string,
 ): Promise<void> => {
   const sheetName = sheetNameOf(range);
-  const clearRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:clear`,
-    { method: "POST", headers: authHeaders(token), body: "{}" },
-  );
-  if (!clearRes.ok && clearRes.status !== 400 && clearRes.status !== 404) {
-    throw new Error(`Failed to clear "${sheetName}" (${clearRes.status}): ${await clearRes.text()}`);
-  }
 
   const putRes = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
@@ -80,6 +78,19 @@ export const overwriteSheet = async (
   );
   if (!putRes.ok) {
     throw new Error(`Failed to write "${range}" (${putRes.status}): ${await putRes.text()}`);
+  }
+
+  // Clear rows left over below the new data (when the tab shrank). A range past
+  // the grid returns 400 — tolerated, same as an already-empty tail.
+  const tail = `${sheetName}!A${rows.length + 1}:ZZ`;
+  const clearRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(tail)}:clear`,
+    { method: "POST", headers: authHeaders(token), body: "{}" },
+  );
+  if (!clearRes.ok && clearRes.status !== 400 && clearRes.status !== 404) {
+    throw new Error(
+      `Failed to clear stale rows in "${sheetName}" (${clearRes.status}): ${await clearRes.text()}`,
+    );
   }
 };
 
@@ -144,7 +155,10 @@ export const spliceSheet = async (
   return { preserved: merged.length - replacement.length, replaced: replacement.length };
 };
 
-/** Append `rows` after the existing data in the range's tab. */
+/**
+ * Append `rows` after the existing data in the range's tab. O(rows added) — the
+ * cost does not grow with the tab, which is what lets the catch-up scale.
+ */
 export const appendRows = async (
   spreadsheetId: string,
   range: string,

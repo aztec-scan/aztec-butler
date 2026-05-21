@@ -14,6 +14,7 @@ import { AztecClient } from "../core/components/AztecClient.js";
 import { CoinbaseScraper } from "../core/components/CoinbaseScraper.js";
 import { EthereumClient } from "../core/components/EthereumClient.js";
 import {
+  buildSplitTimelines,
   computeLedgerPeriod,
   sumLedgerRows,
   type LedgerRow,
@@ -26,6 +27,10 @@ import { appendRows, getSheetsAccessToken, overwriteSheet, spliceSheet } from ".
 
 const AVG_BLOCK_SEC = 12; // L1 Ethereum (mainnet + Sepolia) — used only for day-boundary estimates
 const DAY_SEC = 86_400;
+const PROGRESS_EVERY_DAYS = 10; // how often a long catch-up logs progress
+
+/** Format a day-aligned epoch-second timestamp as YYYY-MM-DD. */
+const isoDay = (epochSec: number): string => new Date(epochSec * 1000).toISOString().slice(0, 10);
 
 const LEDGER_HEADER = [
   "date",
@@ -166,86 +171,182 @@ const prepareChain = async (config: SheetsExporterConfig): Promise<ChainContext>
   return { eth, rollups, rewardToken, ourRecipient, coinbases };
 };
 
-/** Recurring run: one period since the cursor, append today's rows. */
-const runRecurring = async (
+/**
+ * Resolve where a catch-up run must start.
+ *
+ *  - no cursor      → cold start at `genesisDay`;
+ *  - cursor present → the day after `cursor.lastDate`.
+ *
+ * `upToDate` is true when that start is already past yesterday — nothing to do.
+ * Pure — unit-tested.
+ */
+export const resolveCatchUpStart = (
+  cursorLastDate: string | null,
+  genesisDay: number,
+  lastCompleteDay: number,
+): { fromDay: number; upToDate: boolean } => {
+  if (!cursorLastDate) {
+    return { fromDay: genesisDay, upToDate: genesisDay > lastCompleteDay };
+  }
+  const cursorDay = Math.floor(Date.parse(`${cursorLastDate}T00:00:00Z`) / 1000 / DAY_SEC) * DAY_SEC;
+  const fromDay = cursorDay + DAY_SEC;
+  return { fromDay, upToDate: fromDay > lastCompleteDay };
+};
+
+/**
+ * Self-healing ledger advance — the recurring service's only operation.
+ *
+ * Brings the Sheet from wherever the cursor sits up to yesterday, one day at a
+ * time:
+ *  - no cursor      → cold start: reset the tabs and rebuild from genesis;
+ *  - stale cursor   → fill the gap day by day (no lumping);
+ *  - current cursor → nothing to do.
+ *
+ * Each day is **appended** — the write cost is independent of how large the tab
+ * has grown, so it scales to hundreds of coinbases. The cursor is committed
+ * after every day, so a crash redoes at most one day. The day in flight is
+ * marked (`pendingDate`); if a crash interrupts its append, the next run
+ * re-derives that one day with an idempotent splice instead of appending a
+ * duplicate.
+ */
+const runCatchUp = async (
   config: SheetsExporterConfig,
   ctx: ChainContext,
   dryRun: boolean,
 ): Promise<void> => {
-  const currentBlock = await ctx.eth.getPublicClient().getBlockNumber();
-  const today = new Date().toISOString().slice(0, 10);
-  const cursor = await loadCursor(config.network);
+  const client = ctx.eth.getPublicClient();
+  const currentBlock = await client.getBlockNumber();
+  const currentTs = Number((await client.getBlock({ blockNumber: currentBlock })).timestamp);
+  const lastCompleteDay = Math.floor(currentTs / DAY_SEC) * DAY_SEC - DAY_SEC;
 
-  if (!cursor) {
-    // First run — establish the baseline; the first ledger row comes next run.
-    const { endBalances } = await computeLedgerPeriod({
+  const startTs = Number(
+    (await client.getBlock({ blockNumber: config.stakingRewardsSplitFromBlock })).timestamp,
+  );
+  const genesisDay = Math.floor(startTs / DAY_SEC) * DAY_SEC;
+
+  const cursor = await loadCursor(config.network);
+  const { fromDay, upToDate } = resolveCatchUpStart(
+    cursor?.lastDate ?? null,
+    genesisDay,
+    lastCompleteDay,
+  );
+  if (upToDate) {
+    console.log(
+      `[sheets-exporter] ledger up to date (through ${cursor?.lastDate ?? "genesis"}) — nothing to catch up.`,
+    );
+    return;
+  }
+
+  const coldStart = !cursor;
+  // The day in flight when a previous run crashed — re-derive it via splice.
+  const repairDay = cursor?.pendingDate;
+
+  let prevBalances = cursor ? balancesFromRecord(cursor.balances) : new Map<string, bigint>();
+  let prevBlock = cursor ? BigInt(cursor.lastBlock) : config.stakingRewardsSplitFromBlock;
+  let committedDate = cursor?.lastDate ?? isoDay(fromDay - DAY_SEC);
+
+  const fromStr = isoDay(fromDay);
+  const toStr = isoDay(lastCompleteDay);
+  const totalDays = (lastCompleteDay - fromDay) / DAY_SEC + 1;
+  console.log(
+    `[sheets-exporter] catching up ${totalDays} day(s): ${fromStr}..${toStr}` +
+      (coldStart ? " (cold start — full history)" : "") +
+      (repairDay ? ` (repairing in-flight day ${repairDay})` : ""),
+  );
+
+  const gate = new RateLimiter({ maxRps: config.maxRps }).run;
+  const token = dryRun ? "" : await getSheetsAccessToken(config.gcpKeyFile);
+
+  // Resolve each coinbase's split history once — the day loop then picks the
+  // active version per day with a pure lookup (no per-day RPC).
+  console.log(`[sheets-exporter] resolving split history for ${ctx.coinbases.length} coinbase(s)…`);
+  const splitTimelines = await buildSplitTimelines(
+    ctx.eth, ctx.coinbases, config.stakingRewardsSplitFromBlock, currentBlock, gate,
+  );
+
+  // Cold start: reset both tabs to a bare header — a clean rebuild from scratch.
+  if (coldStart && !dryRun) {
+    await overwriteSheet(config.spreadsheetId, config.ledgerRange, [LEDGER_HEADER], token);
+    await overwriteSheet(config.spreadsheetId, config.dailyTotalRange, [TOTAL_HEADER], token);
+  }
+
+  const dryRunSample: string[][] = [];
+  let done = 0;
+
+  for (let day = fromDay; day <= lastCompleteDay; day += DAY_SEC) {
+    const date = isoDay(day);
+    const endBlock = estimateBlock(
+      day + DAY_SEC, currentBlock, currentTs, config.stakingRewardsSplitFromBlock,
+    );
+    const { rows, endBalances } = await computeLedgerPeriod({
       eth: ctx.eth,
       coinbases: ctx.coinbases,
       rollups: ctx.rollups,
       rewardToken: ctx.rewardToken,
       ourRecipient: ctx.ourRecipient,
-      prevBalances: new Map(),
-      startBlock: currentBlock,
-      endBlock: currentBlock,
-      splitScanFromBlock: config.stakingRewardsSplitFromBlock,
+      prevBalances,
+      startBlock: prevBlock,
+      endBlock,
+      splitTimelines,
+      historical: true,
+      gate,
     });
-    if (!dryRun) {
+    const ledgerCells = rows.map((row) => ledgerRowCells(date, row));
+    const totalCells = [totalRowCells(date, sumLedgerRows(rows))];
+
+    if (dryRun) {
+      dryRunSample.push(...totalCells);
+    } else {
+      // Mark the day in flight, write it, then commit. A crash mid-write leaves
+      // `pendingDate` set so the next run repairs exactly this day.
       await saveCursor({
         network: config.network,
-        lastBlock: currentBlock.toString(),
-        lastDate: today,
+        lastBlock: prevBlock.toString(),
+        lastDate: committedDate,
+        balances: balancesToRecord(prevBalances),
+        updatedAt: new Date().toISOString(),
+        pendingDate: date,
+      });
+      if (date === repairDay) {
+        // This day's prior append was interrupted — replace it idempotently.
+        await spliceSheet(
+          config.spreadsheetId, config.ledgerRange, LEDGER_HEADER, ledgerCells, date, date, token,
+        );
+        await spliceSheet(
+          config.spreadsheetId, config.dailyTotalRange, TOTAL_HEADER, totalCells, date, date, token,
+        );
+      } else {
+        await appendRows(config.spreadsheetId, config.ledgerRange, ledgerCells, token);
+        await appendRows(config.spreadsheetId, config.dailyTotalRange, totalCells, token);
+      }
+      await saveCursor({
+        network: config.network,
+        lastBlock: endBlock.toString(),
+        lastDate: date,
         balances: balancesToRecord(endBalances),
         updatedAt: new Date().toISOString(),
       });
     }
-    console.log(
-      dryRun
-        ? "[sheets-exporter] --dry-run: baseline computed (cursor not persisted)."
-        : "[sheets-exporter] Baseline established — first ledger row on the next run.",
+
+    prevBalances = endBalances;
+    prevBlock = endBlock;
+    committedDate = date;
+    done++;
+    if (done % PROGRESS_EVERY_DAYS === 0 && done < totalDays) {
+      console.log(`[sheets-exporter] catch-up progress: ${done}/${totalDays} days (through ${date})`);
+    }
+  }
+
+  if (dryRun) {
+    console.log(`[sheets-exporter] --dry-run: ${done} day(s) computed, not written. Daily totals:`);
+    console.table(
+      dryRunSample.length <= 12
+        ? dryRunSample
+        : [...dryRunSample.slice(0, 5), ["…"], ...dryRunSample.slice(-5)],
     );
     return;
   }
-
-  const startBlock = BigInt(cursor.lastBlock);
-  if (currentBlock <= startBlock) {
-    console.log("[sheets-exporter] No new blocks since last run — nothing to do.");
-    return;
-  }
-
-  const { rows, endBalances } = await computeLedgerPeriod({
-    eth: ctx.eth,
-    coinbases: ctx.coinbases,
-    rollups: ctx.rollups,
-    rewardToken: ctx.rewardToken,
-    ourRecipient: ctx.ourRecipient,
-    prevBalances: balancesFromRecord(cursor.balances),
-    startBlock,
-    endBlock: currentBlock,
-    splitScanFromBlock: config.stakingRewardsSplitFromBlock,
-  });
-
-  const ledgerCells = rows.map((row) => ledgerRowCells(today, row));
-  const totalCells = [totalRowCells(today, sumLedgerRows(rows))];
-
-  if (dryRun) {
-    console.log(`[sheets-exporter] --dry-run: ledger rows for ${today}:`);
-    console.table([...ledgerCells, ["—"], ...totalCells]);
-  } else {
-    const token = await getSheetsAccessToken(config.gcpKeyFile);
-    await appendRows(config.spreadsheetId, config.ledgerRange, ledgerCells, token);
-    await appendRows(config.spreadsheetId, config.dailyTotalRange, totalCells, token);
-    console.log(`[sheets-exporter] Appended ${ledgerCells.length} ledger row(s) for ${today}.`);
-  }
-
-  if (!dryRun) {
-    await saveCursor({
-      network: config.network,
-      lastBlock: currentBlock.toString(),
-      lastDate: today,
-      balances: balancesToRecord(endBalances),
-      updatedAt: new Date().toISOString(),
-    });
-  }
+  console.log(`[sheets-exporter] catch-up complete — ledger current through ${toStr}.`);
 };
 
 interface BackfillRange {
@@ -305,6 +406,13 @@ const runBackfill = async (
   const toDateStr = new Date(lastCompleteDay * 1000).toISOString().slice(0, 10);
 
   const gate = new RateLimiter({ maxRps: config.maxRps }).run;
+
+  // Resolve each coinbase's split history once, up front (not per day).
+  console.log(`[sheets-exporter] resolving split history for ${ctx.coinbases.length} coinbase(s)…`);
+  const splitTimelines = await buildSplitTimelines(
+    ctx.eth, ctx.coinbases, config.stakingRewardsSplitFromBlock, currentBlock, gate,
+  );
+
   const ledgerCells: string[][] = [];
   const totalCells: string[][] = [];
   let prevBalances = new Map<string, bigint>();
@@ -327,7 +435,7 @@ const runBackfill = async (
       prevBalances: new Map(),
       startBlock: prevBlock,
       endBlock: prevBlock,
-      splitScanFromBlock: config.stakingRewardsSplitFromBlock,
+      splitTimelines,
       historical: true,
       gate,
     });
@@ -355,7 +463,7 @@ const runBackfill = async (
       prevBalances,
       startBlock: prevBlock,
       endBlock,
-      splitScanFromBlock: config.stakingRewardsSplitFromBlock,
+      splitTimelines,
       historical: true,
       gate,
     });
@@ -446,15 +554,15 @@ export const startSheetsExporter = async (options: SheetsExporterOptions = {}): 
     return;
   }
 
-  // Recurring mode.
-  await runRecurring(config, ctx, options.dryRun ?? false);
+  // Recurring mode — self-healing: catch up any gap on start, then watch.
+  await runCatchUp(config, ctx, options.dryRun ?? false);
   if (options.once || options.dryRun) {
     return;
   }
 
   const tick = () => {
-    void runRecurring(config, ctx, false).catch((error) => {
-      console.error("[sheets-exporter] Run failed:", error);
+    void runCatchUp(config, ctx, false).catch((error) => {
+      console.error("[sheets-exporter] Catch-up run failed:", error);
     });
   };
   const handle = setInterval(tick, config.intervalMs);

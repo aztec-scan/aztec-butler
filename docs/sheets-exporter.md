@@ -100,15 +100,24 @@ aztec-butler sheets-exporter --network <network> [options]
   --backfill              reconstruct historical ledger rows, then exit
   --from-date <DATE>      with --backfill: recompute from DATE (YYYY-MM-DD) onward
   --days <n>              with --backfill: recompute only the last <n> complete days
-  --once                  run a single recurring cycle, then exit
+  --once                  run a single catch-up cycle, then exit
   --dry-run               compute and print; do not write the Sheet or cursor
   --config <path>         override the per-network base env file path
 ```
 
-- **Recurring** (no `--backfill`): on the first run it records a *baseline*
-  (current balances, no rows). Each subsequent run appends one ledger period.
-- **Backfill** (`--backfill`): walks day-by-day, writes daily rows, then leaves
-  a cursor the recurring service picks up from.
+- **Recurring** (no `--backfill`) — the self-healing default. Every run advances
+  the ledger from the cursor to yesterday, day by day:
+  - first run / no cursor → cold start: reconstructs the full history from
+    `STAKING_REWARDS_SPLIT_FROM_BLOCK`;
+  - after downtime → fills the gap day by day (no lumping);
+  - already current → nothing to do.
+
+  Each day is appended and committed individually, so a crash resumes from the
+  last completed day. Append cost is independent of tab size — it scales to
+  hundreds of coinbases.
+- **Backfill** (`--backfill`) — an explicit one-shot reconstruction, then exit.
+  Optional now that recurring self-heals; still useful as a fast first fill or
+  to correct a window.
   - *Full* (no range): from `STAKING_REWARDS_SPLIT_FROM_BLOCK` to yesterday;
     overwrites both tabs.
   - *Ranged* (`--from-date` or `--days`): recomputes only that window and
@@ -125,57 +134,57 @@ persists nothing — safe to run anywhere, including without the GCP key.
 The sheets-exporter runs on the **monitoring server** only (one instance,
 chain-wide). Sequencer hosts do not run it.
 
-### Step 1 — one-time historical backfill
-
-The backfill is long-running and archive-RPC heavy. Run it manually in `tmux`,
-**before** installing the service:
-
-```bash
-tmux new -s butler-backfill
-node dist/index.js sheets-exporter --network mainnet --backfill
-```
-
-Dry-run it first to sanity-check the computation without touching the Sheet:
-
-```bash
-node dist/index.js sheets-exporter --network mainnet --backfill --dry-run
-```
-
-The backfill self-rate-limits to `SHEETS_EXPORTER_MAX_RPS` and retries
-throttling responses, so a free archive endpoint is fine — it just takes
-longer. It overwrites both tabs and writes the resume cursor on completion.
-
-### Step 2 — install the recurring service
+The service is **self-healing** — on first start it reconstructs the full
+history, and after any downtime it catches up the gap automatically. So
+deployment is a single step:
 
 ```bash
 sudo ./daemon/install-sheets-exporter.sh mainnet
 ```
 
-This builds the project and installs the `aztec-butler-sheets-exporter`
-systemd service running `sheets-exporter --network <network>` (recurring mode)
-with read-only hardening (`ProtectSystem=strict`, `ProtectHome=read-only`,
-`NoNewPrivileges`). The env-paths data dir is the only writable path — it holds
-the resume cursor and the coinbase-mapping cache.
+This builds the project and installs the `aztec-butler-sheets-exporter` systemd
+service running `sheets-exporter --network <network>` with read-only hardening
+(`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`). The
+env-paths data dir is the only writable path — it holds the resume cursor and
+the coinbase-mapping cache.
 
 ```bash
 sudo systemctl status aztec-butler-sheets-exporter
 sudo journalctl -u aztec-butler-sheets-exporter -f
 ```
 
-The service resumes from the cursor the backfill left, so no day is double-
-counted or skipped between the two steps.
+On its **first start** the service does a cold-start catch-up: it reconstructs
+the ledger from `STAKING_REWARDS_SPLIT_FROM_BLOCK` to yesterday, one day at a
+time. This is archive-RPC heavy and can take a while on a free endpoint —
+follow the journal for `catch-up progress` lines. Each day is committed
+individually, so a restart resumes from the last completed day rather than
+starting over.
+
+### Optional — a faster initial fill
+
+For a large history you can pre-fill in one foreground pass instead of letting
+the service cold-start:
+
+```bash
+tmux new -s butler-backfill
+node dist/index.js sheets-exporter --network mainnet --backfill --dry-run   # inspect first
+node dist/index.js sheets-exporter --network mainnet --backfill
+```
+
+`--backfill` computes the whole history in memory and writes it in one pass, and
+lets you `--dry-run` inspect it first. It leaves a cursor; when the service then
+starts it finds the ledger already current and goes straight to watching.
 
 ---
 
 ## 6. Recovering from downtime
 
-The recurring service computes **one period per run** and dates every row with
-the run day. If it misses runs (reboot, crash, maintenance), the next run still
-computes the correct *totals* — `Δbalance + claims` is exact over any gap — but
-it lumps the whole gap into a single fat row dated today, and the skipped dates
-get no row. No value is lost; only the per-day breakdown.
+Nothing to do — the service is self-healing. On restart it reads its cursor,
+detects the gap, and catches up day by day automatically (see §5). A multi-day
+outage produces correct per-day rows, not a lumped row.
 
-To restore clean per-day rows for the affected window, run a **ranged backfill**:
+The ranged `--backfill` (`--from-date` / `--days`) is for **correcting** an
+existing window — e.g. re-deriving days after a fix — not for filling gaps:
 
 ```bash
 sudo systemctl stop aztec-butler-sheets-exporter
@@ -190,27 +199,21 @@ node dist/index.js sheets-exporter --network mainnet --backfill --from-date 2026
 sudo systemctl start aztec-butler-sheets-exporter
 ```
 
-A ranged backfill:
+A ranged backfill recomputes only the requested window (always ending
+yesterday), **splices** it into the Sheet — rows outside the window are
+preserved — anchors its opening balances with one historical read at the window
+start, and refreshes the cursor so the service resumes cleanly. Stop the service
+first so the two processes don't write concurrently.
 
-- recomputes only the requested window (always ending yesterday);
-- **splices** the result into the Sheet — rows outside the window are read back
-  and rewritten unchanged, so no other ledger data is lost;
-- anchors its opening balances with one historical read at the window start, so
-  the spliced rows are numerically identical to a full backfill's;
-- refreshes the cursor, so the recurring service resumes cleanly.
-
-Stop the recurring service first so the two processes don't write concurrently.
-
-> A splice still rewrites the whole tab (preserved rows included), so manual
-> edits in *extra columns* of `RewardsLedger` / `RewardsDailyTotal` are not
-> retained — keep any analysis in a separate tab.
+> The exporter owns the `RewardsLedger` / `RewardsDailyTotal` tabs and rewrites
+> them — keep any manual analysis in a separate tab.
 
 ---
 
 ## 7. Local testing
 
 ```bash
-# Recurring dry-run — full chain plumbing, one period, nothing persisted:
+# Catch-up dry-run — cold-start path, computed but not persisted:
 npm run build
 node dist/index.js sheets-exporter --network testnet --once --dry-run
 
