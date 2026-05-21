@@ -79,7 +79,7 @@ export const registerAgentMetrics = (meter: Meter, config: AgentConfig): void =>
     registerLocalMetrics(meter);
   }
   if (modeHasGlobalScrapers(config.mode)) {
-    registerGlobalMetrics(meter);
+    registerGlobalMetrics(meter, config);
   }
 };
 
@@ -265,7 +265,7 @@ const registerLocalMetrics = (meter: Meter): void => {
 };
 
 /** Register the chain-wide (host-less) metrics. */
-const registerGlobalMetrics = (meter: Meter): void => {
+const registerGlobalMetrics = (meter: Meter, config: AgentConfig): void => {
   const entryQueueLength = meter.createObservableGauge(
     metricName("global_entry_queue_length"),
     { description: "Total attesters waiting in the global rollup entry queue" },
@@ -337,4 +337,55 @@ const registerGlobalMetrics = (meter: Meter): void => {
       result.observe(ts, globalAttributes(global.network, { scraper }));
     }
   });
+
+  // ── global: staking rewards (Part 2 Phase A) ────────────────────────────
+  if (config.rewardsEnabled) {
+    const rewardsPending = meter.createObservableGauge(
+      metricName("staking_rewards_pending_aztec"),
+      { description: "Pending sequencer rewards for a coinbase, in whole AZTEC", unit: "AZTEC" },
+    );
+    rewardsPending.addCallback((result) => {
+      const { global } = getAgentState();
+      for (const reward of global.rewards.values()) {
+        result.observe(
+          reward.pendingAztec,
+          globalAttributes(global.network, { coinbase: reward.coinbase }),
+        );
+      }
+    });
+
+    const rewardsOurShare = meter.createObservableGauge(
+      metricName("staking_rewards_our_share_aztec"),
+      {
+        description: "Our portion of pending rewards for a coinbase, in whole AZTEC",
+        unit: "AZTEC",
+      },
+    );
+    rewardsOurShare.addCallback((result) => {
+      const { global } = getAgentState();
+      for (const reward of global.rewards.values()) {
+        result.observe(
+          reward.ourShareAztec,
+          globalAttributes(global.network, { coinbase: reward.coinbase }),
+        );
+      }
+    });
+
+    const rewardsEarned = meter.createObservableCounter(
+      metricName("staking_rewards_earned_aztec"),
+      {
+        description: "Cumulative rewards earned for our recipient per coinbase, in whole AZTEC",
+        unit: "AZTEC",
+      },
+    );
+    rewardsEarned.addCallback((result) => {
+      const { global } = getAgentState();
+      for (const reward of global.rewards.values()) {
+        result.observe(
+          reward.earnedAztec,
+          globalAttributes(global.network, { coinbase: reward.coinbase }),
+        );
+      }
+    });
+  }
 };

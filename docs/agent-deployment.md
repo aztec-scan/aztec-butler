@@ -20,7 +20,7 @@ aztec-butler agent --mode all    --network mainnet    # dev / test / single-box
 | Mode | Scrapers | Requires | Emits | Runs on |
 |---|---|---|---|---|
 | `node` | local keys, local status, publisher balances, entry-queue ETA | `BUTLER_AGENT_HOST` | `host`-labelled local metrics only | every sequencer host |
-| `global` | global chain stats | archive RPC (when rewards is added); no `HOST` | `network`-labelled global metrics only | exactly one host per network |
+| `global` | global chain stats, rewards (opt-in) | archive RPC when rewards on; no `HOST` | `network`-labelled global metrics only | exactly one host per network |
 | `all` | everything | `HOST` + archive RPC | both | dev / test / single-box only |
 
 The mode selects the scraper set **and** the metric-instrument set. A `global`
@@ -45,6 +45,8 @@ The agent reads the standard per-network base env file
 | `BUTLER_AGENT_SCRAPE_INTERVAL_MS` | `30000` | Local scraper interval (`node`/`all`). |
 | `BUTLER_AGENT_GLOBAL_SCRAPE_INTERVAL_MS` | `60000` | Global scraper interval (`global`/`all`). |
 | `BUTLER_AGENT_ENTRY_QUEUE_ETA_INTERVAL_MS` | `120000` | Entry-queue ETA scraper interval (`node`/`all`). |
+| `BUTLER_AGENT_REWARDS_ENABLED` | `false` | Enable the staking-rewards scraper (`global`/`all` mode). |
+| `BUTLER_AGENT_REWARDS_INTERVAL_MS` | `3600000` | Rewards scraper interval. |
 
 The per-scraper boolean toggles were removed — the run mode determines the
 scraper set.
@@ -55,13 +57,17 @@ scraper set.
 NETWORK=mainnet
 ETHEREUM_CHAIN_ID=1
 ETHEREUM_NODE_URL=...
-ETHEREUM_ARCHIVE_NODE_URL=...                     # optional, useful for Olla queue reads
+ETHEREUM_ARCHIVE_NODE_URL=...                     # required when rewards enabled; also Olla queue reads
 AZTEC_NODE_URL=...
 MIN_ETH_PER_ATTESTER=0.1                          # used for publisher top-up calc
 
 AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=...          # native registry admin
 OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=...     # Olla registry admin
 OLLA_AZTEC_STAKING_REGISTRY_ADDRESS=...           # Olla registry contract
+
+STAKING_REWARDS_SPLIT_FROM_BLOCK=...              # rewards: StakedWithProvider event-scan start block
+REWARD_TOKEN_ADDRESS=...                          # rewards: optional; default = rollup staking asset
+SAFE_ADDRESS=...                                  # rewards: optional; recipient counted as "ours"
 ```
 
 ### Fail-closed safety
@@ -179,6 +185,9 @@ deployment that is the **monitoring server**; the sequencer hosts run
 | `aztec_butler_global_provider_queue_length` | `network, registry` |
 | `aztec_butler_global_provider_next_arrival_timestamp` | `network, registry` |
 | `aztec_butler_global_last_scraped_timestamp` | `network, scraper` |
+| `aztec_butler_staking_rewards_pending_aztec` | `network, coinbase` |
+| `aztec_butler_staking_rewards_our_share_aztec` | `network, coinbase` |
+| `aztec_butler_staking_rewards_earned_aztec` | `network, coinbase` |
 
 ### Example Grafana queries
 

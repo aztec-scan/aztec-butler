@@ -27,6 +27,7 @@ import { GlobalStatsScraper } from "./scrapers/global-stats-scraper.js";
 import { LocalKeyScraper } from "./scrapers/local-key-scraper.js";
 import { LocalStatusScraper } from "./scrapers/local-status-scraper.js";
 import { PublisherBalanceScraper } from "./scrapers/publisher-balance-scraper.js";
+import { RewardsStatsScraper } from "./scrapers/rewards-scraper.js";
 import { initAgentState } from "./state.js";
 
 export interface AgentRunOptions {
@@ -77,6 +78,12 @@ const buildScrapers = (config: AgentConfig, chain: AgentChainContext): Registere
       scraper: new GlobalStatsScraper(config, chain),
       intervalMs: config.globalScrapeIntervalMs,
     });
+    if (config.rewardsEnabled) {
+      scrapers.push({
+        scraper: new RewardsStatsScraper(config, chain),
+        intervalMs: config.rewardsIntervalMs,
+      });
+    }
   }
 
   return scrapers;

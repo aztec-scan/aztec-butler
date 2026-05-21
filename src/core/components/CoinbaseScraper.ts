@@ -201,6 +201,9 @@ export class CoinbaseScraper {
     const attesterSet = new Set(
       this.options.attesterAddresses.map((addr) => addr.toLowerCase()),
     );
+    // Empty attester list = discover-all mode: the StakedWithProvider getLogs
+    // is already filtered by providerIdentifier, so every event belongs to us.
+    const discoverAll = attesterSet.size === 0;
 
     // Fetch logs in chunks to avoid RPC limits
     const CHUNK_SIZE = 10000n;
@@ -230,8 +233,8 @@ export class CoinbaseScraper {
         const attester = log.args.attester!;
         const coinbase = log.args.coinbaseSplitContractAddress!;
 
-        // Only include attesters we're tracking
-        if (attesterSet.has(attester.toLowerCase())) {
+        // Include attesters we're tracking (or all, in discover-all mode)
+        if (discoverAll || attesterSet.has(attester.toLowerCase())) {
           // Get block details for timestamp
           const block = await client.getBlock({ blockNumber: log.blockNumber });
 

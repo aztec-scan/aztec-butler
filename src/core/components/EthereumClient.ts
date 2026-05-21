@@ -1467,4 +1467,32 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
     const rollupContract = this.getRollupContract();
     return await rollupContract.read.getCurrentEpoch();
   }
+
+  /**
+   * Get pending (unclaimed) sequencer rewards for a coinbase address.
+   */
+  async getSequencerRewards(coinbase: string): Promise<bigint> {
+    const rollupContract = this.getRollupContract();
+    return await rollupContract.read.getSequencerRewards([getAddress(coinbase)]);
+  }
+
+  /**
+   * Get the rollup's staking asset (reward token) address.
+   */
+  async getStakingAssetAddress(): Promise<Address> {
+    const rollupContract = this.getRollupContract();
+    return getAddress(await rollupContract.read.getStakingAsset());
+  }
+
+  /**
+   * Read the ERC-20 `decimals()` of a token contract.
+   */
+  async getTokenDecimals(token: string): Promise<number> {
+    const erc20 = getContract({
+      address: getAddress(token),
+      abi: erc20Abi,
+      client: this.client,
+    });
+    return await erc20.read.decimals();
+  }
 }

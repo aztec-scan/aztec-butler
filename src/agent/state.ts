@@ -72,10 +72,22 @@ export interface EntryQueueStatsState {
   lastUpdated: Date;
 }
 
+/** Live staking-rewards figures for one coinbase, in whole AZTEC. */
+export interface CoinbaseRewardState {
+  coinbase: string;
+  pendingAztec: number;
+  ourShareAztec: number;
+  /** Cumulative earned (sum of positive our-share deltas); resets on restart. */
+  earnedAztec: number;
+  lastUpdated: Date;
+}
+
 export interface GlobalSequencerState {
   network: string;
   registries: Partial<Record<Registry, ProviderQueueState>>;
   entryQueue: EntryQueueStatsState | null;
+  /** keyed by lowercase coinbase address */
+  rewards: Map<string, CoinbaseRewardState>;
   /** per-scraper last successful scrape time (unix seconds) */
   lastScraped: Map<string, number>;
 }
@@ -103,6 +115,7 @@ export const initAgentState = (network: string, host: string): AgentState => {
       network,
       registries: {},
       entryQueue: null,
+      rewards: new Map(),
       lastScraped: new Map(),
     },
   };

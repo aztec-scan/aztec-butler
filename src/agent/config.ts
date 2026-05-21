@@ -42,6 +42,7 @@ const DEFAULT_OTLP_EXPORT_INTERVAL_MS = 30_000;
 const DEFAULT_SCRAPE_INTERVAL_MS = 30_000;
 const DEFAULT_GLOBAL_SCRAPE_INTERVAL_MS = 60_000;
 const DEFAULT_ENTRY_QUEUE_ETA_INTERVAL_MS = 120_000;
+const DEFAULT_REWARDS_INTERVAL_MS = 3_600_000;
 
 export interface AgentConfig {
   network: string;
@@ -70,6 +71,17 @@ export interface AgentConfig {
   globalScrapeIntervalMs: number;
   /** Interval for the per-host entry-queue ETA scraper (`node`/`all` mode). */
   entryQueueEtaIntervalMs: number;
+
+  // ── rewards (Part 2 Phase A — `global`/`all` mode) ────────────────────
+  /** Enable the staking-rewards scraper. */
+  rewardsEnabled: boolean;
+  rewardsIntervalMs: number;
+  /** Start block for the `StakedWithProvider` event scan. Required when rewards enabled. */
+  stakingRewardsSplitFromBlock?: bigint;
+  /** Override the reward token; default = the rollup's staking asset. */
+  rewardTokenAddress?: string;
+  /** Recipient counted as "ours" in split allocations; default = the provider's rewardsRecipient. */
+  safeAddress?: string;
 
   // ── OTLP export ──────────────────────────────────────────────────────
   otlp: {
@@ -211,6 +223,12 @@ export const buildAgentConfig = (
       env.BUTLER_AGENT_ENTRY_QUEUE_ETA_INTERVAL_MS,
       DEFAULT_ENTRY_QUEUE_ETA_INTERVAL_MS,
     ),
+    rewardsEnabled: parseBool(env.BUTLER_AGENT_REWARDS_ENABLED, false),
+    rewardsIntervalMs: positiveInt(
+      "BUTLER_AGENT_REWARDS_INTERVAL_MS",
+      env.BUTLER_AGENT_REWARDS_INTERVAL_MS,
+      DEFAULT_REWARDS_INTERVAL_MS,
+    ),
     otlp: {
       enabled: parseBool(env.BUTLER_AGENT_OTLP_ENABLED, true),
       endpoint: env.BUTLER_AGENT_OTLP_ENDPOINT?.trim() || DEFAULT_OTLP_ENDPOINT,
@@ -239,6 +257,39 @@ export const buildAgentConfig = (
 
   const ollaRegistry = optionalAddress("OLLA_AZTEC_STAKING_REGISTRY_ADDRESS", env.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS);
   if (ollaRegistry) config.ollaStakingRegistryAddress = ollaRegistry;
+
+  const splitFromBlockRaw = env.STAKING_REWARDS_SPLIT_FROM_BLOCK?.trim();
+  if (splitFromBlockRaw) {
+    const parsed = z.coerce.bigint().nonnegative().safeParse(splitFromBlockRaw);
+    if (!parsed.success) {
+      throw new Error(
+        `Invalid configuration for STAKING_REWARDS_SPLIT_FROM_BLOCK: a non-negative integer is required (got "${splitFromBlockRaw}")`,
+      );
+    }
+    config.stakingRewardsSplitFromBlock = parsed.data;
+  }
+
+  const rewardToken = optionalAddress("REWARD_TOKEN_ADDRESS", env.REWARD_TOKEN_ADDRESS);
+  if (rewardToken) config.rewardTokenAddress = rewardToken;
+
+  const safe = optionalAddress("SAFE_ADDRESS", env.SAFE_ADDRESS);
+  if (safe) config.safeAddress = safe;
+
+  // Rewards (in global/all mode) needs archive RPC + an event-scan start block.
+  if (config.rewardsEnabled && modeHasGlobalScrapers(agentMode)) {
+    if (!config.ethereumArchiveNodeUrl) {
+      throw new Error(
+        "BUTLER_AGENT_REWARDS_ENABLED requires ETHEREUM_ARCHIVE_NODE_URL — the " +
+          "StakedWithProvider event scan needs an archive node.",
+      );
+    }
+    if (config.stakingRewardsSplitFromBlock === undefined) {
+      throw new Error(
+        "BUTLER_AGENT_REWARDS_ENABLED requires STAKING_REWARDS_SPLIT_FROM_BLOCK — " +
+          "the event-scan start block.",
+      );
+    }
+  }
 
   return config;
 };
