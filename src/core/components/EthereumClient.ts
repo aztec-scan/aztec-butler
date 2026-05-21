@@ -1477,6 +1477,25 @@ WARNING: Not enough staking tokens held by the rollup contract. Held: ${currentT
   }
 
   /**
+   * Get pending sequencer rewards for a coinbase on a SPECIFIC rollup version,
+   * optionally at a historical block. Used by the rewards ledger, which sums
+   * across all rollup versions and (for backfill) reads historical state.
+   *
+   * @param options.blockNumber  historical block (requires an archive node)
+   * @param options.useArchive   route via the archive client
+   */
+  async getSequencerRewardsAt(
+    coinbase: string,
+    rollupAddress: Address,
+    options?: { blockNumber?: bigint; useArchive?: boolean },
+  ): Promise<bigint> {
+    const rollup = this.getRollupContractAt(rollupAddress, options?.useArchive ?? false);
+    return await rollup.read.getSequencerRewards([getAddress(coinbase)], {
+      ...(options?.blockNumber !== undefined ? { blockNumber: options.blockNumber } : {}),
+    });
+  }
+
+  /**
    * Get the rollup's staking asset (reward token) address.
    */
   async getStakingAssetAddress(): Promise<Address> {

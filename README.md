@@ -100,6 +100,7 @@ See [src/server/state/index.ts](./src/server/state/index.ts) and [src/server/sta
 - **[Operator Guide](./docs/operator-guide/README.md)** - Complete guide for validator key management (generate, deploy, register)
 - **[Daemon Setup](./daemon/README.md)** - Run aztec-butler as a systemd service with Prometheus metrics
 - **[Agent Deployment Guide](./docs/agent-deployment.md)** - Run the local read-only telemetry agent with OTLP export
+- **[Sheets Exporter](./docs/sheets-exporter.md)** - Event-sourced staking-rewards accounting ledger → Google Sheets
 
 ## Configuration
 

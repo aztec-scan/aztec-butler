@@ -85,6 +85,61 @@ program
     },
   );
 
+program
+  .command("sheets-exporter")
+  .description(
+    "Run the staking-rewards accounting ledger exporter (event-sourced → Google Sheets)",
+  )
+  .requiredOption("--network <network>", "Network to run for (e.g., mainnet, testnet)")
+  .option(
+    "--backfill",
+    "Reconstruct historical ledger rows from chain, write them, then exit",
+  )
+  .option(
+    "--from-date <YYYY-MM-DD>",
+    "With --backfill: recompute only days from this date onward (splices, preserves other rows)",
+  )
+  .option(
+    "--days <n>",
+    "With --backfill: recompute only the last <n> complete days (splices, preserves other rows)",
+  )
+  .option("--once", "Run a single recurring cycle then exit")
+  .option(
+    "--dry-run",
+    "Compute the ledger but print rows instead of writing to Google Sheets",
+  )
+  .option("--config <path>", "Override the per-network base env file path")
+  .action(
+    async (options: {
+      network: string;
+      backfill?: boolean;
+      fromDate?: string;
+      days?: string;
+      once?: boolean;
+      dryRun?: boolean;
+      config?: string;
+    }) => {
+      checkNodeVersion();
+      let backfillDays: number | undefined;
+      if (options.days !== undefined) {
+        backfillDays = Number(options.days);
+        if (!Number.isInteger(backfillDays) || backfillDays <= 0) {
+          throw new Error(`--days must be a positive integer (got "${options.days}").`);
+        }
+      }
+      const { startSheetsExporter } = await import("./sheets-exporter/index.js");
+      await startSheetsExporter({
+        network: options.network,
+        ...(options.backfill ? { backfill: true } : {}),
+        ...(options.fromDate ? { backfillFromDate: options.fromDate } : {}),
+        ...(backfillDays !== undefined ? { backfillDays } : {}),
+        ...(options.once ? { once: true } : {}),
+        ...(options.dryRun ? { dryRun: true } : {}),
+        ...(options.config ? { configFilePath: options.config } : {}),
+      });
+    },
+  );
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   program.parseAsync(process.argv).catch((error) => {
     console.error("Fatal error:", error);
