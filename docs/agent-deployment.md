@@ -187,7 +187,6 @@ deployment that is the **monitoring server**; the sequencer hosts run
 | `aztec_butler_global_last_scraped_timestamp` | `network, scraper` |
 | `aztec_butler_staking_rewards_pending_aztec` | `network, coinbase` |
 | `aztec_butler_staking_rewards_our_share_aztec` | `network, coinbase` |
-| `aztec_butler_staking_rewards_earned_aztec` | `network, coinbase` |
 
 ### Example Grafana queries
 

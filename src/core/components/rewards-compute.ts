@@ -110,18 +110,3 @@ export async function computeCoinbaseReward(
 export function toWholeTokens(raw: bigint, decimals: number): number {
   return Number(formatUnits(raw, decimals));
 }
-
-/**
- * Cumulative "earned": add only positive deltas of our-share. A claim drops
- * pending rewards (negative delta) and must NOT subtract from the total.
- *
- * Pure function — unit tested.
- */
-export function accumulateEarned(
-  prevEarned: number,
-  prevOurShare: number,
-  currentOurShare: number,
-): number {
-  const delta = currentOurShare - prevOurShare;
-  return prevEarned + (delta > 0 ? delta : 0);
-}

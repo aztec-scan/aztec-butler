@@ -13,7 +13,6 @@
 import { getAddress } from "viem";
 import { CoinbaseScraper } from "../../core/components/CoinbaseScraper.js";
 import {
-  accumulateEarned,
   computeCoinbaseReward,
   resolveRewardToken,
   toWholeTokens,
@@ -118,20 +117,10 @@ export class RewardsStatsScraper extends AbstractScraper {
         }
 
         const key = coinbase.toLowerCase();
-        const pendingAztec = toWholeTokens(reward.pendingRaw, rewardToken.decimals);
-        const ourShareAztec = toWholeTokens(reward.ourShareRaw, rewardToken.decimals);
-        const prev = state.global.rewards.get(key);
-        const earnedAztec = accumulateEarned(
-          prev?.earnedAztec ?? 0,
-          prev?.ourShareAztec ?? ourShareAztec,
-          ourShareAztec,
-        );
-
         const next: CoinbaseRewardState = {
           coinbase,
-          pendingAztec,
-          ourShareAztec,
-          earnedAztec,
+          pendingAztec: toWholeTokens(reward.pendingRaw, rewardToken.decimals),
+          ourShareAztec: toWholeTokens(reward.ourShareRaw, rewardToken.decimals),
           lastUpdated: now,
         };
         state.global.rewards.set(key, next);

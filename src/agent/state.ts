@@ -77,8 +77,6 @@ export interface CoinbaseRewardState {
   coinbase: string;
   pendingAztec: number;
   ourShareAztec: number;
-  /** Cumulative earned (sum of positive our-share deltas); resets on restart. */
-  earnedAztec: number;
   lastUpdated: Date;
 }
 

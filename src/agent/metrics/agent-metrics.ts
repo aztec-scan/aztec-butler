@@ -371,21 +371,5 @@ const registerGlobalMetrics = (meter: Meter, config: AgentConfig): void => {
       }
     });
 
-    const rewardsEarned = meter.createObservableCounter(
-      metricName("staking_rewards_earned_aztec"),
-      {
-        description: "Cumulative rewards earned for our recipient per coinbase, in whole AZTEC",
-        unit: "AZTEC",
-      },
-    );
-    rewardsEarned.addCallback((result) => {
-      const { global } = getAgentState();
-      for (const reward of global.rewards.values()) {
-        result.observe(
-          reward.earnedAztec,
-          globalAttributes(global.network, { coinbase: reward.coinbase }),
-        );
-      }
-    });
   }
 };

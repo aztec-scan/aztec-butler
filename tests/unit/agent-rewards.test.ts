@@ -3,7 +3,6 @@ import test from "node:test";
 import { buildAgentConfig } from "../../src/agent/config.js";
 import type { SplitAllocationData } from "../../src/core/components/EthereumClient.js";
 import {
-  accumulateEarned,
   computeOurShareRaw,
   toWholeTokens,
 } from "../../src/core/components/rewards-compute.js";
@@ -53,24 +52,6 @@ test("toWholeTokens — scales by 10^decimals", () => {
   assert.equal(toWholeTokens(1_000_000_000_000_000_000n, 18), 1);
   assert.equal(toWholeTokens(123_456_000_000_000_000_000n, 18), 123.456);
   assert.equal(toWholeTokens(0n, 18), 0);
-});
-
-// ── accumulateEarned ───────────────────────────────────────────────────────
-
-test("accumulateEarned — accrual adds the positive delta", () => {
-  assert.equal(accumulateEarned(10, 5, 8), 13);
-});
-
-test("accumulateEarned — a claim (drop in our-share) does not subtract", () => {
-  assert.equal(accumulateEarned(13, 8, 1), 13);
-});
-
-test("accumulateEarned — no change adds nothing", () => {
-  assert.equal(accumulateEarned(5, 3, 3), 5);
-});
-
-test("accumulateEarned — first observation (prev === current) contributes 0", () => {
-  assert.equal(accumulateEarned(0, 7, 7), 0);
 });
 
 // ── rewards config validation ──────────────────────────────────────────────
