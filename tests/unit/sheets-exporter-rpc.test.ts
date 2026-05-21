@@ -9,6 +9,10 @@ test("backoffSchedule — exponential delays", () => {
   assert.deepEqual(backoffSchedule(0, 100), []);
 });
 
+test("backoffSchedule — delays are capped at maxBackoffMs", () => {
+  assert.deepEqual(backoffSchedule(6, 1000, 4000), [1000, 2000, 4000, 4000, 4000, 4000]);
+});
+
 // ── isRetryableError ────────────────────────────────────────────────────────
 
 test("isRetryableError — true for throttle / transient failures", () => {

@@ -169,8 +169,8 @@ starting over.
 
 ### Optional — a faster initial fill
 
-For a large history you can pre-fill in one foreground pass instead of letting
-the service cold-start:
+With a **fast, reliable archive** you can pre-fill the whole history in one
+foreground pass instead of letting the service cold-start:
 
 ```bash
 tmux new -s butler-backfill
@@ -178,9 +178,16 @@ node dist/index.js sheets-exporter --network mainnet --backfill --dry-run   # in
 node dist/index.js sheets-exporter --network mainnet --backfill
 ```
 
-`--backfill` computes the whole history in memory and writes it in one pass, and
-lets you `--dry-run` inspect it first. It leaves a cursor; when the service then
-starts it finds the ledger already current and goes straight to watching.
+`--backfill` computes the whole history and writes it in one pass, and lets you
+`--dry-run` inspect it first. It leaves a cursor; the service then starts up
+already current.
+
+> `--backfill` checkpoints only at the **end** — a crash loses the run. On a
+> **free / heavily-throttled** archive, do *not* use `--backfill`. Just deploy
+> the service and let it cold-start: the catch-up checkpoints after every day,
+> and the rate-limiter waits throttling out (capped exponential backoff, ~1h
+> budget per call) rather than failing. It grinds to completion across restarts
+> without losing progress — slow, but it always finishes.
 
 ---
 

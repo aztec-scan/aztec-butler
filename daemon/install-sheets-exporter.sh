@@ -76,6 +76,9 @@ cat > "$SERVICE_FILE" <<EOF_HEADER
 Description=Aztec Butler sheets-exporter - staking-rewards accounting ledger for ${NETWORK}
 After=network.target
 Wants=network.target
+# Never give up restarting — a throttled cold-start backfill may crash-resume
+# many times before it completes.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

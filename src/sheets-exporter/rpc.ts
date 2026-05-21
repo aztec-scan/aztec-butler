@@ -1,25 +1,34 @@
 /**
- * Rate-limited, retrying RPC gate for the rewards backfill.
+ * Rate-limited, retrying RPC gate for the rewards backfill / catch-up.
  *
- * A free archive endpoint will throttle under the thousands of historical calls
- * a full backfill makes, so this:
+ * A free archive endpoint will throttle hard under the ~100k historical calls a
+ * cold-start backfill makes, so this:
  *   - self-rate-limits: enforces a minimum interval between calls (maxRps);
- *   - retries with exponential backoff on throttle / transient errors.
+ *   - retries throttle / transient errors with capped exponential backoff,
+ *     generously enough to WAIT throttling OUT rather than fail — a throttled
+ *     call becomes slow, not a hard error, so the backfill still completes.
  *
- * The recurring exporter makes only tens of calls per run and can use a
- * pass-through gate.
+ * Only a genuinely unreachable endpoint exhausts the retry budget and throws.
  */
 
 export interface RateLimiterOptions {
   /** Requests per second cap (self-rate-limit). 0 disables pacing. */
   maxRps: number;
+  /** Retries for one call before giving up (default 40 — ~1h of waiting out throttling). */
   maxRetries?: number;
+  /** Base backoff in ms; doubles each retry (default 1000). */
   baseBackoffMs?: number;
+  /** Cap on a single backoff delay in ms (default 120_000). */
+  maxBackoffMs?: number;
 }
 
-/** Exponential-backoff delay schedule (pure — unit tested). */
-export const backoffSchedule = (maxRetries: number, baseMs: number): number[] =>
-  Array.from({ length: maxRetries }, (_, i) => baseMs * 2 ** i);
+/** Exponential-backoff delays, each capped at `maxBackoffMs` (pure — unit tested). */
+export const backoffSchedule = (
+  maxRetries: number,
+  baseMs: number,
+  maxBackoffMs = Infinity,
+): number[] =>
+  Array.from({ length: maxRetries }, (_, i) => Math.min(baseMs * 2 ** i, maxBackoffMs));
 
 /** True when an error looks like rate-limiting or a transient RPC failure (pure). */
 export const isRetryableError = (error: unknown): boolean => {
@@ -47,7 +56,11 @@ export class RateLimiter {
 
   constructor(options: RateLimiterOptions) {
     this.minIntervalMs = options.maxRps > 0 ? 1000 / options.maxRps : 0;
-    this.delays = backoffSchedule(options.maxRetries ?? 6, options.baseBackoffMs ?? 1000);
+    this.delays = backoffSchedule(
+      options.maxRetries ?? 40,
+      options.baseBackoffMs ?? 1000,
+      options.maxBackoffMs ?? 120_000,
+    );
   }
 
   /** Run `fn` under the rate limit, retrying retryable failures with backoff. */
