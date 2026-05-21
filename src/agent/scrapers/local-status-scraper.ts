@@ -2,12 +2,12 @@
  * Local L1/L2 status scraper.
  *
  * For attesters present on THIS host:
- *   - reads rollup `getAttesterView` (when rollupStatus is enabled)
- *   - checks registry-specific staking-provider queue membership (when
- *     l1Status is enabled)
+ *   - reads rollup `getAttesterView`
+ *   - checks registry-specific staking-provider queue membership
  *   - derives the common lifecycle state
  *
- * Olla queue reconstruction is event-derived and may need archive RPC.
+ * Runs in `node`/`all` mode. Olla queue reconstruction is event-derived and may
+ * need archive RPC.
  */
 
 import { AbstractScraper } from "../../server/scrapers/base-scraper.js";
@@ -23,7 +23,7 @@ export class LocalStatusScraper extends AbstractScraper {
   readonly network: string;
 
   constructor(
-    private readonly config: AgentConfig,
+    config: AgentConfig,
     private readonly chain: AgentChainContext,
   ) {
     super();
@@ -45,26 +45,24 @@ export class LocalStatusScraper extends AbstractScraper {
 
     // Fetch each in-use registry's provider queue once per scrape.
     const queuePositions = new Map<Registry, Map<string, number>>();
-    if (this.config.scrapers.l1Status) {
-      for (const registry of registriesInUse) {
-        const provider = this.chain.providers[registry];
-        if (!provider || provider.providerId === null) {
-          continue;
-        }
-        try {
-          const queue = await this.chain.ethClient.getProviderQueue(
-            provider.providerId,
-            registry,
-          );
-          const positions = new Map<string, number>();
-          queue.forEach((addr, index) => positions.set(addr.toLowerCase(), index));
-          queuePositions.set(registry, positions);
-        } catch (error) {
-          console.warn(
-            `[${this.name}] Failed to read ${registry} provider queue: ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+    for (const registry of registriesInUse) {
+      const provider = this.chain.providers[registry];
+      if (!provider || provider.providerId === null) {
+        continue;
+      }
+      try {
+        const queue = await this.chain.ethClient.getProviderQueue(
+          provider.providerId,
+          registry,
+        );
+        const positions = new Map<string, number>();
+        queue.forEach((addr, index) => positions.set(addr.toLowerCase(), index));
+        queuePositions.set(registry, positions);
+      } catch (error) {
+        console.warn(
+          `[${this.name}] Failed to read ${registry} provider queue: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
@@ -72,15 +70,13 @@ export class LocalStatusScraper extends AbstractScraper {
 
     for (const [addrKey, runtime] of state.local.keys) {
       let onChainView: AttesterView | null = null;
-      if (this.config.scrapers.rollupStatus) {
-        try {
-          onChainView = await this.chain.ethClient.getAttesterView(runtime.attesterAddress);
-        } catch (error) {
-          console.warn(
-            `[${this.name}] getAttesterView failed for ${runtime.attesterAddress}: ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+      try {
+        onChainView = await this.chain.ethClient.getAttesterView(runtime.attesterAddress);
+      } catch (error) {
+        console.warn(
+          `[${this.name}] getAttesterView failed for ${runtime.attesterAddress}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
       }
 
       const positions = queuePositions.get(runtime.registry);

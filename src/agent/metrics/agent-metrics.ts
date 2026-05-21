@@ -6,14 +6,22 @@
  *   - GLOBAL metrics describe chain-wide state -> MUST NOT include `host`
  *     (otherwise two agents would emit identical-but-host-differing series).
  *
+ * The run mode decides which instrument set is registered: `node` registers
+ * only local instruments, `global` only global, `all` both. A `global`-mode
+ * agent therefore has no local instruments at all — it is structurally
+ * incapable of emitting a `host`-labelled series.
+ *
  * {@link localAttributes} / {@link globalAttributes} are the single source of
- * truth for that rule and are unit tested.
+ * truth for the host-label rule and are unit tested.
  */
 
 import type { Attributes, Meter } from "@opentelemetry/api";
 import { PACKAGE_NAME } from "../../core/config/index.js";
-import type { AgentConfig } from "../config.js";
-import { ATTESTER_LIFECYCLE_STATES } from "../lifecycle.js";
+import {
+  modeHasGlobalScrapers,
+  modeHasLocalScrapers,
+  type AgentConfig,
+} from "../config.js";
 import { getAgentState } from "../state.js";
 
 /** Build attributes for a LOCAL metric — always carries `network` + `host`. */
@@ -38,10 +46,20 @@ export const globalAttributes = (
 const metricName = (suffix: string): string => `${PACKAGE_NAME}_${suffix}`;
 
 /**
- * Register all agent observable gauges against `meter`. Callbacks read live
- * agent state at export time.
+ * Register agent observable gauges against `meter`, selected by run mode.
+ * Callbacks read live agent state at export time.
  */
 export const registerAgentMetrics = (meter: Meter, config: AgentConfig): void => {
+  if (modeHasLocalScrapers(config.mode)) {
+    registerLocalMetrics(meter);
+  }
+  if (modeHasGlobalScrapers(config.mode)) {
+    registerGlobalMetrics(meter);
+  }
+};
+
+/** Register the per-host (`host`-labelled) local metrics. */
+const registerLocalMetrics = (meter: Meter): void => {
   // ── local: attester presence ────────────────────────────────────────────
   const attesterPresent = meter.createObservableGauge(metricName("attester_present"), {
     description: "1 for each attester whose registered-key file is present on this host",
@@ -154,11 +172,6 @@ export const registerAgentMetrics = (meter: Meter, config: AgentConfig): void =>
       result.observe(ts, localAttributes(local.network, local.host, { scraper }));
     }
   });
-
-  // Global metrics are only emitted by the designated global-stats agent.
-  if (config.scrapers.globalStats) {
-    registerGlobalMetrics(meter);
-  }
 };
 
 /** Register the chain-wide (host-less) metrics. */

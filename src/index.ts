@@ -49,6 +49,10 @@ program
     "--network <network>",
     "Network to run the agent for (e.g., mainnet, testnet)",
   )
+  .requiredOption(
+    "--mode <mode>",
+    "Run mode: node (sequencer host), global (monitoring server), or all (dev/test)",
+  )
   .option(
     "--once",
     "Run a single scrape + export cycle then exit (for local testing)",
@@ -64,6 +68,7 @@ program
   .action(
     async (options: {
       network: string;
+      mode: string;
       once?: boolean;
       dryRun?: boolean;
       config?: string;
@@ -72,6 +77,7 @@ program
       const { startAgent } = await import("./agent/index.js");
       await startAgent({
         network: options.network,
+        mode: options.mode,
         ...(options.once ? { once: true } : {}),
         ...(options.dryRun ? { dryRun: true } : {}),
         ...(options.config ? { configFilePath: options.config } : {}),

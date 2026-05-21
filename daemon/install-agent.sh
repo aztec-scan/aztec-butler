@@ -1,19 +1,33 @@
 #!/bin/bash
 #
-# Install the aztec-butler AGENT as a systemd service (mainnet).
+# Install the aztec-butler AGENT as a systemd service.
 #
-# The agent is the local, read-only sequencer telemetry process. It exports
-# metrics over OTLP to a local OpenTelemetry collector and runs no HTTP
-# server. Per-host behaviour (host name, whether global stats are exported)
-# comes entirely from the network base.env — see docs/agent-deployment.md.
+# Usage: sudo ./daemon/install-agent.sh <mode> [network]
+#   mode    — node | global | all
+#   network — defaults to mainnet
+#
+# The agent is the local, read-only telemetry process. It exports metrics over
+# OTLP to an OpenTelemetry collector and runs no HTTP server. Run `node` on each
+# sequencer host and `global` on the monitoring server — see
+# docs/agent-deployment.md.
 #
 set -e
 
 SERVICE_NAME="aztec-butler-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-NETWORK="${1:-mainnet}"
+MODE="${1:-}"
+NETWORK="${2:-mainnet}"
 
-echo "Installing Aztec Butler AGENT daemon (network: ${NETWORK})..."
+case "$MODE" in
+  node | global | all) ;;
+  *)
+    echo "Error: first argument must be the run mode: node | global | all"
+    echo "Usage: sudo ./daemon/install-agent.sh <mode> [network]"
+    exit 1
+    ;;
+esac
+
+echo "Installing Aztec Butler AGENT daemon (mode: ${MODE}, network: ${NETWORK})..."
 
 # Check if running as root/sudo
 if [ "$EUID" -ne 0 ]; then
@@ -79,7 +93,7 @@ sudo -u "$ACTUAL_USER" npm run build
 echo "Generating service file..."
 cat > "$SERVICE_FILE" <<EOF_HEADER
 [Unit]
-Description=Aztec Butler Agent - read-only sequencer telemetry (OTLP) for ${NETWORK}
+Description=Aztec Butler Agent (${MODE}) - read-only telemetry (OTLP) for ${NETWORK}
 After=network.target
 Wants=network.target
 
@@ -91,7 +105,7 @@ cat >> "$SERVICE_FILE" <<EOF
 User=$ACTUAL_USER
 Group=$USER_GROUP
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$NODE_PATH $INSTALL_DIR/dist/index.js agent --network ${NETWORK}
+ExecStart=$NODE_PATH $INSTALL_DIR/dist/index.js agent --mode ${MODE} --network ${NETWORK}
 Restart=always
 RestartSec=5
 Environment="NODE_ENV=production"
@@ -116,12 +130,12 @@ systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 
 echo ""
-echo "✅ Aztec Butler AGENT installed and started (${NETWORK})"
+echo "✅ Aztec Butler AGENT installed and started (mode: ${MODE}, network: ${NETWORK})"
 echo ""
 echo "Useful commands:"
 echo "  Check status:  sudo systemctl status ${SERVICE_NAME}"
 echo "  Follow logs:   sudo journalctl -u ${SERVICE_NAME} -f"
 echo "  Stop service:  sudo systemctl stop ${SERVICE_NAME}"
 echo ""
-echo "Reminder: agent behaviour is configured via the ${NETWORK}-base.env file."
+echo "Reminder: chain/RPC settings come from the ${NETWORK}-base.env file."
 echo "See docs/agent-deployment.md."

@@ -31,13 +31,14 @@ npm start -- serve --network mainnet
 
 ## Agent Mode
 
-The **agent** is the local, read-only sequencer telemetry process. It runs on
-each sequencer host, reads that host's registered-key files, performs
-read-only L1/L2 checks, and pushes metrics to a local OpenTelemetry collector
-over OTLP. It runs no HTTP server and loads no private keys.
+The **agent** is the local, read-only telemetry process. It runs in one of three
+modes, performs read-only L1/L2 checks, and pushes metrics to an OpenTelemetry
+collector over OTLP. It runs no HTTP server and loads no private keys.
 
 ```bash
-aztec-butler agent --network mainnet
+aztec-butler agent --mode node   --network mainnet    # on each sequencer host
+aztec-butler agent --mode global --network mainnet    # on the monitoring server
+aztec-butler agent --mode all    --network mainnet    # dev / test / single-box
 ```
 
 Test it locally before deploying — no production access required:

@@ -23,16 +23,23 @@ import {
 export class LocalKeyScraper extends AbstractScraper {
   readonly name = "local_keys";
   readonly network: string;
+  private readonly host: string;
 
-  constructor(private readonly config: AgentConfig) {
+  constructor(config: AgentConfig) {
     super();
     this.network = config.network;
+    if (!config.host) {
+      // node/all mode always has a host (enforced by buildAgentConfig); this
+      // guard makes the invariant explicit for the type system.
+      throw new Error("LocalKeyScraper requires BUTLER_AGENT_HOST (node/all mode).");
+    }
+    this.host = config.host;
   }
 
   async scrape(): Promise<void> {
     const { keys, filesLoaded, filesSkipped } = await loadLocalRegisteredKeys(
-      this.config.network,
-      this.config.host,
+      this.network,
+      this.host,
     );
 
     const state = getAgentState();

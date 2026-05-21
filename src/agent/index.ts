@@ -1,18 +1,25 @@
 /**
  * Agent runtime — the local, read-only sequencer telemetry process.
  *
- *   aztec-butler agent --network mainnet
+ *   aztec-butler agent --mode node   --network mainnet   (on each sequencer host)
+ *   aztec-butler agent --mode global --network mainnet   (on the monitoring server)
+ *   aztec-butler agent --mode all    --network mainnet   (dev / test / single-box)
  *
- * Reads host-local registered-key files, performs read-only L1/L2 checks for
- * those keys, optionally scrapes global chain state, and pushes everything to
- * a local OpenTelemetry collector over OTLP. It runs no HTTP server and loads
- * no private keys.
+ * The run mode selects the scraper set and the metric-instrument set. The agent
+ * runs no HTTP server and loads no private keys; it pushes metrics to a local
+ * OpenTelemetry collector over OTLP.
  */
 
 import { ScraperManager } from "../server/scrapers/scraper-manager.js";
 import type { BaseScraper } from "../server/scrapers/base-scraper.js";
-import { initAgentChain } from "./chain.js";
-import { describeAgentConfig, loadAgentConfig, type AgentConfig } from "./config.js";
+import { initAgentChain, type AgentChainContext } from "./chain.js";
+import {
+  describeAgentConfig,
+  loadAgentConfig,
+  modeHasGlobalScrapers,
+  modeHasLocalScrapers,
+  type AgentConfig,
+} from "./config.js";
 import { registerAgentMetrics } from "./metrics/agent-metrics.js";
 import { initAgentMeterProvider, type AgentMeterProvider } from "./metrics/otlp.js";
 import { GlobalStatsScraper } from "./scrapers/global-stats-scraper.js";
@@ -20,10 +27,11 @@ import { LocalKeyScraper } from "./scrapers/local-key-scraper.js";
 import { LocalStatusScraper } from "./scrapers/local-status-scraper.js";
 import { PublisherBalanceScraper } from "./scrapers/publisher-balance-scraper.js";
 import { initAgentState } from "./state.js";
-import type { AgentChainContext } from "./chain.js";
 
 export interface AgentRunOptions {
   network?: string;
+  /** Run mode — `node` | `global` | `all`. Required (from the `--mode` flag). */
+  mode?: string;
   /** Run a single scrape + export cycle, then exit (for local testing). */
   once?: boolean;
   /** Print metrics to stdout instead of pushing OTLP (for local testing). */
@@ -45,29 +53,21 @@ interface RegisteredScraper {
   intervalMs: number;
 }
 
-/** Build the enabled scrapers in dependency order (local keys first). */
+/** Build the scraper set for the configured run mode, in dependency order. */
 const buildScrapers = (config: AgentConfig, chain: AgentChainContext): RegisteredScraper[] => {
   const scrapers: RegisteredScraper[] = [];
 
-  if (config.scrapers.localKeys) {
-    scrapers.push({
-      scraper: new LocalKeyScraper(config),
-      intervalMs: config.scrapeIntervalMs,
-    });
-  }
-  if (config.scrapers.l1Status || config.scrapers.rollupStatus) {
-    scrapers.push({
-      scraper: new LocalStatusScraper(config, chain),
-      intervalMs: config.scrapeIntervalMs,
-    });
-  }
-  if (config.scrapers.publisherBalances) {
+  if (modeHasLocalScrapers(config.mode)) {
+    // Local keys first — the status/publisher scrapers enrich what it discovers.
+    scrapers.push({ scraper: new LocalKeyScraper(config), intervalMs: config.scrapeIntervalMs });
+    scrapers.push({ scraper: new LocalStatusScraper(config, chain), intervalMs: config.scrapeIntervalMs });
     scrapers.push({
       scraper: new PublisherBalanceScraper(config, chain),
       intervalMs: config.scrapeIntervalMs,
     });
   }
-  if (config.scrapers.globalStats) {
+
+  if (modeHasGlobalScrapers(config.mode)) {
     scrapers.push({
       scraper: new GlobalStatsScraper(config, chain),
       intervalMs: config.globalScrapeIntervalMs,
@@ -96,22 +96,26 @@ export const startAgent = async (options: AgentRunOptions = {}): Promise<void> =
   if (!network) {
     throw new Error("Agent mode requires a network. Pass --network <network> (e.g. --network mainnet).");
   }
+  const mode = options.mode?.trim();
+  if (!mode) {
+    throw new Error("Agent mode requires --mode <node|global|all>.");
+  }
 
-  // 1. Config (fails closed on unsafe/mutating config).
+  // 1. Config (validates the mode and fails closed on unsafe/mutating config).
   const config = options.configFilePath
-    ? loadAgentConfig(network, { configFilePath: options.configFilePath })
-    : loadAgentConfig(network);
+    ? loadAgentConfig(network, mode, { configFilePath: options.configFilePath })
+    : loadAgentConfig(network, mode);
   console.log(`[agent] ${describeAgentConfig(config)}`);
 
-  if (config.scrapers.globalStats) {
+  if (modeHasGlobalScrapers(config.mode)) {
     console.log(
-      "[agent] GLOBAL stats export is ENABLED on this host. Ensure exactly ONE " +
+      "[agent] GLOBAL metrics are exported by this process. Ensure exactly ONE " +
         "agent per network does this, or backends will see duplicate global series.",
     );
   }
 
   // 2. State.
-  initAgentState(config.network, config.host);
+  initAgentState(config.network, config.host ?? "");
 
   // 3. Chain context (verifies chain ID before trusting any L1 read).
   console.log("[agent] Initialising chain context...");
@@ -166,6 +170,6 @@ export const startAgent = async (options: AgentRunOptions = {}): Promise<void> =
   process.on("SIGTERM", () => void shutdown());
 
   console.log("\n=== Agent is running (read-only) ===");
-  console.log(`network=${config.network} host=${config.host}`);
+  console.log(`network=${config.network} mode=${config.mode} host=${config.host ?? "(none)"}`);
   console.log("Press Ctrl+C to stop\n");
 };

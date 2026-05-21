@@ -12,7 +12,7 @@ import { getAgentState, initAgentState } from "../../src/agent/state.js";
  * verifies the OTLP exporter wiring constructs cleanly.
  */
 
-function config(overrides: Record<string, string | undefined> = {}) {
+function config(mode = "all", overrides: Record<string, string | undefined> = {}) {
   return buildAgentConfig(
     {
       BUTLER_AGENT_HOST: "test-host",
@@ -22,10 +22,11 @@ function config(overrides: Record<string, string | undefined> = {}) {
       ...overrides,
     },
     "mainnet",
+    mode,
   );
 }
 
-test("metrics pipeline registers and flushes without throwing", async () => {
+test("metrics pipeline registers and flushes without throwing (all mode)", async () => {
   initAgentState("mainnet", "test-host");
   const state = getAgentState();
   state.local.keys.set("0xaa01", {
@@ -52,12 +53,18 @@ test("metrics pipeline registers and flushes without throwing", async () => {
   };
 
   // dryRun -> ConsoleMetricExporter, so no network is touched.
-  const provider = initAgentMeterProvider(
-    config({ BUTLER_AGENT_GLOBAL_STATS_ENABLED: "true" }),
-    { dryRun: true },
-  );
-  registerAgentMetrics(provider.meter, config({ BUTLER_AGENT_GLOBAL_STATS_ENABLED: "true" }));
+  const provider = initAgentMeterProvider(config("all"), { dryRun: true });
+  registerAgentMetrics(provider.meter, config("all"));
 
+  await provider.forceFlush();
+  await provider.shutdown();
+});
+
+test("global mode registers only global instruments", async () => {
+  initAgentState("mainnet", "");
+  const provider = initAgentMeterProvider(config("global"), { dryRun: true });
+  // Should not throw — global mode skips local instruments entirely.
+  registerAgentMetrics(provider.meter, config("global"));
   await provider.forceFlush();
   await provider.shutdown();
 });
@@ -66,7 +73,7 @@ test("OTLP meter provider constructs and shuts down cleanly", async () => {
   initAgentState("mainnet", "test-host");
   // Not dryRun: builds the real OTLPMetricExporter. shutdown() must not
   // require the collector to be reachable.
-  const provider = initAgentMeterProvider(config(), { exportIntervalMs: 600_000 });
-  registerAgentMetrics(provider.meter, config());
+  const provider = initAgentMeterProvider(config("all"), { exportIntervalMs: 600_000 });
+  registerAgentMetrics(provider.meter, config("all"));
   await provider.shutdown();
 });

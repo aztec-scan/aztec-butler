@@ -1,30 +1,33 @@
 # Aztec Butler — Agent Mode
 
-The **agent** is the local, read-only sequencer telemetry process. It runs on
-each sequencer host, reads that host's registered-key files, performs
-read-only L1/L2 checks for those keys, and pushes metrics to a **local
-OpenTelemetry collector** over OTLP.
-
-```
-sequencer host
-  aztec-butler agent              (this process)
-    - reads local registered-key files
-    - computes local attester/publisher/registry state
-    - read-only L1/L2 checks for local keys
-    - optionally scrapes global rollup/provider queue stats
-    - exports OTLP metrics ──▶ local otel-collector-contrib:0.107.0 ──▶ central backend
-```
-
-The agent runs **no HTTP server** and **loads no private keys**. It is
-read-only by construction and fails closed if given mutating config.
+The **agent** is the local, read-only telemetry process. It runs in one of three
+explicit **run modes** and pushes metrics to an OpenTelemetry collector over
+OTLP. It runs **no HTTP server** and **loads no private keys** — it is read-only
+by construction and fails closed if given mutating config.
 
 ```bash
-aztec-butler agent --network mainnet
+aztec-butler agent --mode node   --network mainnet    # on each sequencer host
+aztec-butler agent --mode global --network mainnet    # on the monitoring server
+aztec-butler agent --mode all    --network mainnet    # dev / test / single-box
 ```
 
 ---
 
-## 1. Configuration
+## 1. Run modes
+
+`--mode` is **required** — there is no default.
+
+| Mode | Scrapers | Requires | Emits | Runs on |
+|---|---|---|---|---|
+| `node` | local keys, local status, publisher balances | `BUTLER_AGENT_HOST` | `host`-labelled local metrics only | every sequencer host |
+| `global` | global chain stats | archive RPC (when rewards is added); no `HOST` | `network`-labelled global metrics only | exactly one host per network |
+| `all` | everything | `HOST` + archive RPC | both | dev / test / single-box only |
+
+The mode selects the scraper set **and** the metric-instrument set. A `global`
+agent never registers local instruments, so it can never emit a `host`-labelled
+series — it cannot appear as a phantom node in host-scoped dashboards or alerts.
+
+## 2. Configuration
 
 The agent reads the standard per-network base env file
 (`<configDir>/<network>-base.env`) for chain/RPC settings, plus the
@@ -34,18 +37,16 @@ The agent reads the standard per-network base env file
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BUTLER_AGENT_HOST` | *(required)* | This sequencer's host name — the `host` metric label (e.g. `beast-3`). |
+| `BUTLER_AGENT_HOST` | *(required for `node`/`all`)* | This sequencer's host name — the `host` metric label (e.g. `beast-3`). Unused in `global` mode. |
 | `BUTLER_AGENT_OTLP_ENABLED` | `true` | Push metrics over OTLP. When `false`, metrics print to stdout. |
 | `BUTLER_AGENT_OTLP_ENDPOINT` | `http://127.0.0.1:4318/v1/metrics` | Local collector endpoint. |
 | `BUTLER_AGENT_OTLP_PROTOCOL` | `http/protobuf` | Transport. `grpc` is reserved but not bundled in this build. |
 | `BUTLER_AGENT_OTLP_EXPORT_INTERVAL_MS` | `30000` | OTLP export interval. |
-| `BUTLER_AGENT_SCRAPE_INTERVAL_MS` | `30000` | Local scraper interval. |
-| `BUTLER_AGENT_GLOBAL_SCRAPE_INTERVAL_MS` | `60000` | Global stats scraper interval. |
-| `BUTLER_AGENT_LOCAL_KEYS_ENABLED` | `true` | Read local registered-key files. |
-| `BUTLER_AGENT_L1_STATUS_ENABLED` | `true` | Read staking-registry provider-queue membership. |
-| `BUTLER_AGENT_ROLLUP_STATUS_ENABLED` | `true` | Read rollup `getAttesterView` (lifecycle state). |
-| `BUTLER_AGENT_PUBLISHER_BALANCES_ENABLED` | `true` | Read L1 ETH balances for local publishers. |
-| `BUTLER_AGENT_GLOBAL_STATS_ENABLED` | `false` | Export global chain state. **Opt-in — see §4.** |
+| `BUTLER_AGENT_SCRAPE_INTERVAL_MS` | `30000` | Local scraper interval (`node`/`all`). |
+| `BUTLER_AGENT_GLOBAL_SCRAPE_INTERVAL_MS` | `60000` | Global scraper interval (`global`/`all`). |
+
+The per-scraper boolean toggles were removed — the run mode determines the
+scraper set.
 
 ### Network fields (shared with other Butler modes)
 
@@ -77,9 +78,9 @@ read is trusted.
 
 ---
 
-## 2. Local key files
+## 3. Local key files
 
-The agent reads only **its own host's** registered-key files:
+A `node`/`all` agent reads only **its own host's** registered-key files:
 
 ```
 ~/.local/share/aztec-butler/<network>/<host>/native-registered-keys.json   -> registry "native"
@@ -87,14 +88,14 @@ The agent reads only **its own host's** registered-key files:
 ```
 
 The registry is parsed from the filename prefix. Unknown prefixes are skipped
-with a warning.
+with a warning. A `global` agent reads **no** key files.
 
 ---
 
-## 3. Testing locally before deploying
+## 4. Testing locally before deploying
 
-Three ways to exercise the agent on your workstation — all read-only, none
-touch production.
+Use `--mode all` for testing — it exercises both local and global scrapers in
+one process. All of the below are read-only and never touch production.
 
 ### a) Dry run — no collector needed
 
@@ -103,7 +104,7 @@ Prints every metric (with labels) to stdout:
 ```bash
 scripts/agent-local-test.sh dry-run mainnet
 # or directly:
-npm run dev:agent -- --network mainnet --once --dry-run
+npm run dev:agent -- --network mainnet --mode all --once --dry-run
 ```
 
 Use this to confirm key discovery, lifecycle derivation and label values.
@@ -111,8 +112,7 @@ Use this to confirm key discovery, lifecycle derivation and label values.
 ### b) One-shot against a real local collector
 
 Spins up `otel-collector-contrib:0.107.0` locally (the same version as
-production), runs one scrape+export, and lets you inspect exactly what
-arrived:
+production), runs one scrape+export, and lets you inspect exactly what arrived:
 
 ```bash
 scripts/agent-local-test.sh once mainnet     # bring up collector + one cycle
@@ -135,37 +135,26 @@ scripts/agent-local-test.sh run mainnet      # collector + agent loop (Ctrl+C to
 npm test
 ```
 
-Covers registry parsing, local key placement preservation, lifecycle
-derivation, global metrics omitting `host`, and fail-closed config validation.
+Covers per-mode config validation, registry parsing, local key placement
+preservation, lifecycle derivation, and global metrics omitting `host`.
 
 ---
 
-## 4. The single-global-exporter rule
+## 5. The single-global-exporter rule
 
 Global metrics describe chain-wide state and are exported **without a `host`
-label**. If two agents both exported them, the backend would see duplicate
-time series with identical labels.
+label**. If two agents both exported them, the backend would see duplicate time
+series with identical labels.
 
-So exactly **one agent per network** sets `BUTLER_AGENT_GLOBAL_STATS_ENABLED=true`.
-
-In this deployment that host is **beast-4**:
-
-```
-# beast-4 (global exporter)
-BUTLER_AGENT_GLOBAL_STATS_ENABLED=true
-
-# beast-3 (local-only)
-BUTLER_AGENT_GLOBAL_STATS_ENABLED=false
-```
-
-If global scrapes start failing on beast-4, flip the flag to beast-3 (via
-Ansible/systemd config) and restart both agents.
+So exactly **one agent per network** runs `--mode global` (or `all`). In this
+deployment that is the **monitoring server**; the sequencer hosts run
+`--mode node` and emit only their own local metrics.
 
 ---
 
-## 5. Metrics
+## 6. Metrics
 
-### Local (per-host) — include `host`
+### Local (per-host) — include `host` — emitted by `node`/`all`
 
 | Metric | Labels |
 |---|---|
@@ -177,7 +166,7 @@ Ansible/systemd config) and restart both agents.
 | `aztec_butler_publisher_required_topup_wei` | `network, host, publisher_address` |
 | `aztec_butler_local_last_scraped_timestamp` | `network, host, scraper` |
 
-### Global (chain-wide) — no `host`
+### Global (chain-wide) — no `host` — emitted by `global`/`all`
 
 | Metric | Labels |
 |---|---|
@@ -213,24 +202,25 @@ sum by (network, host, registry, state) (
 
 ---
 
-## 6. systemd deployment
+## 7. systemd deployment
 
-On each sequencer host, ensure the `<network>-base.env` config exists with the
-correct `BUTLER_AGENT_HOST` and global-stats flag, then:
+Ensure the `<network>-base.env` config exists, then install the service with the
+mode for that host — `node` on a sequencer, `global` on the monitoring server:
 
 ```bash
-sudo ./daemon/install-agent.sh mainnet
+sudo ./daemon/install-agent.sh node mainnet      # on a sequencer host
+sudo ./daemon/install-agent.sh global mainnet    # on the monitoring server
 ```
 
 This builds the project and installs an `aztec-butler-agent` systemd service
-running `aztec-butler agent --network mainnet` with read-only hardening
-(`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`).
+running `aztec-butler agent --mode <mode> --network <network>` with read-only
+hardening (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`).
 
 ```bash
 sudo systemctl status aztec-butler-agent
 sudo journalctl -u aztec-butler-agent -f
 ```
 
-The local OpenTelemetry collector (`otel-collector-contrib:0.107.0`) is
-deployed separately and must be listening on the configured OTLP endpoint
-before the agent starts.
+The OpenTelemetry collector (`otel-collector-contrib:0.107.0`) is deployed
+separately and must be listening on the configured OTLP endpoint before the
+agent starts.

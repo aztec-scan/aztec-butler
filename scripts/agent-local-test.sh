@@ -50,7 +50,7 @@ case "$ACTION" in
   dry-run)
     echo "Running agent for '$NETWORK' in --dry-run mode (metrics printed to stdout, no collector)..."
     cd "$REPO_ROOT"
-    npm run dev:agent -- --network "$NETWORK" --once --dry-run
+    npm run dev:agent -- --network "$NETWORK" --mode all --once --dry-run
     ;;
 
   once)
@@ -59,7 +59,7 @@ case "$ACTION" in
     sleep 2
     echo "Running a single agent scrape+export for '$NETWORK' into the local collector..."
     cd "$REPO_ROOT"
-    npm run dev:agent -- --network "$NETWORK" --once
+    npm run dev:agent -- --network "$NETWORK" --mode all --once
     echo
     echo "Exported. Inspect what arrived with: scripts/agent-local-test.sh logs"
     ;;
@@ -70,7 +70,7 @@ case "$ACTION" in
     sleep 2
     echo "Running agent continuously for '$NETWORK' (Ctrl+C to stop)..."
     cd "$REPO_ROOT"
-    npm run dev:agent -- --network "$NETWORK"
+    npm run dev:agent -- --network "$NETWORK" --mode all
     ;;
 
   *)

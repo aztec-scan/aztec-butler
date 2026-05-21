@@ -1,13 +1,14 @@
 /**
  * Agent configuration.
  *
- * The agent is the local, read-only sequencer telemetry process. It loads
- * the standard per-network base.env (for chain/RPC settings) plus a set of
- * agent-specific BUTLER_AGENT_* fields.
+ * The agent is the local, read-only sequencer telemetry process. It runs in one
+ * of three explicit modes (see {@link AgentMode}); the mode selects the scraper
+ * set and the metric-instrument set. It loads the standard per-network base.env
+ * (for chain/RPC settings) plus a set of agent-specific BUTLER_AGENT_* fields.
  *
- * Agent mode is read-only by design. {@link buildAgentConfig} fails closed
- * when it sees any mutating or key-bearing configuration so an agent host
- * can never be accidentally given write-path credentials.
+ * Agent mode is read-only by design. {@link buildAgentConfig} fails closed when
+ * it sees any mutating or key-bearing configuration so an agent host can never
+ * be accidentally given write-path credentials.
  */
 
 import dotenv from "dotenv";
@@ -19,6 +20,23 @@ import { PACKAGE_NAME } from "../core/config/index.js";
 export const OTLP_PROTOCOLS = ["http/protobuf", "grpc"] as const;
 export type OtlpProtocol = (typeof OTLP_PROTOCOLS)[number];
 
+/**
+ * Agent run modes:
+ * - `node`   — local sequencer-node telemetry (keys, status, publishers, ETA)
+ * - `global` — chain-wide telemetry (entry/provider queues, rewards); one per network
+ * - `all`    — both; dev / test / single-box only
+ */
+export const AGENT_MODES = ["node", "global", "all"] as const;
+export type AgentMode = (typeof AGENT_MODES)[number];
+
+/** True when the mode runs the local (host-scoped) scrapers + metrics. */
+export const modeHasLocalScrapers = (mode: AgentMode): boolean =>
+  mode === "node" || mode === "all";
+
+/** True when the mode runs the global (chain-wide) scrapers + metrics. */
+export const modeHasGlobalScrapers = (mode: AgentMode): boolean =>
+  mode === "global" || mode === "all";
+
 export const DEFAULT_OTLP_ENDPOINT = "http://127.0.0.1:4318/v1/metrics";
 const DEFAULT_OTLP_EXPORT_INTERVAL_MS = 30_000;
 const DEFAULT_SCRAPE_INTERVAL_MS = 30_000;
@@ -26,8 +44,14 @@ const DEFAULT_GLOBAL_SCRAPE_INTERVAL_MS = 60_000;
 
 export interface AgentConfig {
   network: string;
-  /** Logical host name for this sequencer (e.g. "beast-3"). Used as the `host` metric label. */
-  host: string;
+  /** Run mode — selects the scraper set and the metric-instrument set. */
+  mode: AgentMode;
+  /**
+   * Logical host name for this sequencer (e.g. "beast-3"); the `host` metric
+   * label. Required for `node`/`all` mode; absent for `global` mode, which has
+   * no host identity.
+   */
+  host?: string;
 
   // ── network / chain ──────────────────────────────────────────────────
   ethereumChainId: number;
@@ -50,20 +74,6 @@ export interface AgentConfig {
     endpoint: string;
     protocol: OtlpProtocol;
     exportIntervalMs: number;
-  };
-
-  // ── scraper toggles ──────────────────────────────────────────────────
-  scrapers: {
-    /** Read local registered-key files (presence / registry / coinbase). */
-    localKeys: boolean;
-    /** Read staking-registry provider-queue membership for local attesters. */
-    l1Status: boolean;
-    /** Read rollup `getAttesterView` for local attesters (lifecycle state). */
-    rollupStatus: boolean;
-    /** Read L1 ETH balances for local publishers. */
-    publisherBalances: boolean;
-    /** Export global chain state (entry queue, provider queues). Opt-in. */
-    globalStats: boolean;
   };
 }
 
@@ -127,19 +137,31 @@ export const assertReadOnlyEnv = (env: Record<string, string | undefined>): void
 };
 
 /**
- * Build an {@link AgentConfig} from a raw env map. Pure and side-effect free
- * so it can be unit tested without touching `process.env` or the filesystem.
+ * Build an {@link AgentConfig} from a raw env map and a run mode. Pure and
+ * side-effect free so it can be unit tested without touching `process.env` or
+ * the filesystem.
+ *
+ * @param mode  the run mode, typically from the `--mode` CLI flag
  */
 export const buildAgentConfig = (
   env: Record<string, string | undefined>,
   network: string,
+  mode: string,
 ): AgentConfig => {
   assertReadOnlyEnv(env);
 
-  const host = env.BUTLER_AGENT_HOST?.trim();
-  if (!host) {
+  if (!AGENT_MODES.includes(mode as AgentMode)) {
     throw new Error(
-      "BUTLER_AGENT_HOST is required in agent mode — set it to this sequencer's host name (e.g. beast-3).",
+      `Invalid agent mode "${mode}". Expected one of: ${AGENT_MODES.join(", ")}.`,
+    );
+  }
+  const agentMode = mode as AgentMode;
+
+  const host = env.BUTLER_AGENT_HOST?.trim();
+  if (modeHasLocalScrapers(agentMode) && !host) {
+    throw new Error(
+      `BUTLER_AGENT_HOST is required in "${agentMode}" mode — set it to this ` +
+        `sequencer's host name (e.g. beast-3).`,
     );
   }
 
@@ -166,7 +188,7 @@ export const buildAgentConfig = (
 
   const config: AgentConfig = {
     network,
-    host,
+    mode: agentMode,
     ethereumChainId,
     ethereumNodeUrl: requiredUrl("ETHEREUM_NODE_URL", env.ETHEREUM_NODE_URL),
     aztecNodeUrl: requiredUrl("AZTEC_NODE_URL", env.AZTEC_NODE_URL),
@@ -191,14 +213,9 @@ export const buildAgentConfig = (
         DEFAULT_OTLP_EXPORT_INTERVAL_MS,
       ),
     },
-    scrapers: {
-      localKeys: parseBool(env.BUTLER_AGENT_LOCAL_KEYS_ENABLED, true),
-      l1Status: parseBool(env.BUTLER_AGENT_L1_STATUS_ENABLED, true),
-      rollupStatus: parseBool(env.BUTLER_AGENT_ROLLUP_STATUS_ENABLED, true),
-      publisherBalances: parseBool(env.BUTLER_AGENT_PUBLISHER_BALANCES_ENABLED, true),
-      globalStats: parseBool(env.BUTLER_AGENT_GLOBAL_STATS_ENABLED, false),
-    },
   };
+
+  if (host) config.host = host;
 
   const optionalArchive = archiveUrl ? requiredUrl("ETHEREUM_ARCHIVE_NODE_URL", archiveUrl) : undefined;
   if (optionalArchive) config.ethereumArchiveNodeUrl = optionalArchive;
@@ -226,28 +243,26 @@ export const getAgentConfigPath = (network: string): string => {
 
 /**
  * Load agent config for a network: read the base.env into `process.env`,
- * then build and validate the {@link AgentConfig}.
+ * then build and validate the {@link AgentConfig} for the given run mode.
  */
 export const loadAgentConfig = (
   network: string,
+  mode: string,
   options?: { configFilePath?: string },
 ): AgentConfig => {
   const configPath = options?.configFilePath ?? getAgentConfigPath(network);
   dotenv.config({ path: configPath });
   console.log(`[agent] Loading configuration from ${configPath}`);
-  return buildAgentConfig(process.env, network);
+  return buildAgentConfig(process.env, network, mode);
 };
 
 /** One-line human summary of the agent's effective configuration. */
 export const describeAgentConfig = (config: AgentConfig): string => {
-  const enabledScrapers = Object.entries(config.scrapers)
-    .filter(([, on]) => on)
-    .map(([name]) => name);
   return [
     `network=${config.network}`,
-    `host=${config.host}`,
+    `mode=${config.mode}`,
+    `host=${config.host ?? "(none)"}`,
     `chainId=${config.ethereumChainId}`,
     `otlp=${config.otlp.enabled ? `${config.otlp.protocol}->${config.otlp.endpoint}` : "disabled"}`,
-    `scrapers=[${enabledScrapers.join(",")}]`,
   ].join(" ");
 };
