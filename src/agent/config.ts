@@ -14,8 +14,15 @@
 import dotenv from "dotenv";
 import envPath from "env-paths";
 import path from "node:path";
-import { z } from "zod";
 import { PACKAGE_NAME } from "../core/config/index.js";
+import {
+  assertReadOnlyEnv,
+  optionalAddress,
+  optionalNonNegativeBigint,
+  parseBool,
+  positiveInt,
+  requiredUrl,
+} from "../core/config/env.js";
 
 export const OTLP_PROTOCOLS = ["http/protobuf", "grpc"] as const;
 export type OtlpProtocol = (typeof OTLP_PROTOCOLS)[number];
@@ -98,65 +105,6 @@ export interface AgentConfig {
     exportIntervalMs: number;
   };
 }
-
-/** Parse a boolean-ish env var. Unset → `defaultValue`. */
-const parseBool = (value: string | undefined, defaultValue: boolean): boolean => {
-  if (value === undefined || value === "") return defaultValue;
-  return value === "true" || value === "1";
-};
-
-/** Address validator: 0x-prefixed, 42 chars. */
-const optionalAddress = (label: string, value: string | undefined): string | undefined => {
-  if (value === undefined || value === "") return undefined;
-  const result = z.string().startsWith("0x").length(42).safeParse(value);
-  if (!result.success) {
-    throw new Error(`Invalid configuration for ${label}: expected a 0x-prefixed 42-char address, got "${value}"`);
-  }
-  return result.data;
-};
-
-const requiredUrl = (label: string, value: string | undefined): string => {
-  const result = z.string().url().safeParse(value);
-  if (!result.success) {
-    throw new Error(`Invalid configuration for ${label}: a valid URL is required (got "${value ?? "<unset>"}")`);
-  }
-  return result.data;
-};
-
-const positiveInt = (label: string, value: string | undefined, defaultValue: number): number => {
-  if (value === undefined || value === "") return defaultValue;
-  const result = z.coerce.number().int().positive().safeParse(value);
-  if (!result.success) {
-    throw new Error(`Invalid configuration for ${label}: a positive integer is required (got "${value}")`);
-  }
-  return result.data;
-};
-
-/**
- * Fail closed on unsafe/mutating configuration. Agent mode must never be
- * given write-path credentials or be allowed to broadcast/propose.
- */
-export const assertReadOnlyEnv = (env: Record<string, string | undefined>): void => {
-  const violations: string[] = [];
-
-  if (parseBool(env.SAFE_PROPOSALS_ENABLED, false)) {
-    violations.push("SAFE_PROPOSALS_ENABLED is true — agent mode never proposes Safe transactions.");
-  }
-  if (env.MULTISIG_PROPOSER_PRIVATE_KEY) {
-    violations.push("MULTISIG_PROPOSER_PRIVATE_KEY is set — agent mode must not be given private keys.");
-  }
-  if (env.SAFE_API_KEY) {
-    violations.push("SAFE_API_KEY is set — agent mode does not use the Safe API.");
-  }
-
-  if (violations.length > 0) {
-    throw new Error(
-      "Refusing to start agent: agent mode is read-only and must not receive mutating or key-bearing config.\n" +
-        violations.map((v) => `  - ${v}`).join("\n") +
-        "\n\nUse a dedicated, minimal agent env file (see docs/agent-deployment.md).",
-    );
-  }
-};
 
 /**
  * Build an {@link AgentConfig} from a raw env map and a run mode. Pure and
@@ -253,16 +201,11 @@ export const buildAgentConfig = (
   const optionalArchive = archiveUrl ? requiredUrl("ETHEREUM_ARCHIVE_NODE_URL", archiveUrl) : undefined;
   if (optionalArchive) config.ethereumArchiveNodeUrl = optionalArchive;
 
-  const providerIdRaw = env.AZTEC_STAKING_PROVIDER_ID?.trim();
-  if (providerIdRaw) {
-    const parsed = z.coerce.bigint().nonnegative().safeParse(providerIdRaw);
-    if (!parsed.success) {
-      throw new Error(
-        `Invalid configuration for AZTEC_STAKING_PROVIDER_ID: a non-negative integer is required (got "${providerIdRaw}")`,
-      );
-    }
-    config.nativeProviderId = parsed.data;
-  }
+  const nativeProviderId = optionalNonNegativeBigint(
+    "AZTEC_STAKING_PROVIDER_ID",
+    env.AZTEC_STAKING_PROVIDER_ID,
+  );
+  if (nativeProviderId !== undefined) config.nativeProviderId = nativeProviderId;
 
   const nativeAdmin = optionalAddress("AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS", env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS);
   if (nativeAdmin) config.nativeProviderAdminAddress = nativeAdmin;
@@ -276,16 +219,11 @@ export const buildAgentConfig = (
   const ollaRegistry = optionalAddress("OLLA_AZTEC_STAKING_REGISTRY_ADDRESS", env.OLLA_AZTEC_STAKING_REGISTRY_ADDRESS);
   if (ollaRegistry) config.ollaStakingRegistryAddress = ollaRegistry;
 
-  const splitFromBlockRaw = env.STAKING_REWARDS_SPLIT_FROM_BLOCK?.trim();
-  if (splitFromBlockRaw) {
-    const parsed = z.coerce.bigint().nonnegative().safeParse(splitFromBlockRaw);
-    if (!parsed.success) {
-      throw new Error(
-        `Invalid configuration for STAKING_REWARDS_SPLIT_FROM_BLOCK: a non-negative integer is required (got "${splitFromBlockRaw}")`,
-      );
-    }
-    config.stakingRewardsSplitFromBlock = parsed.data;
-  }
+  const splitFromBlock = optionalNonNegativeBigint(
+    "STAKING_REWARDS_SPLIT_FROM_BLOCK",
+    env.STAKING_REWARDS_SPLIT_FROM_BLOCK,
+  );
+  if (splitFromBlock !== undefined) config.stakingRewardsSplitFromBlock = splitFromBlock;
 
   const rewardToken = optionalAddress("REWARD_TOKEN_ADDRESS", env.REWARD_TOKEN_ADDRESS);
   if (rewardToken) config.rewardTokenAddress = rewardToken;

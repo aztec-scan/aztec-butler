@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   AGENT_MODES,
   DEFAULT_OTLP_ENDPOINT,
-  assertReadOnlyEnv,
   buildAgentConfig,
   modeHasGlobalScrapers,
   modeHasLocalScrapers,
@@ -90,7 +89,7 @@ test("global mode does NOT require BUTLER_AGENT_HOST", () => {
 test("fails closed when SAFE_PROPOSALS_ENABLED is true", () => {
   assert.throws(
     () => buildAgentConfig(validEnv({ SAFE_PROPOSALS_ENABLED: "true" }), "mainnet", "node"),
-    /agent mode is read-only/i,
+    /mode is read-only/i,
   );
 });
 
@@ -106,10 +105,6 @@ test("fails closed when SAFE_API_KEY is present", () => {
     () => buildAgentConfig(validEnv({ SAFE_API_KEY: "secret" }), "mainnet", "global"),
     /does not use the Safe API/i,
   );
-});
-
-test("assertReadOnlyEnv passes for a clean env", () => {
-  assert.doesNotThrow(() => assertReadOnlyEnv(validEnv()));
 });
 
 // ── other validation ───────────────────────────────────────────────────────

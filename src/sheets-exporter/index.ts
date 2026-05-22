@@ -14,6 +14,11 @@ import { AztecClient } from "../core/components/AztecClient.js";
 import { CoinbaseScraper } from "../core/components/CoinbaseScraper.js";
 import { EthereumClient } from "../core/components/EthereumClient.js";
 import {
+  describeNativeProvider,
+  resolveNativeProvider,
+  type NativeProviderSelector,
+} from "../core/components/staking-provider.js";
+import {
   buildSplitTimelines,
   computeLedgerPeriod,
   sumLedgerRows,
@@ -118,21 +123,21 @@ const prepareChain = async (config: SheetsExporterConfig): Promise<ChainContext>
   });
   await eth.verifyChainId();
 
-  // Resolve the native provider by id (preferred) or admin address. The config
-  // build guarantees exactly one of the two is set — hence the cast below.
-  const provider =
-    config.nativeProviderId !== undefined
-      ? await eth.getStakingProviderById(config.nativeProviderId)
-      : await eth.getStakingProvider(
-          config.nativeProviderAdminAddress as string,
-          "native",
-        );
+  // Resolve the native provider — by stable id when configured, else by admin
+  // address (see core/components/staking-provider.ts). Config guarantees one is set.
+  const providerSelector: NativeProviderSelector = {
+    ...(config.nativeProviderId !== undefined
+      ? { providerId: config.nativeProviderId }
+      : {}),
+    ...(config.nativeProviderAdminAddress
+      ? { adminAddress: config.nativeProviderAdminAddress }
+      : {}),
+  };
+  const provider = await resolveNativeProvider(eth, providerSelector);
   if (!provider || provider.providerId === null) {
-    const ref =
-      config.nativeProviderId !== undefined
-        ? `id=${config.nativeProviderId}`
-        : `admin ${config.nativeProviderAdminAddress}`;
-    throw new Error(`No native staking provider found for ${ref}.`);
+    throw new Error(
+      `No native staking provider found for ${describeNativeProvider(providerSelector)}.`,
+    );
   }
 
   // All rollup versions to sum getSequencerRewards across.

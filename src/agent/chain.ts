@@ -9,6 +9,11 @@
 import type { Address } from "viem";
 import { AztecClient } from "../core/components/AztecClient.js";
 import { EthereumClient } from "../core/components/EthereumClient.js";
+import {
+  describeNativeProvider,
+  resolveNativeProvider,
+  type NativeProviderSelector,
+} from "../core/components/staking-provider.js";
 import type { Registry } from "./keys/local-key-loader.js";
 import type { AgentConfig } from "./config.js";
 
@@ -57,12 +62,19 @@ export const initAgentChain = async (config: AgentConfig): Promise<AgentChainCon
 
   const providers: Partial<Record<Registry, ResolvedProvider>> = {};
 
-  // Resolve the native provider. Prefer the stable provider id (a single read,
-  // no iteration); fall back to admin-address resolution when only the address
-  // is configured; otherwise skip native scrapes entirely.
-  if (config.nativeProviderId !== undefined) {
+  // Resolve the native provider — by stable id when configured, else by admin
+  // address (see core/components/staking-provider.ts). Skipped when neither set.
+  if (config.nativeProviderId !== undefined || config.nativeProviderAdminAddress) {
+    const selector: NativeProviderSelector = {
+      ...(config.nativeProviderId !== undefined
+        ? { providerId: config.nativeProviderId }
+        : {}),
+      ...(config.nativeProviderAdminAddress
+        ? { adminAddress: config.nativeProviderAdminAddress }
+        : {}),
+    };
     try {
-      const data = await ethClient.getStakingProviderById(config.nativeProviderId);
+      const data = await resolveNativeProvider(ethClient, selector);
       if (data) {
         providers.native = {
           registry: "native",
@@ -73,28 +85,7 @@ export const initAgentChain = async (config: AgentConfig): Promise<AgentChainCon
         console.log(`[agent] Resolved native provider id=${data.providerId}`);
       } else {
         console.warn(
-          `[agent] No native staking provider registered for id=${config.nativeProviderId}.`,
-        );
-      }
-    } catch (error) {
-      console.warn(
-        `[agent] Failed to resolve native provider by id: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  } else if (config.nativeProviderAdminAddress) {
-    try {
-      const data = await ethClient.getStakingProvider(config.nativeProviderAdminAddress, "native");
-      if (data) {
-        providers.native = {
-          registry: "native",
-          providerId: data.providerId,
-          adminAddress: config.nativeProviderAdminAddress,
-          rewardsRecipient: data.rewardsRecipient,
-        };
-        console.log(`[agent] Resolved native provider id=${data.providerId}`);
-      } else {
-        console.warn(
-          `[agent] No native staking provider found for admin ${config.nativeProviderAdminAddress}.`,
+          `[agent] No native staking provider found for ${describeNativeProvider(selector)}.`,
         );
       }
     } catch (error) {
