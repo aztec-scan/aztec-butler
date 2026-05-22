@@ -51,28 +51,29 @@ export class LocalKeyScraper extends AbstractScraper {
       seenAttesters.add(addrKey);
       const existing = state.local.keys.get(addrKey);
 
-      // Preserve on-chain enrichment from the status scraper; refresh
-      // placement facts (registry / coinbase / publishers) from the file.
-      const next: LocalAttesterRuntimeState = {
-        attesterAddress: key.attesterAddress,
-        registry: key.registry,
-        publishers: key.publishers,
-        lifecycleState: existing?.lifecycleState ?? "NEW",
-        inProviderQueue: existing?.inProviderQueue ?? false,
-        lastUpdated: now,
-      };
-      if (key.coinbase) next.coinbase = key.coinbase;
-      if (existing?.onChainView) next.onChainView = existing.onChainView;
-      if (existing?.providerQueuePosition !== undefined) {
-        next.providerQueuePosition = existing.providerQueuePosition;
+      if (existing) {
+        // Mutate in place: refresh the placement facts (registry / coinbase /
+        // publishers) from the file and leave the on-chain enrichment alone.
+        // Replacing the object would orphan writes the status / eta scrapers
+        // make to a reference they captured before their own `await`.
+        existing.attesterAddress = key.attesterAddress;
+        existing.registry = key.registry;
+        existing.publishers = key.publishers;
+        if (key.coinbase) existing.coinbase = key.coinbase;
+        else delete existing.coinbase;
+        existing.lastUpdated = now;
+      } else {
+        const created: LocalAttesterRuntimeState = {
+          attesterAddress: key.attesterAddress,
+          registry: key.registry,
+          publishers: key.publishers,
+          lifecycleState: "NEW",
+          inProviderQueue: false,
+          lastUpdated: now,
+        };
+        if (key.coinbase) created.coinbase = key.coinbase;
+        state.local.keys.set(addrKey, created);
       }
-      if (existing?.entryQueuePosition !== undefined) {
-        next.entryQueuePosition = existing.entryQueuePosition;
-      }
-      if (existing?.entryQueueEtaTimestamp !== undefined) {
-        next.entryQueueEtaTimestamp = existing.entryQueueEtaTimestamp;
-      }
-      state.local.keys.set(addrKey, next);
     }
 
     // Drop attesters whose key files were removed.
@@ -92,14 +93,23 @@ export class LocalKeyScraper extends AbstractScraper {
         k.publishers.some((p) => p.toLowerCase() === pubKey),
       ).length;
       const existing = state.local.publishers.get(pubKey);
-      const next: LocalPublisherRuntimeState = {
-        publisherAddress,
-        balanceWei: existing?.balanceWei ?? 0n,
-        requiredTopUpWei: existing?.requiredTopUpWei ?? 0n,
-        attesterCount,
-        lastUpdated: now,
-      };
-      state.local.publishers.set(pubKey, next);
+      if (existing) {
+        // Mutate in place: refresh membership facts and leave balanceWei /
+        // requiredTopUpWei alone — the balance scraper writes those to a
+        // reference it captured before its own `await`.
+        existing.publisherAddress = publisherAddress;
+        existing.attesterCount = attesterCount;
+        existing.lastUpdated = now;
+      } else {
+        const created: LocalPublisherRuntimeState = {
+          publisherAddress,
+          balanceWei: 0n,
+          requiredTopUpWei: 0n,
+          attesterCount,
+          lastUpdated: now,
+        };
+        state.local.publishers.set(pubKey, created);
+      }
     }
     for (const pubKey of [...state.local.publishers.keys()]) {
       if (!seenPublishers.has(pubKey)) {

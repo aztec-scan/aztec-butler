@@ -77,20 +77,37 @@ export class ScraperManager {
         continue;
       }
 
+      // Guard against overlapping runs of the SAME scraper: if a scrape takes
+      // longer than its interval, the next tick is skipped rather than starting
+      // a second concurrent run (which would double RPC load and race on shared
+      // state and caches).
+      let scraping = false;
+      const runScrape = async (label: string): Promise<void> => {
+        if (scraping) {
+          console.warn(
+            `  ! ${scraper.name} scraper [${scraper.network}] — previous run still ` +
+              `in progress, skipping ${label}`,
+          );
+          return;
+        }
+        scraping = true;
+        try {
+          await scraper.scrape();
+        } catch (error) {
+          console.error(
+            `Error in ${scraper.name} scraper [${scraper.network}] (${label}):`,
+            error,
+          );
+          // Continue with the next interval.
+        } finally {
+          scraping = false;
+        }
+      };
+
       // Schedule periodic scraping before the initial scrape so one slow
       // scraper cannot block all later scrapers from starting.
       const handle = setInterval(() => {
-        void (async () => {
-          try {
-            await scraper.scrape();
-          } catch (error) {
-            console.error(
-              `Error in ${scraper.name} scraper [${scraper.network}]:`,
-              error,
-            );
-            // Continue scraping on next interval
-          }
-        })();
+        void runScrape("scheduled run");
       }, intervalMs);
 
       this.intervalHandles.push(handle);
@@ -99,20 +116,10 @@ export class ScraperManager {
         `  ✓ ${scraper.name} scraper [${scraper.network}] scheduled (interval: ${intervalMs / 1000}s)`,
       );
 
-      void (async () => {
-        try {
-          console.log(
-            `  - Running initial scrape for ${scraper.name} [${scraper.network}]...`,
-          );
-          await scraper.scrape();
-        } catch (error) {
-          console.error(
-            `  ✗ Initial scrape failed for ${scraper.name} [${scraper.network}]:`,
-            error,
-          );
-          // Continue with other scrapers
-        }
-      })();
+      console.log(
+        `  - Running initial scrape for ${scraper.name} [${scraper.network}]...`,
+      );
+      void runScrape("initial scrape");
     }
 
     console.log("All scrapers started successfully");
