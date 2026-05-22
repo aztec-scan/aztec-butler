@@ -523,28 +523,34 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     }
 
     const stakingReg = this.getNativeStakingRegistryContract();
-    let index = 0n;
 
-    while (true) {
-      try {
-        const [admin, takeRate, rewardsRecipient] =
-          await stakingReg.read.providerConfigurations([index]);
-        if (admin === adminAddress) {
-          const providerData: StakingProviderData = {
-            providerId: index,
-            admin,
-            takeRate,
-            rewardsRecipient,
-          };
-          this.providerDataCache.set(cacheKey, providerData);
-          return providerData;
-        }
-        index++;
-      } catch {
-        this.providerDataCache.set(cacheKey, null);
-        return null;
+    // `providerConfigurations` is a mapping keyed by provider id: reading an
+    // out-of-range id returns a zero-struct rather than reverting, so the scan
+    // MUST be bounded. `nextProviderIdentifier` is the monotonic id counter —
+    // every registered provider has an id strictly less than this value.
+    const providerCount = await stakingReg.read.nextProviderIdentifier();
+    // viem returns EIP-55 checksummed (mixed-case) addresses, while the
+    // configured admin address may be supplied in any case. Compare
+    // case-insensitively, as the Olla branch above already does.
+    const normalizedAdmin = adminAddress.toLowerCase();
+
+    for (let index = 0n; index < providerCount; index++) {
+      const [admin, takeRate, rewardsRecipient] =
+        await stakingReg.read.providerConfigurations([index]);
+      if (admin.toLowerCase() === normalizedAdmin) {
+        const providerData: StakingProviderData = {
+          providerId: index,
+          admin,
+          takeRate,
+          rewardsRecipient,
+        };
+        this.providerDataCache.set(cacheKey, providerData);
+        return providerData;
       }
     }
+
+    this.providerDataCache.set(cacheKey, null);
+    return null;
   }
 
   /**
