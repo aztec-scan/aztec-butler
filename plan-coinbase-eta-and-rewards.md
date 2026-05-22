@@ -1,54 +1,117 @@
-# Plan: Missing-Coinbase ETA + Chain-Derived Rewards Scraper
+# Plan: Agent Run Modes + Missing-Coinbase ETA + Chain-Derived Rewards Scraper
 
-Two follow-on features for the agent (`PLAN.md`):
+This plan covers a prerequisite refactor and two follow-on features for the
+agent (`PLAN.md`):
 
+- **Part 0** — Agent run modes: replace the per-scraper boolean toggles with an
+  explicit, required `--mode`.
 - **Part 1** — Missing-coinbase ETA: tell operators *how long they have* to set a
   coinbase before a local attester activates without one.
 - **Part 2** — Rewards scraper: per-coinbase staking-rewards telemetry, with the
   Google Sheets export split out as a separate, credentialed downstream consumer.
 
-The two parts are independent and can be implemented/shipped separately.
+Part 0 lands first. Parts 1 and 2 are independent of each other.
+
+---
+
+# Part 0 — Agent run modes (prerequisite refactor)
+
+Replace the agent's per-scraper boolean toggles with an explicit, **required**
+`--mode`. This is a refactor of the already-built (but not-yet-deployed) agent —
+cheap now, and it makes the deployment model unmisconfigurable.
+
+## Modes — `aztec-butler agent --mode {node|global|all}`
+
+| Mode | Scrapers | Requires | Emits | Where |
+|---|---|---|---|---|
+| `node` | local keys, local status, publisher balances, entry-queue ETA | `BUTLER_AGENT_HOST` | `host`-labelled local metrics only | every sequencer node |
+| `global` | global stats (+ rewards, opt-in) | archive RPC when rewards on; no `HOST` | `network`-labelled global metrics only | exactly one per network (monitoring server) |
+| `all` | everything | `HOST` + archive RPC | both | dev / test / single-box only |
+
+- `--mode` is **required** — no default. `agent --network mainnet` with no
+  `--mode` errors, so a process can never silently run `all` in production and
+  emit duplicate global series.
+- The mode selects the **scraper set and the metric-instrument set**. `global`
+  mode never registers the local (`host`-labelled) instruments — so the
+  phantom-node concern is structurally impossible, not merely avoided. (This
+  subsumes the earlier "gate local instruments on local scrapers" refinement.)
+- Per-mode validation: `node`/`all` require `BUTLER_AGENT_HOST`; `global`/`all`
+  with rewards require archive RPC; `global` has no host identity at all.
+- `--once` / `--dry-run` are unchanged — orthogonal run-modifiers.
+
+## Config — toggles deleted
+
+The per-scraper booleans (`BUTLER_AGENT_LOCAL_KEYS_ENABLED`,
+`BUTLER_AGENT_L1_STATUS_ENABLED`, `BUTLER_AGENT_ROLLUP_STATUS_ENABLED`,
+`BUTLER_AGENT_PUBLISHER_BALANCES_ENABLED`, `BUTLER_AGENT_GLOBAL_STATS_ENABLED`)
+are **removed** — the mode determines the scraper set.
+
+The one feature toggle that survives is `BUTLER_AGENT_REWARDS_ENABLED` — it gates
+rewards (Part 2 Phase A) *within* `global`/`all` mode, because rewards ships
+later and carries extra requirements (archive RPC, AZTEC token). One toggle, not
+a soup. Interval config (`BUTLER_AGENT_*_INTERVAL_MS`) stays.
+
+## Why `all` (not `combined`)
+
+`all` is literally accurate (runs all scrapers), short, and unambiguous — and it
+does not oversell itself as a production-recommended mode. The real multi-host
+topology always uses the `node` + `global` split; `all` is the single-box /
+testing option. (`combined` is bland; `standalone` risks reading as the "proper"
+mode.)
+
+## Implementation outline (Part 0)
+
+1. `src/agent/config.ts` — replace the scraper booleans with a required `mode` enum; per-mode validation (HOST, archive RPC); keep `BUTLER_AGENT_REWARDS_ENABLED`.
+2. `src/agent/index.ts` — add the required `--mode` CLI option; derive the scraper set from the mode.
+3. `src/agent/metrics/agent-metrics.ts` — register local vs global instruments by mode.
+4. `daemon/install-agent.sh` — pass `--mode`; `scripts/agent-local-test.sh` → `--mode all`.
+5. `docs/agent-deployment.md` — rewrite the config section around modes.
+6. `tests/unit/agent-config.test.ts` — per-mode validation tests.
+
+> Supersedes the per-scraper-toggle configuration described in `PLAN.md`.
 
 ---
 
 ## Deployment topology
 
-Confirmed placement. This is a **deployment choice** — the agent's per-scraper
-toggles already support it, so it needs no code change beyond one minor
-refinement noted below.
-
-| Host | Process | Scrapers | Key files present? |
+| Host | Process | Emits | Key files? |
 |---|---|---|---|
-| Sequencer nodes (beast-3, beast-4) | `aztec-butler agent` | **local only** — local keys, local status, publisher balances, entry-queue ETA | Yes — each node's **own** files only |
-| Monitoring server (`m.aztlanlabs.xyz`) | `aztec-butler agent` (global-only) | **global only** — global stats + rewards (Part 2 Phase A); local scrapers off | **No** |
+| Sequencer nodes (beast-3, beast-4) | `aztec-butler agent --mode node` | `host`-labelled local metrics | Yes — each node's **own** files only |
+| Monitoring server (`m.aztlanlabs.xyz`) | `aztec-butler agent --mode global` | `network`-labelled global metrics | **No** |
 | Monitoring server | `aztec-butler sheets-exporter` | — (queries Prometheus) | **No** |
 
 Rationale:
 
 - The monitoring server already runs **Prometheus 2.45.0** (`:9090`, 30 d
   retention) and **Grafana**, already hosts the butler, and already has the GCP
-  credential + archive RPC configured. It is the natural home for everything
-  chain-global and for the credentialed Sheets job.
+  credential + archive RPC configured. Natural home for everything chain-global
+  and for the credentialed Sheets job.
 - Global stats and rewards are **chain-wide reads** — no reason to run them on a
-  sequencer node. Running them on the monitoring server makes it the **single,
-  unambiguous global exporter** per network (this supersedes the earlier
-  "beast-3 vs beast-4 for global stats" question).
-- The monitoring-server agent runs with `BUTLER_AGENT_LOCAL_KEYS_ENABLED=false`
-  and the other local toggles off; only `BUTLER_AGENT_GLOBAL_STATS_ENABLED` and
-  `BUTLER_AGENT_REWARDS_STATS_ENABLED` are on.
+  sequencer node. The monitoring server becomes the **single, unambiguous global
+  exporter** per network (this supersedes the earlier "beast-3 vs beast-4"
+  question).
 
 **Key-file rule (hard requirement).** Registered-key files live **only on the
-sequencer node that owns them**, read locally by that node's own agent. They are
-never synced, aggregated, or copied to another server. The monitoring server
-needs **zero** key files: global stats are chain reads, rewards coinbases are
-derived from `StakedWithProvider` chain events, and the Sheets exporter only
-queries Prometheus. The current aztlan-ops `monitoring_server` role copies every
-host's `files/aztec/<network>/<host>/*.json` onto the monitoring server for
-`serve` mode — **those copy tasks are removed** by this migration.
+sequencer node that owns them**, read locally by that node's own `--mode node`
+agent. They are never synced, aggregated, or copied to another server. The
+monitoring server needs **zero** key files: global stats are chain reads, rewards
+coinbases are derived from `StakedWithProvider` chain events, and the Sheets
+exporter only queries Prometheus. The current aztlan-ops `monitoring_server` role
+copies every host's `files/aztec/<network>/<host>/*.json` onto the monitoring
+server for `serve` mode — **those copy tasks are removed** by this migration.
 
-**Minor code refinement:** make `BUTLER_AGENT_HOST` optional when all local
-scrapers are disabled — a global-only agent has no host identity (and global
-metrics carry no `host` label anyway).
+**The `global` agent is not a node.** `global` mode (Part 0) registers only
+global (`network`-labelled) instruments — it is structurally incapable of
+emitting a `host`-labelled series, so it never appears in host/node-enumerating
+dashboards or per-host alerts. Global-exporter liveness is a separate,
+non-conflated signal — `global_last_scraped_timestamp{network,scraper}` (no
+`host`). The OTLP resource is `service.name` only (no host, no auto
+host-detection), so nothing leaks via `target_info` either.
+
+> Separate known migration item: the existing aztlan-ops aztec-butler
+> **dashboards** query the old `serve` metric names and must be rebuilt for the
+> new agent metrics. That is "dashboards show nothing until rebuilt" — the
+> opposite of a phantom node.
 
 ---
 
@@ -70,17 +133,17 @@ The ETA needs two facts joined:
   the queue's drain rate
 
 In the old single-process server these lived together. In the agent model the
-global entry queue is only *exported* by one host (the monitoring server). The
-ETA, however, is host-specific (it's about *your* attesters).
+global entry queue is only *exported* by the `global` agent. The ETA, however, is
+host-specific (it's about *your* attesters).
 
 ### Resolution
 
 **Reading the entry queue is not the same as exporting a global metric.** Every
-sequencer-node agent may *read* `getEntryQueueAt(...)` to locate its own
-attesters — the read is cheap and read-only. Only the **global aggregate**
+`node`-mode agent may *read* `getEntryQueueAt(...)` to locate its own attesters —
+the read is cheap and read-only. Only the **global aggregate**
 (`global_entry_queue_length`) must stay single-source.
 
-- Each sequencer-node agent computes ETAs for **its own** attesters and emits
+- Each `node`-mode agent computes ETAs for **its own** attesters and emits
   **host-labelled** series. Attester sets are disjoint across hosts, so there is
   no duplicate-series problem.
 - An attester deliberately run on two hosts (HA) correctly yields two series
@@ -88,11 +151,9 @@ attesters — the read is cheap and read-only. Only the **global aggregate**
 
 ## Design
 
-### New scraper: `LocalEntryQueueEtaScraper` (local scope)
+### New scraper: `LocalEntryQueueEtaScraper`
 
-A **local** scraper — it runs on each sequencer-node agent (off on the
-monitoring-server agent, which has local scrapers disabled). On its own (slower)
-interval:
+Part of the `node` mode scraper set (Part 0). On its own (slower) interval:
 
 1. Fetch the ordered global entry queue, **stopping early** once every local
    attester has been located (you only need the queue up to your last attester's
@@ -134,17 +195,17 @@ both inputs locally (coinbase presence + ETA); the join is trivial and cheap.
 ### Config
 
 ```text
-BUTLER_AGENT_ENTRY_QUEUE_ETA_ENABLED=true            # default true (a local scraper)
 BUTLER_AGENT_ENTRY_QUEUE_ETA_INTERVAL_MS=120000      # default 120s
 ```
 
+The scraper itself has no enable toggle — it is simply part of `node` mode.
 Coinbase ETAs move slowly (the queue drains ~`flushSize` per epoch), so a 120 s
 interval is ample and keeps RPC load low.
 
 ## RPC cost
 
 `getAllQueuedAttesters()` is an index-by-index loop (`N+1` calls). Every
-sequencer-node agent now reads the queue, so cost matters:
+`node`-mode agent now reads the queue, so cost matters:
 
 - **Primary mitigation — early stop:** scan from index 0 and stop once all local
   attesters are located. Cost is bounded by *your last attester's position*, not
@@ -167,273 +228,260 @@ sequencer-node agent now reads the queue, so cost matters:
 1. `src/agent/queue-timing.ts` — extract `fetchL2BlockTimeMs` + `computeTimePerAttester` (shared).
 2. `src/core/components/EthereumClient.ts` — add early-stop queue read.
 3. `src/agent/state.ts` — add `entryQueuePosition?` / `entryQueueEtaTimestamp?` to `LocalAttesterRuntimeState`.
-4. `src/agent/scrapers/entry-queue-eta-scraper.ts` — new `LocalEntryQueueEtaScraper`.
-5. `src/agent/metrics/agent-metrics.ts` — add the three metrics above.
-6. `src/agent/config.ts` — add the two config fields.
-7. `src/agent/index.ts` — register the scraper; refactor `global-stats-scraper.ts` onto `queue-timing.ts`.
+4. `src/agent/scrapers/entry-queue-eta-scraper.ts` — new `LocalEntryQueueEtaScraper`; add to the `node` scraper set.
+5. `src/agent/metrics/agent-metrics.ts` — add the three metrics above (local section).
+6. `src/agent/config.ts` — add the interval config field.
+7. `src/agent/index.ts` — wire the scraper into `node` mode; refactor `global-stats-scraper.ts` onto `queue-timing.ts`.
 8. `tests/unit/agent-entry-queue-eta.test.ts` — position→ETA math, missing-coinbase selection, edge cases.
 9. `docs/agent-deployment.md` — document the metrics + an example alert.
 
 ---
 
-# Part 2 — Chain-Derived Rewards Scraper
+# Part 2 — Staking-Rewards Telemetry & Accounting
 
-## Goal
+Two separate concerns, two separate processes:
 
-Per-coinbase staking-rewards telemetry, split into two **separate processes**:
+- **Phase A — rewards monitoring** *(implemented)* — a live operational view of
+  *pending/unclaimed* rewards, exported by the agent in `global`/`all` mode.
+- **Phase B — accounting ledger** — `aztec-butler sheets-exporter`: an
+  event-sourced daily ledger of *realized* rewards for financial accounting,
+  written to Google Sheets.
 
-- **Phase A** — *rewards scraper*: the single rewards scrape. Read-only,
-  credential-free; emits rewards metrics over OTLP.
-- **Phase B** — *Sheets exporter*: a separate, credentialed **consumer** that
-  reads Phase A's metrics from Prometheus and writes the daily reward accounting
-  to Google Sheets.
+They answer different questions. Phase A: "is unclaimed reward piling up — should
+we claim?" Phase B: "what did we earn, per day, and how did it split between our
+Safe and the other delegate?"
 
-Phase A never touches Sheets. Phase B never scrapes chain and never emits metrics.
-There is exactly **one** rewards scrape (Phase A); Phase B is a pure downstream
-consumer. Both run on the monitoring server (see Deployment topology).
+## Why the two are different
 
-## Non-goals
+Financial accounting must be **replayable, auditable, and not built on sampled
+transient state**. The rollup exposes rewards only as `getSequencerRewards(coinbase)`
+— a *pending balance* that climbs with accrual and drops to ~0 on claim — and
+emits **no reward event**. Sampling that across historical blocks (the old
+`StakingRewardsScraper`) is fragile and is what produced the unreliable
+`staking-rewards-history.json`.
 
-- Running rewards on every host — it is global/provider-level; **one instance per
-  network**, on the monitoring server.
-- Credentials or external writes anywhere near the sequencer-node agents.
-- A second rewards scrape — Phase A is the sole producer; Phase B only consumes.
-- Any key files on the monitoring server.
+The ledger is instead built on:
+
+> **`accrued(day) = Δ(Σ getSequencerRewards across all rollup versions) + claims(day)`**
+
+— a daily balance snapshot combined with the immutable claim events. Exact,
+self-reconciling, replayable.
+
+## Confirmed on-chain facts (design assumptions)
+
+Verified during planning; the design depends on them:
+
+- Every coinbase reaches the rollup via the native StakingRegistry's
+  `StakedWithProvider` event — one event scan discovers the **complete** coinbase
+  set. No key files; no non-provider/genesis edge cases.
+- Unclaimed sequencer rewards **stay on the old rollup** across an upgrade — no
+  carry-over, so no spurious balance jump at migration.
+- Old-rollup rewards **remain claimable at all times** — no "stranded" balance.
+- The rollup emits **no reward-credit event**; `L2BlockProposed` carries neither
+  proposer nor coinbase — so per-block reward reconstruction is impossible.
+- Reward token = the rollup's staking asset (`getStakingAsset()`); `decimals()`
+  resolved on-chain.
 
 ## Registry scope
 
-The rewards path is **registry-agnostic**, exactly as today's `StakingRewardsScraper`
-is — it computes rewards for whatever coinbases exist. Olla is **out of scope**:
-Olla rewards are tracked separately, outside this tool. Metrics are keyed by
-`coinbase` only — no `registry` label (see Resolved Decisions Q1).
+Native only. Olla rewards are tracked separately, outside this tool. Metrics and
+ledger rows are keyed by `coinbase`.
 
 ---
 
-## Phase A — Rewards scraper → OTLP metrics
+## Phase A — Rewards monitoring *(implemented)*
 
-A new global scraper inside the agent, opt-in, running on the **monitoring-server
-agent** (global-only mode — see Deployment topology), alongside the global-stats
-scraper.
+Built and verified against testnet. A `global`/`all`-mode agent scraper, opt-in
+via `BUTLER_AGENT_REWARDS_ENABLED`.
 
-### A1. Coinbase discovery from chain (no key-file sync)
+- Discovers coinbases from `StakedWithProvider` (CoinbaseScraper discover-all mode).
+- Per coinbase: current `getSequencerRewards` + latest split allocation →
+  `pending` and `our_share`.
+- Metrics (global, no `host`), whole AZTEC:
+  - `aztec_butler_staking_rewards_pending_aztec{network, coinbase}`
+  - `aztec_butler_staking_rewards_our_share_aztec{network, coinbase}`
 
-Coinbases are discovered **purely from chain events** — no key files on the
-monitoring server. The native StakingRegistry emits:
+This is **operational monitoring** — current pending/unclaimed state, for
+dashboards and "time to claim" alerting. It is **not** the accounting record; the
+reconstructed `earned` counter was removed — "earned" belongs to the Phase B
+ledger.
 
-```solidity
-event StakedWithProvider(
-  uint256 indexed providerIdentifier,
-  address indexed rollupAddress,
-  address indexed attester,
-  address coinbaseSplitContractAddress,
-  address stakerImplementation
-)
-```
-
-It is **indexed by `providerIdentifier`**, so a `getLogs` filtered to *our*
-provider ID returns exactly our `attester → coinbase` mappings — globally
-complete, from chain alone.
-
-- Reuse the event-scanning machinery in `src/core/components/CoinbaseScraper.ts`,
-  adapted to a **discover-all mode**: drop its `attesterAddresses` pre-filter —
-  the `providerIdentifier`-indexed `getLogs` already scopes results to our
-  provider, and there is no attester list to filter against.
-- The unique set of `coinbaseSplitContractAddress` is our coinbase set.
-- Requires **archive RPC** for the historical event scan →
-  `ETHEREUM_ARCHIVE_NODE_URL` becomes **required** when rewards stats are enabled
-  (validate this in `buildAgentConfig`). The monitoring server already has an
-  archive RPC URL configured.
-- Incremental scan from `STAKING_REWARDS_SPLIT_FROM_BLOCK`, with a **rebuildable
-  on-disk cursor cache** (`{lastScrapedBlock, mappings}`) to avoid a full re-scan
-  on restart (Resolved Decisions Q4). It is a pure performance cache —
-  reconstructable from chain, never a source of truth, never copied between
-  servers. `CoinbaseScraper` already has `loadCoinbaseCache`/`saveCoinbaseCache`.
-
-`StakedWithProvider` is a native-registry event. **Olla is out of scope** — Olla
-rewards are tracked separately, outside this tool, so there is no Olla coinbase
-handling here (Resolved Decisions Q1).
-
-### A2. Reward token & per-coinbase computation
-
-**Reward token:** resolved on-chain at init — the rollup's staking asset,
-confirmed on mainnet to be **AZTEC `0xa27ec0006e59f245217ff08cd52a7e8b169e62d2`**.
-Read `decimals()` from the token contract once at init and scale by it; do **not**
-hardcode (testnet uses a different token). An optional `REWARD_TOKEN_ADDRESS`
-override is allowed.
-
-Per coinbase, compute **current** values only (no backfill in Phase A):
-
-- pending rewards for the coinbase (current rollup)
-- latest split allocation (`SplitUpdated` event) → recipients + allocations
-- our share = `pending * ourAllocation / totalAllocation`, where "ours" is the
-  provider's `rewardsRecipient` (already resolved in `initAgentChain`) or a
-  configured `SAFE_ADDRESS`
-
-Extract the live per-coinbase computation from the server's `StakingRewardsScraper`
-into a reusable `src/core/components/rewards-compute.ts`. The server's backfill,
-rollup-version timeline, and history persistence are **not** part of Phase A.
-
-### A3. Metrics (global — no `host`, no `registry`)
-
-```text
-aztec_butler_staking_rewards_pending_aztec{network, coinbase}
-aztec_butler_staking_rewards_our_share_aztec{network, coinbase}
-aztec_butler_staking_rewards_earned_aztec{network, coinbase}      # cumulative counter
-```
-
-- Values are in **whole AZTEC** (float — the raw amount divided by `10^decimals`).
-  This is dashboard-friendly and avoids the `2^53` precision ceiling that raw
-  base-units would hit.
-- `earned` is a monotonic **ObservableCounter**, computed from an **in-memory**
-  last-`our_share` map (sum of positive deltas — accrual, ignoring drops from
-  claims). On restart the map empties and the counter resets to 0; Prometheus
-  `rate()`/`increase()` are reset-aware, so this needs no disk persistence.
-
-### A4. Config (Phase A)
-
-```text
-BUTLER_AGENT_REWARDS_STATS_ENABLED=false             # opt-in; on for the monitoring-server agent
-BUTLER_AGENT_REWARDS_INTERVAL_MS=3600000             # default 1h
-STAKING_REWARDS_SPLIT_FROM_BLOCK=...                 # existing — event-scan start block
-ETHEREUM_ARCHIVE_NODE_URL=...                        # REQUIRED when rewards enabled
-REWARD_TOKEN_ADDRESS=...                             # optional override; default = rollup staking asset
-```
-
-Enabled on the **monitoring-server agent** only — the single global exporter per
-network (see Deployment topology).
-
-### Implementation outline (Phase A)
-
-1. `src/core/components/rewards-compute.ts` — extract live pending+split→share computation; resolve reward token + decimals.
-2. Adapt `CoinbaseScraper` for discover-all mode (drop attester pre-filter).
-3. `src/agent/scrapers/rewards-scraper.ts` — `RewardsStatsScraper`.
-4. `src/agent/state.ts` — per-coinbase rewards state + in-memory `earned` deltas.
-5. `src/agent/metrics/agent-metrics.ts` — add the three rewards metrics (global section).
-6. `src/agent/config.ts` — add Phase A config; require archive RPC when enabled; make `BUTLER_AGENT_HOST` optional when local scrapers are off.
-7. `src/agent/index.ts` — register the scraper when enabled.
-8. `tests/unit/agent-rewards.test.ts` — share math, decimals scaling, earned-counter deltas (claim drop + restart reset).
-9. `docs/agent-deployment.md` — document metrics + the single-exporter rule.
+Config (implemented): `BUTLER_AGENT_REWARDS_ENABLED`,
+`BUTLER_AGENT_REWARDS_INTERVAL_MS`, `STAKING_REWARDS_SPLIT_FROM_BLOCK`,
+`ETHEREUM_ARCHIVE_NODE_URL` (required when enabled), `REWARD_TOKEN_ADDRESS`
+(optional).
 
 ---
 
-## Phase B — Google Sheets exporter (separate downstream consumer)
+## Phase B — Accounting ledger → Google Sheets
 
-A separate runtime mode — **not** part of the agent:
+A separate runtime mode:
 
 ```bash
-aztec-butler sheets-exporter --network mainnet
+aztec-butler sheets-exporter --network mainnet              # recurring (systemd)
+aztec-butler sheets-exporter --network mainnet --backfill   # one-time historical fill
 ```
 
-Phase B is a **pure downstream consumer**. It does **not** scrape chain — Phase A
-is the single rewards scrape. Phase B reads the rewards metrics Phase A already
-produced and writes the daily accounting to Google Sheets. One scrape, Sheets as
-a separate consumer.
+Runs on the **monitoring server** — the only component holding the Google
+credential. Self-contained: chain RPC + GCP credential + config. No Prometheus,
+no key files.
 
-### B1. Source: the monitoring server's Prometheus
+### B1. The ledger
 
-Phase A pushes `staking_rewards_*_aztec` via OTLP → collector → the monitoring
-server's **Prometheus 2.45.0** (`:9090`, the same store Grafana queries). Phase B
-runs on the **same host** as that Prometheus, so it queries it over **localhost**:
-`http://localhost:9090/api/v1/query_range`. No new infrastructure, no network
-exposure, no auth — it reads a store that must already exist for Grafana to work.
-30 d Prometheus retention is ample for a daily export.
+Daily, per coinbase:
 
-### B2. Daily aggregates via range queries
-
-The four existing Sheets outputs map to range queries over the
-`staking_rewards_*_aztec` series:
-
-| Sheets output | Source query (sketch) |
+| Column | Derivation |
 |---|---|
-| Daily total | daily aggregate of `staking_rewards_pending_aztec` / `our_share_aztec` |
-| Coinbases | label values of `coinbase` |
-| Daily per coinbase | daily aggregate grouped by `coinbase` |
-| Daily earned | `increase(staking_rewards_earned_aztec[1d])` per coinbase |
+| `accrued` | `Δ(Σ getSequencerRewards over all rollups) + claims that day` |
+| `claimed` | sum of reward-token `Transfer`s into the coinbase that day |
+| `our_share` / `other_delegate` | `accrued × split%` from `SplitUpdated` (or directly from distribute `Transfer`s) |
 
-Phase A samples hourly, so Prometheus holds hourly resolution — daily aggregates
-are accurate, including earnings that accrue and are claimed within a day (Phase
-A's `earned` counter already captures that).
+Inputs — all chain-derived or config:
 
-### B3. Config (Phase B)
+| Input | Source |
+|---|---|
+| Coinbase set | `StakedWithProvider` event scan (provider-filtered) |
+| Rollup set | `getRollupTimeline` (`CanonicalRollupUpdated`) — enumerates rollups to sum over |
+| Balances | `getSequencerRewards(coinbase)` summed across the rollup set |
+| Claims / distributes | reward-token `Transfer` events (`getLogs`) |
+| Split % | `SplitUpdated` events per coinbase |
+| Our recipient | config — Safe / provider `rewardsRecipient` |
+
+Summing `getSequencerRewards` across **all** rollup versions makes the formula
+migration-proof with no per-block dispatch: a not-yet-existing coinbase or an old
+rollup contributes 0; a late claim on an old rollup yields `Δ = −X, claims = +X
+→ accrued 0`.
+
+### B2. Reliability
+
+- Claims, distributes and the split → **fully event-sourced**, replayable from
+  genesis on any RPC.
+- Daily `accrued` → uses **current-block** balance reads (reliable — unlike the
+  old scraper's historical-state reads) plus events. The day-boundary balances
+  must be captured as time passes (persisted cursor); but it **self-reconciles to
+  exact totals**, and an outage only coarsens granularity (one lump for the gap),
+  never corrupts.
+
+### B3. The Google Sheet is the store
+
+Append-only, durable, the deliverable. There is **no** rewards history file and
+**no** rewards data in the Ansible repo — only config. The recurring service
+persists a small **cursor** (per-coinbase last balances + last-scanned block) in
+the data dir; it is rebuildable by re-running `--backfill`.
+
+### B4. `--backfill` — one-time historical fill
+
+Same code and formula, iterated over historical day-boundaries.
+
+- **Archive RPC required** — historical `getSequencerRewards` reads need archive
+  state; public non-archive RPCs cannot serve it.
+- **Archive endpoint is configurable** — `SHEETS_EXPORTER_ARCHIVE_RPC_URL`
+  (falls back to `ETHEREUM_ARCHIVE_NODE_URL`). dRPC's free tier serves archive
+  (verified: its keyless endpoint answers historical `eth_call`) and is the
+  expected default, but any archive provider works.
+- **Throttling resilience** — the first backfill is thousands of archive calls
+  and a free endpoint *will* rate-limit. The backfill must:
+  - **self-rate-limit** — a configurable cap (`SHEETS_EXPORTER_MAX_RPS`, low
+    default) to stay under the free tier proactively rather than hammering it;
+  - **retry with exponential backoff** on 429 / throttle / transient errors —
+    never fail the whole run on a throttle;
+  - **checkpoint & resume** — persist progress (last completed day) so an
+    interrupted or throttled run continues instead of restarting;
+  - keep request **concurrency low** (sequential or a small bounded pool).
+- Sums `getSequencerRewards` across the rollup *set* — no per-block routing.
+- **Idempotent** — writes the historical range by overwriting from the top, so
+  re-running (e.g. after a fix) just rewrites the same rows.
+- Run as a one-off command **on the monitoring server**; it fills the Sheet and
+  leaves the cursor for the recurring service. Long-running — run under `tmux`.
+
+### B5. Config (Phase B)
 
 ```text
-SHEETS_EXPORTER_METRICS_QUERY_URL=http://localhost:9090   # co-located Prometheus
-SHEETS_EXPORTER_METRICS_QUERY_AUTH=                       # unused for localhost
-SHEETS_EXPORTER_INTERVAL_MS=86400000                      # default daily
-GOOGLE_SERVICE_ACCOUNT_KEY_FILE=...                       # existing — already on the monitoring server
-GOOGLE_SHEETS_SPREADSHEET_ID=...                          # existing
-GOOGLE_SHEETS_RANGE / *_COINBASES_RANGE / ...             # existing
+SHEETS_EXPORTER_INTERVAL_MS=86400000              # recurring cadence (default daily)
+SHEETS_EXPORTER_ARCHIVE_RPC_URL=...               # backfill archive endpoint; default = ETHEREUM_ARCHIVE_NODE_URL
+SHEETS_EXPORTER_MAX_RPS=...                       # backfill self-rate-limit (low default)
+GOOGLE_SERVICE_ACCOUNT_KEY_FILE=...               # existing — already on the monitoring server
+GOOGLE_SHEETS_SPREADSHEET_ID=... / *_RANGE=...    # existing
+ETHEREUM_NODE_URL / AZTEC_NODE_URL                # recurring: current-block reads, no archive
+STAKING_REWARDS_SPLIT_FROM_BLOCK=...              # event-scan / backfill start block
 ```
 
-No chain RPC, no archive RPC, no persistence, no key files — Google Sheets is
-append-only and is its own historical record.
+The **recurring** service needs no archive RPC (current-block reads only); only
+`--backfill` does.
 
-### B4. Deployment
+### B6. Deployment
 
-- Its own systemd unit (`aztec-butler-sheets-exporter`), one instance per network.
-- Runs on the **monitoring server**, co-located with Prometheus (localhost query)
-  and with the GCP credential + Sheets config that already exist there. No
-  credentials touch the sequencer nodes.
+- Own systemd unit `aztec-butler-sheets-exporter`, one per network, on the
+  monitoring server, co-located with the GCP credential.
+- Ansible (`monitoring_server` role) deploys the binary, the service unit, and
+  config/credential — **not** data, and it does **not** run the backfill.
+- The backfill is a **documented one-off operator step**: deploy via Ansible →
+  run `sheets-exporter --backfill` once on the server (in `tmux`) → start the
+  recurring service.
 
 ### Implementation outline (Phase B)
 
-1. `src/sheets-exporter/metrics-query.ts` — minimal Prometheus query-API client.
-2. `src/sheets-exporter/aggregates.ts` — query results → the four daily aggregate shapes.
-3. `src/sheets-exporter/index.ts` — entrypoint: query → aggregate → write Sheets, on a schedule.
-4. `src/index.ts` — add the `sheets-exporter` CLI command.
-5. `daemon/install-sheets-exporter.sh` — systemd installer.
-6. `docs/` — deployment + config docs.
+1. `src/core/components/rewards-ledger.ts` — the `accrued = Δsum + claims` computation, claim/distribute `Transfer` scan, cross-rollup balance sum, split resolution; shared by recurring + backfill. Reuses `rewards-compute.ts`.
+2. `src/sheets-exporter/rpc.ts` — archive RPC client: self-rate-limit, exponential backoff/retry, low concurrency.
+3. `src/sheets-exporter/cursor.ts` — persist/load per-coinbase boundary balances + last-scanned block + backfill checkpoint.
+4. `src/sheets-exporter/index.ts` — entrypoint: recurring loop and the `--backfill` driver.
+5. Reuse `src/server/exporters/sheets-staking-rewards.ts` + `src/core/utils/googleAuth.ts` for Sheet writes.
+6. `src/index.ts` — `sheets-exporter` CLI command (`--network`, `--backfill`, `--dry-run`).
+7. `daemon/install-sheets-exporter.sh` — systemd installer.
+8. `tests/unit/` — ledger formula (`accrued = Δsum + claims`; migration day; late old-rollup claim), cursor round-trip, rate-limiter + backoff.
+9. `docs/` — deployment guide including the one-off backfill step.
 
 ---
 
 ## Migration
 
-- Google Sheets is append-only — **existing historical rows stay**.
-- `serve` keeps running rewards until Phase A is live, then disable it there
-  (never run two rewards metric emitters — one instance per network). Phase B
-  consumes Prometheus and may run once Phase A has populated it.
-- The old `staking-rewards-history.json` + chain backfill exist only for data
-  predating the tool. In the new model Prometheus is the history. If pre-existing
-  history is needed, that is a **one-time** backfill — not part of either
-  recurring service.
-- **aztlan-ops `monitoring_server` role** gets *simpler*: the "Discover butler
-  registered key files" and "Copy butler registered key files to data directory"
-  tasks are **removed** (no key files on the monitoring server), and the
-  `files/aztec/<network>/<host>/*.json` files are dropped from the Ansible repo.
-  New units: a global-only `aztec-butler agent` and an `aztec-butler-sheets-exporter`
-  per network.
+- The Google Sheet is append-only — any **existing rows stay**.
+- The old `staking-rewards-history.json` is unreliable and is **not** used;
+  `--backfill` reconstructs the full history correctly from chain instead.
+- `serve` keeps running rewards until Phase A + Phase B are live, then disable it
+  there. Never run two rewards processes writing the same outputs.
+- aztlan-ops `monitoring_server` role: add the `sheets-exporter` unit + config;
+  the rewards path needs **no** key files there.
 
 ---
 
 ## Resolved decisions
 
-**Q1 — Olla is out of scope.** "Olla rewards" was a speculative addition in the
-first draft. `OLLA_REWARDS_COINBASE_ADDRESS` is used only by the
-`prepare-deployment` CLI command (`fc24c43`); `StakingRewardsScraper` is entirely
-registry-agnostic. Olla rewards are **tracked separately, outside this tool**. →
-No `registry` label, no Olla coinbase handling. Native coinbases come from
-`StakedWithProvider`; rewards are keyed by `coinbase`.
+**Q1 — Olla out of scope.** Rewards are registry-agnostic and native-only; Olla
+is tracked separately. No `registry` label; rows keyed by `coinbase`.
 
-**Q2 — The metrics backend is the monitoring server's Prometheus.** The repo did
-not name it because it is external by design (`PLAN.md`: "central metrics backend
-/ Grafana"). It is **Prometheus 2.45.0** on the monitoring server (`:9090`, 30 d
-retention) — the same store Grafana queries. → Phase B is co-located with it and
-queries it over localhost; it is not new infrastructure. An earlier draft
-overcorrected and rewrote Phase B to scrape chain itself — reverted: Phase A is
-the sole rewards scrape, Phase B is a pure consumer.
+**Q2 — Accounting is event-sourced, not Prometheus-sourced.** An earlier draft
+had Phase B query Prometheus — wrong for accounting (30 d retention, not
+replayable, not auditable). Phase B is a self-contained event-sourced ledger
+(`getSequencerRewards` snapshots + `Transfer` events → Sheet). Phase A still
+feeds Prometheus, for *monitoring* only.
 
-**Q3 — Reward token.** AZTEC, mainnet `0xa27ec0006e59f245217ff08cd52a7e8b169e62d2`.
-→ Resolve the reward token + its `decimals()` on-chain at init (from the rollup
-staking asset; optional `REWARD_TOKEN_ADDRESS` override). Metrics exported in
-whole AZTEC, named `staking_rewards_*_aztec`.
+**Q3 — Reward token.** The rollup's staking asset (`getStakingAsset()`), mainnet
+AZTEC `0xa27ec0006e59f245217ff08cd52a7e8b169e62d2`; `decimals()` resolved
+on-chain; optional `REWARD_TOKEN_ADDRESS` override. Amounts in whole AZTEC.
 
-**Q4 — Coinbase cursor cache.** → Keep the rebuildable on-disk cache; do not
-full-rescan on restart. It lives on the monitoring server, rebuilt from chain —
-never copied between servers.
+**Q4 — Coinbase discovery.** Purely from `StakedWithProvider` events
+(provider-filtered) — confirmed complete (everything is provider-staked). No key
+files; no `REWARD_EXTRA_COINBASES` hook needed.
 
-**Q5 — Deployment topology.** Sequencer-node agents run local scrapers only; the
-monitoring server runs a global-only agent (global stats + rewards Phase A) plus
-the `sheets-exporter`. Registered-key files stay only on the sequencer node that
-owns them — never synced to the monitoring server. The monitoring server is the
-single global exporter per network (this supersedes the earlier beast-3-vs-beast-4
-question). See Deployment topology.
+**Q5 — Deployment topology.** Sequencer nodes run `--mode node`; the monitoring
+server runs `--mode global` + `sheets-exporter`. Registered-key files stay only
+on the node that owns them.
+
+**Q6 — Agent run modes.** Explicit required `--mode` (`node`/`global`/`all`)
+instead of per-scraper toggles. (Part 0 — implemented.)
+
+**Q7 — Cash vs accrual.** Daily **accrued** (smooth, `Δbalance + claims`) is the
+primary "what we earned" figure; **claimed** is recorded alongside as the cash
+movement. Accrual is reliable *going forward* (current-block sampling); the
+pre-agent past is reconstructed by `--backfill` with an archive node.
+
+**Q8 — Rollup upgrades.** Sum `getSequencerRewards` across all rollup versions;
+rewards stay on (and stay claimable on) the old rollup, so the sum + formula
+handle migrations with no per-block dispatch.
+
+**Q9 — Archive RPC + throttling.** Free dRPC serves archive (verified). The
+endpoint is configurable (`SHEETS_EXPORTER_ARCHIVE_RPC_URL`); the backfill
+self-rate-limits, retries with backoff, and checkpoints/resumes to survive
+free-tier throttling on the large initial run. The recurring service needs no
+archive at all.
