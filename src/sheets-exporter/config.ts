@@ -26,8 +26,14 @@ export interface SheetsExporterConfig {
   /** Archive RPC for `--backfill` historical reads. Optional; required only for backfill. */
   archiveRpcUrl?: string;
   aztecNodeUrl: string;
-  /** Native staking-provider admin — used to resolve the provider id for coinbase discovery. */
-  nativeProviderAdminAddress: string;
+  /**
+   * Native staking provider id — the stable identifier, preferred over the
+   * admin address. The build requires exactly one of `nativeProviderId` /
+   * `nativeProviderAdminAddress` to be configured.
+   */
+  nativeProviderId?: bigint;
+  /** Native staking-provider admin — fallback when the provider id is unset. */
+  nativeProviderAdminAddress?: string;
   /** Recipient counted as "ours" in split allocations; default = provider rewardsRecipient. */
   rewardRecipientAddress?: string;
   /** Reward token override; default = the rollup's staking asset. */
@@ -52,14 +58,6 @@ const requiredUrl = (label: string, value: string | undefined): string => {
 const requiredStr = (label: string, value: string | undefined): string => {
   const v = value?.trim();
   if (!v) throw new Error(`${label} is required for the sheets-exporter.`);
-  return v;
-};
-
-const requiredAddress = (label: string, value: string | undefined): string => {
-  const v = requiredStr(label, value);
-  if (!z.string().startsWith("0x").length(42).safeParse(v).success) {
-    throw new Error(`Invalid ${label}: expected a 0x-prefixed 42-char address, got "${v}"`);
-  }
   return v;
 };
 
@@ -99,10 +97,6 @@ export const buildSheetsExporterConfig = (
     ethereumChainId: chainId,
     ethereumNodeUrl: requiredUrl("ETHEREUM_NODE_URL", env.ETHEREUM_NODE_URL),
     aztecNodeUrl: requiredUrl("AZTEC_NODE_URL", env.AZTEC_NODE_URL),
-    nativeProviderAdminAddress: requiredAddress(
-      "AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS",
-      env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
-    ),
     stakingRewardsSplitFromBlock: splitFromBlock.data,
     gcpKeyFile: requiredStr("GOOGLE_SERVICE_ACCOUNT_KEY_FILE", env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE),
     spreadsheetId: requiredStr("GOOGLE_SHEETS_SPREADSHEET_ID", env.GOOGLE_SHEETS_SPREADSHEET_ID),
@@ -111,6 +105,30 @@ export const buildSheetsExporterConfig = (
     intervalMs: positiveInt("SHEETS_EXPORTER_INTERVAL_MS", env.SHEETS_EXPORTER_INTERVAL_MS, DEFAULT_INTERVAL_MS),
     maxRps: positiveInt("SHEETS_EXPORTER_MAX_RPS", env.SHEETS_EXPORTER_MAX_RPS, DEFAULT_MAX_RPS),
   };
+
+  // Native provider: resolved by id (preferred) or admin address. The
+  // sheets-exporter cannot run without a provider, so one of the two is required.
+  const providerIdRaw = env.AZTEC_STAKING_PROVIDER_ID?.trim();
+  if (providerIdRaw) {
+    const parsed = z.coerce.bigint().nonnegative().safeParse(providerIdRaw);
+    if (!parsed.success) {
+      throw new Error(
+        `Invalid AZTEC_STAKING_PROVIDER_ID: a non-negative integer is required (got "${providerIdRaw}")`,
+      );
+    }
+    config.nativeProviderId = parsed.data;
+  }
+  const nativeAdmin = optionalAddress(
+    "AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS",
+    env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS,
+  );
+  if (nativeAdmin) config.nativeProviderAdminAddress = nativeAdmin;
+  if (config.nativeProviderId === undefined && !config.nativeProviderAdminAddress) {
+    throw new Error(
+      "The sheets-exporter requires a native staking provider: set " +
+        "AZTEC_STAKING_PROVIDER_ID (preferred) or AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS.",
+    );
+  }
 
   // Archive endpoint: dedicated override, else the shared ETHEREUM_ARCHIVE_NODE_URL.
   const archive = env.SHEETS_EXPORTER_ARCHIVE_RPC_URL?.trim() || env.ETHEREUM_ARCHIVE_NODE_URL?.trim();

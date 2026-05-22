@@ -69,7 +69,8 @@ fields below.
 | `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` | *(required)* | Path to the GCP service-account JSON key. The Sheet must be shared with this service account (Editor). |
 | `GOOGLE_SHEETS_SPREADSHEET_ID` | *(required)* | Target spreadsheet ID (from its URL). |
 | `STAKING_REWARDS_SPLIT_FROM_BLOCK` | *(required)* | Start block for the `StakedWithProvider` scan **and** the `--backfill` day range. |
-| `AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` | *(required)* | Native provider admin — resolves the provider id for coinbase discovery. |
+| `AZTEC_STAKING_PROVIDER_ID` | *(required\*)* | Native provider id — the stable identifier; resolves the provider in a single read. Preferred over the admin address. |
+| `AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS` | *(required\*)* | Native provider admin — fallback used to resolve the provider when `AZTEC_STAKING_PROVIDER_ID` is unset. |
 | `SHEETS_EXPORTER_ARCHIVE_RPC_URL` | falls back to `ETHEREUM_ARCHIVE_NODE_URL` | **Required — must be a real archive node.** Every run reads `getSequencerRewards` at past block heights (historical `eth_call`); a non-archive node prunes that state and cannot serve it. A free dRPC endpoint works for steady state; a paid archive is much faster for a large one-time backfill. |
 | `SHEETS_EXPORTER_MAX_RPS` | `8` | Self-rate-limit (requests/sec) to stay under the archive tier's limit. Retries throttling with exponential backoff. |
 | `SHEETS_EXPORTER_INTERVAL_MS` | `86400000` (daily) | Recurring-mode cycle interval. |
@@ -77,6 +78,10 @@ fields below.
 | `SHEETS_EXPORTER_DAILY_TOTAL_RANGE` | `RewardsDailyTotal!A1` | Target range for the daily-total rows. |
 | `SAFE_ADDRESS` | *(optional)* | Split recipient counted as "ours"; default = the provider's rewards recipient. |
 | `REWARD_TOKEN_ADDRESS` | *(optional)* | Reward-token override; default = the rollup staking asset. |
+
+\* Provide **one** of `AZTEC_STAKING_PROVIDER_ID` (preferred) or
+`AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS`. The exporter fails to start if neither
+is set; if both are set, the id is used.
 
 Shared network fields (`ETHEREUM_CHAIN_ID`, `ETHEREUM_NODE_URL`,
 `AZTEC_NODE_URL`) come from the `<network>-base.env`.

@@ -118,11 +118,21 @@ const prepareChain = async (config: SheetsExporterConfig): Promise<ChainContext>
   });
   await eth.verifyChainId();
 
-  const provider = await eth.getStakingProvider(config.nativeProviderAdminAddress, "native");
+  // Resolve the native provider by id (preferred) or admin address. The config
+  // build guarantees exactly one of the two is set — hence the cast below.
+  const provider =
+    config.nativeProviderId !== undefined
+      ? await eth.getStakingProviderById(config.nativeProviderId)
+      : await eth.getStakingProvider(
+          config.nativeProviderAdminAddress as string,
+          "native",
+        );
   if (!provider || provider.providerId === null) {
-    throw new Error(
-      `No native staking provider found for admin ${config.nativeProviderAdminAddress}.`,
-    );
+    const ref =
+      config.nativeProviderId !== undefined
+        ? `id=${config.nativeProviderId}`
+        : `admin ${config.nativeProviderAdminAddress}`;
+    throw new Error(`No native staking provider found for ${ref}.`);
   }
 
   // All rollup versions to sum getSequencerRewards across.

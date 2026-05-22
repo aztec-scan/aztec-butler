@@ -22,6 +22,8 @@ test("builds a valid sheets-exporter config", () => {
   assert.equal(config.stakingRewardsSplitFromBlock, 23083526n);
   assert.equal(config.spreadsheetId, "sheet-abc");
   assert.equal(config.archiveRpcUrl, "https://archive.example.com");
+  assert.equal(config.nativeProviderAdminAddress, `0x${"1".repeat(40)}`);
+  assert.equal(config.nativeProviderId, undefined);
 });
 
 test("SHEETS_EXPORTER_ARCHIVE_RPC_URL overrides ETHEREUM_ARCHIVE_NODE_URL", () => {
@@ -44,12 +46,30 @@ test("requires STAKING_REWARDS_SPLIT_FROM_BLOCK", () => {
   assert.throws(() => buildSheetsExporterConfig(env, "mainnet"), /STAKING_REWARDS_SPLIT_FROM_BLOCK/);
 });
 
-test("requires the provider admin address", () => {
+test("requires a provider id or admin address", () => {
   const env = validEnv();
   delete env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
   assert.throws(
     () => buildSheetsExporterConfig(env, "mainnet"),
-    /AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS/,
+    /requires a native staking provider/,
+  );
+});
+
+test("accepts AZTEC_STAKING_PROVIDER_ID in place of the admin address", () => {
+  const env = validEnv();
+  delete env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS;
+  const config = buildSheetsExporterConfig(
+    { ...env, AZTEC_STAKING_PROVIDER_ID: "4" },
+    "mainnet",
+  );
+  assert.equal(config.nativeProviderId, 4n);
+  assert.equal(config.nativeProviderAdminAddress, undefined);
+});
+
+test("rejects an invalid AZTEC_STAKING_PROVIDER_ID", () => {
+  assert.throws(
+    () => buildSheetsExporterConfig(validEnv({ AZTEC_STAKING_PROVIDER_ID: "not-a-number" }), "mainnet"),
+    /AZTEC_STAKING_PROVIDER_ID/,
   );
 });
 
