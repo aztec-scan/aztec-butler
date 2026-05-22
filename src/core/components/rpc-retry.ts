@@ -2,12 +2,13 @@
  * Rate-limit-aware RPC retry machinery, shared across every chain caller.
  *
  * Retry policy — deliberately narrow:
- *   - ONLY rate-limiting / throttling errors are retried. A throttled call
- *     becomes slow, not fatal, so long scans (rewards backfill, coinbase
- *     discovery) ride out a free RPC tier's limits instead of crashing.
- *   - EVERY other failure fails loud: 5xx server errors, "data not found",
- *     reverts, malformed requests, and network failures all propagate
- *     immediately. Retrying those would only mask a real problem.
+ *   - Rate-limiting / throttling AND transient transport failures (connection
+ *     resets, socket hang-ups, DNS hiccups) are retried. Both resolve on their
+ *     own, so long scans (rewards backfill, coinbase discovery) ride them out
+ *     instead of crashing on a single blip.
+ *   - EVERY genuine failure fails loud: 5xx server errors (including a 504
+ *     "Gateway Timeout"), "data not found", reverts, and malformed requests
+ *     all propagate immediately. Retrying those would only mask a real problem.
  *
  * Two entry points share the same policy:
  *   - {@link withRetry} — retry a single call (used inside EthereumClient).
@@ -36,13 +37,9 @@ const errorText = (error: unknown): string => {
 };
 
 /**
- * True ONLY for rate-limiting / throttling errors — the single failure class
- * that is safe to retry.
- *
- * Everything else returns false on purpose: HTTP 5xx, "data not found",
- * execution reverts, invalid params, and network errors (ECONNRESET, fetch
- * failed, timeouts) are all genuine failures the caller must surface, not
- * silently retry.
+ * True for rate-limiting / throttling errors specifically (HTTP 429, "too many
+ * requests", explicit throttle messages). See {@link isRetryableError} for the
+ * full retry predicate.
  */
 export const isRateLimitError = (error: unknown): boolean => {
   const text = errorText(error);
@@ -55,6 +52,39 @@ export const isRateLimitError = (error: unknown): boolean => {
     text.includes("throttl") // throttle / throttled / throttling
   );
 };
+
+/**
+ * True for transient transport-level failures — connection resets, socket
+ * hang-ups, DNS hiccups, fetch failures. These never reached a server response,
+ * resolve on their own, and are safe to retry.
+ *
+ * Deliberately matches no bare "timeout" token: a 5xx response such as "504
+ * Gateway Timeout" is a server response and must fail loud, not be retried.
+ */
+export const isTransientNetworkError = (error: unknown): boolean => {
+  const text = errorText(error);
+  return (
+    text.includes("econnreset") ||
+    text.includes("econnrefused") ||
+    text.includes("etimedout") ||
+    text.includes("enetunreach") ||
+    text.includes("eai_again") || // transient DNS failure
+    text.includes("socket hang up") ||
+    text.includes("fetch failed") ||
+    text.includes("network error") ||
+    text.includes("request timed out") ||
+    text.includes("connection timed out") ||
+    text.includes("took too long") // viem TimeoutError
+  );
+};
+
+/**
+ * The retry predicate: true ONLY for failures that resolve on their own —
+ * rate-limiting and transient transport errors. Genuine failures (5xx, missing
+ * data, reverts, bad params) return false and must be surfaced, not retried.
+ */
+export const isRetryableError = (error: unknown): boolean =>
+  isRateLimitError(error) || isTransientNetworkError(error);
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -71,9 +101,9 @@ export interface RetryOptions {
 }
 
 /**
- * Run `fn`, retrying ONLY on rate-limiting (see {@link isRateLimitError}).
- * Any other error propagates immediately. Throws the last error once the
- * retry budget is exhausted.
+ * Run `fn`, retrying ONLY on retryable failures (see {@link isRetryableError}:
+ * rate-limiting and transient transport errors). Any genuine error propagates
+ * immediately. Throws the last error once the retry budget is exhausted.
  */
 export const withRetry = async <T>(
   fn: () => Promise<T>,
@@ -89,10 +119,10 @@ export const withRetry = async <T>(
       return await fn();
     } catch (error) {
       const delay = delays[attempt];
-      if (delay === undefined || !isRateLimitError(error)) throw error;
+      if (delay === undefined || !isRetryableError(error)) throw error;
       console.warn(
-        `[rpc] ${options.label ?? "call"} rate-limited ` +
-          `(attempt ${attempt + 1}/${delays.length}), retrying in ${delay}ms`,
+        `[rpc] ${options.label ?? "call"} failed (retryable, ` +
+          `attempt ${attempt + 1}/${delays.length}), retrying in ${delay}ms`,
       );
       await sleep(delay);
     }
@@ -146,11 +176,11 @@ export class RateLimiter {
         return await fn();
       } catch (error) {
         const delay = this.delays[attempt];
-        if (delay === undefined || !isRateLimitError(error)) {
+        if (delay === undefined || !isRetryableError(error)) {
           throw error;
         }
         console.warn(
-          `[sheets-exporter] RPC call rate-limited (attempt ${attempt + 1}), retrying in ${delay}ms: ` +
+          `[sheets-exporter] RPC call failed (retryable, attempt ${attempt + 1}), retrying in ${delay}ms: ` +
             `${error instanceof Error ? error.message : String(error)}`,
         );
         await sleep(delay);
