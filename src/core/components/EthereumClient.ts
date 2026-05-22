@@ -16,7 +16,9 @@ import {
   getContract,
   http,
   HttpTransportConfig,
+  isAddressEqual,
   parseAbiItem,
+  zeroAddress,
   type Address,
   type GetContractReturnType,
   type Hex,
@@ -551,6 +553,47 @@ supply: ${await stakingAssetContract.read.totalSupply()}
 
     this.providerDataCache.set(cacheKey, null);
     return null;
+  }
+
+  /**
+   * Get native staking provider data by provider id.
+   *
+   * The provider id is the stable identifier for a provider — unlike the admin
+   * address it never changes once registered. A single `providerConfigurations`
+   * read returns everything {@link StakingProviderData} needs, with no
+   * iteration and no address matching.
+   *
+   * Returns `null` when the id is not registered: `providerConfigurations` is a
+   * mapping, so an out-of-range id yields a zero-struct (zero admin) rather than
+   * reverting. Results are memoized per id.
+   */
+  async getStakingProviderById(
+    providerId: bigint,
+  ): Promise<StakingProviderData | null> {
+    const cacheKey = `native:id:${providerId}`;
+    if (this.providerDataCache.has(cacheKey)) {
+      return this.providerDataCache.get(cacheKey)!;
+    }
+
+    const stakingReg = this.getNativeStakingRegistryContract();
+    const [admin, takeRate, rewardsRecipient] =
+      await stakingReg.read.providerConfigurations([providerId]);
+
+    // A registered provider always has a non-zero admin; a zero admin means the
+    // id does not exist in the registry mapping.
+    if (isAddressEqual(admin, zeroAddress)) {
+      this.providerDataCache.set(cacheKey, null);
+      return null;
+    }
+
+    const providerData: StakingProviderData = {
+      providerId,
+      admin,
+      takeRate,
+      rewardsRecipient,
+    };
+    this.providerDataCache.set(cacheKey, providerData);
+    return providerData;
   }
 
   /**

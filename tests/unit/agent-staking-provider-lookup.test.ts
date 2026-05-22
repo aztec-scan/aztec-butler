@@ -117,3 +117,46 @@ test("native lookup matches the admin address case-insensitively", async () => {
   assert.equal(result?.takeRate, 250);
   assert.equal(result?.rewardsRecipient, rewardsRecipient);
 });
+
+test("lookup by id returns the provider in a single direct read", async () => {
+  const admin = getAddress("0xabcdef0123456789abcdef0123456789abcdef01");
+  const rewardsRecipient = getAddress(
+    "0x00000000000000000000000000000000deadbeef",
+  );
+  const { client, reads } = buildClientWithProviders([
+    [getAddress("0x1111111111111111111111111111111111111111"), 100, ZERO_ADDRESS],
+    [admin, 250, rewardsRecipient],
+  ]);
+
+  const result = await client.getStakingProviderById(1n);
+
+  assert.notEqual(result, null);
+  assert.equal(result?.providerId, 1n);
+  assert.equal(result?.admin, admin);
+  assert.equal(result?.takeRate, 250);
+  assert.equal(result?.rewardsRecipient, rewardsRecipient);
+  // One read of the requested id — no iteration, no count lookup.
+  assert.deepEqual(reads.providerConfigurations, [1n]);
+  assert.equal(reads.nextProviderIdentifier, 0);
+});
+
+test("lookup by id resolves provider id 0", async () => {
+  const admin = getAddress("0x1111111111111111111111111111111111111111");
+  const { client } = buildClientWithProviders([[admin, 50, ZERO_ADDRESS]]);
+
+  const result = await client.getStakingProviderById(0n);
+
+  assert.equal(result?.providerId, 0n);
+  assert.equal(result?.admin, admin);
+});
+
+test("lookup by id returns null for an unregistered id (zero-struct)", async () => {
+  const { client } = buildClientWithProviders([
+    [getAddress("0x1111111111111111111111111111111111111111"), 100, ZERO_ADDRESS],
+  ]);
+
+  // id 7 is out of range — the registry mapping yields a zero-admin struct.
+  const result = await client.getStakingProviderById(7n);
+
+  assert.equal(result, null);
+});

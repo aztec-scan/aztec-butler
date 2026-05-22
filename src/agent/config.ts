@@ -62,6 +62,13 @@ export interface AgentConfig {
   aztecNodeUrl: string;
 
   // ── registry config ──────────────────────────────────────────────────
+  /**
+   * Native staking provider id — the stable identifier for the provider.
+   * Preferred over {@link nativeProviderAdminAddress}: the id never changes,
+   * resolves in a single read, and avoids registry iteration. When set, it
+   * takes precedence over the admin-address resolution path.
+   */
+  nativeProviderId?: bigint;
   nativeProviderAdminAddress?: string;
   ollaProviderAdminAddress?: string;
   ollaStakingRegistryAddress?: string;
@@ -245,6 +252,17 @@ export const buildAgentConfig = (
 
   const optionalArchive = archiveUrl ? requiredUrl("ETHEREUM_ARCHIVE_NODE_URL", archiveUrl) : undefined;
   if (optionalArchive) config.ethereumArchiveNodeUrl = optionalArchive;
+
+  const providerIdRaw = env.AZTEC_STAKING_PROVIDER_ID?.trim();
+  if (providerIdRaw) {
+    const parsed = z.coerce.bigint().nonnegative().safeParse(providerIdRaw);
+    if (!parsed.success) {
+      throw new Error(
+        `Invalid configuration for AZTEC_STAKING_PROVIDER_ID: a non-negative integer is required (got "${providerIdRaw}")`,
+      );
+    }
+    config.nativeProviderId = parsed.data;
+  }
 
   const nativeAdmin = optionalAddress("AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS", env.AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS);
   if (nativeAdmin) config.nativeProviderAdminAddress = nativeAdmin;

@@ -61,7 +61,8 @@ ETHEREUM_ARCHIVE_NODE_URL=...                     # required when rewards enable
 AZTEC_NODE_URL=...
 MIN_ETH_PER_ATTESTER=0.1                          # used for publisher top-up calc
 
-AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=...          # native registry admin
+AZTEC_STAKING_PROVIDER_ID=...                     # native registry provider id (preferred; stable identifier)
+AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=...          # native registry admin (fallback when id is unset)
 OLLA_AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS=...     # Olla registry admin
 OLLA_AZTEC_STAKING_REGISTRY_ADDRESS=...           # Olla registry contract
 

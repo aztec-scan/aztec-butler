@@ -139,3 +139,34 @@ test("honours BUTLER_AGENT_OTLP_ENABLED=false", () => {
   const config = buildAgentConfig(validEnv({ BUTLER_AGENT_OTLP_ENABLED: "false" }), "mainnet", "all");
   assert.equal(config.otlp.enabled, false);
 });
+
+// ── native provider id ─────────────────────────────────────────────────────
+
+test("parses AZTEC_STAKING_PROVIDER_ID as a bigint", () => {
+  const config = buildAgentConfig(validEnv({ AZTEC_STAKING_PROVIDER_ID: "4" }), "mainnet", "global");
+  assert.equal(config.nativeProviderId, 4n);
+});
+
+test("accepts AZTEC_STAKING_PROVIDER_ID=0", () => {
+  const config = buildAgentConfig(validEnv({ AZTEC_STAKING_PROVIDER_ID: "0" }), "mainnet", "global");
+  assert.equal(config.nativeProviderId, 0n);
+});
+
+test("nativeProviderId is undefined when AZTEC_STAKING_PROVIDER_ID is unset", () => {
+  const config = buildAgentConfig(validEnv(), "mainnet", "global");
+  assert.equal(config.nativeProviderId, undefined);
+});
+
+test("rejects a non-integer AZTEC_STAKING_PROVIDER_ID", () => {
+  assert.throws(
+    () => buildAgentConfig(validEnv({ AZTEC_STAKING_PROVIDER_ID: "not-a-number" }), "mainnet", "global"),
+    /AZTEC_STAKING_PROVIDER_ID/,
+  );
+});
+
+test("rejects a negative AZTEC_STAKING_PROVIDER_ID", () => {
+  assert.throws(
+    () => buildAgentConfig(validEnv({ AZTEC_STAKING_PROVIDER_ID: "-1" }), "mainnet", "global"),
+    /AZTEC_STAKING_PROVIDER_ID/,
+  );
+});

@@ -57,7 +57,31 @@ export const initAgentChain = async (config: AgentConfig): Promise<AgentChainCon
 
   const providers: Partial<Record<Registry, ResolvedProvider>> = {};
 
-  if (config.nativeProviderAdminAddress) {
+  // Resolve the native provider. Prefer the stable provider id (a single read,
+  // no iteration); fall back to admin-address resolution when only the address
+  // is configured; otherwise skip native scrapes entirely.
+  if (config.nativeProviderId !== undefined) {
+    try {
+      const data = await ethClient.getStakingProviderById(config.nativeProviderId);
+      if (data) {
+        providers.native = {
+          registry: "native",
+          providerId: data.providerId,
+          adminAddress: data.admin,
+          rewardsRecipient: data.rewardsRecipient,
+        };
+        console.log(`[agent] Resolved native provider id=${data.providerId}`);
+      } else {
+        console.warn(
+          `[agent] No native staking provider registered for id=${config.nativeProviderId}.`,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[agent] Failed to resolve native provider by id: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  } else if (config.nativeProviderAdminAddress) {
     try {
       const data = await ethClient.getStakingProvider(config.nativeProviderAdminAddress, "native");
       if (data) {
