@@ -27,7 +27,7 @@ import {
 import { resolveRewardToken, type RewardToken } from "../core/components/rewards-compute.js";
 import { loadSheetsExporterConfig, type SheetsExporterConfig } from "./config.js";
 import { balancesFromRecord, balancesToRecord, loadCursor, saveCursor } from "./cursor.js";
-import { RateLimiter } from "./rpc.js";
+import { RateLimiter } from "../core/components/rpc-retry.js";
 import { appendRows, getSheetsAccessToken, overwriteSheet, spliceSheet } from "./sheet-writer.js";
 
 const AVG_BLOCK_SEC = 12; // L1 Ethereum (mainnet + Sepolia) — used only for day-boundary estimates

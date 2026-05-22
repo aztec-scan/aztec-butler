@@ -68,8 +68,7 @@ export class CoinbaseScraper {
     }
 
     const startBlock = existingCache.lastScrapedBlock + 1n;
-    const client = this.getArchiveClient();
-    const currentBlock = await client.getBlockNumber();
+    const currentBlock = await this.options.ethClient.getArchiveBlockNumber();
 
     if (startBlock > currentBlock) {
       console.log(
@@ -129,8 +128,7 @@ export class CoinbaseScraper {
     console.log("\n=== Full Coinbase Scrape ===\n");
 
     const startBlock = this.options.defaultStartBlock;
-    const client = this.getArchiveClient();
-    const currentBlock = await client.getBlockNumber();
+    const currentBlock = await this.options.ethClient.getArchiveBlockNumber();
 
     console.log(`Scraping from block ${startBlock} to ${currentBlock}`);
     console.log(`Full range: ${currentBlock - startBlock + 1n} blocks\n`);
@@ -191,13 +189,11 @@ export class CoinbaseScraper {
     fromBlock: bigint,
     toBlock: bigint,
   ): Promise<MappedCoinbase[]> {
-    const client = this.getArchiveClient();
     const stakingRegistryAddress =
       this.options.ethClient.getStakingRegistryAddress();
 
     console.log(`Staking Registry: ${stakingRegistryAddress}`);
 
-    const mappings: MappedCoinbase[] = [];
     const attesterSet = new Set(
       this.options.attesterAddresses.map((addr) => addr.toLowerCase()),
     );
@@ -205,52 +201,38 @@ export class CoinbaseScraper {
     // is already filtered by providerIdentifier, so every event belongs to us.
     const discoverAll = attesterSet.size === 0;
 
-    // Fetch logs in chunks to avoid RPC limits
-    const CHUNK_SIZE = 10000n;
-    let currentBlock = fromBlock;
+    // Chunked, rate-limit-retrying getLogs on the archive node. A non-rate-limit
+    // RPC error fails loud rather than being silently retried.
+    const logs = await this.options.ethClient.getArchiveEventLogs({
+      address: stakingRegistryAddress,
+      event: STAKED_WITH_PROVIDER_EVENT,
+      args: { providerIdentifier: this.options.providerId },
+      fromBlock,
+      toBlock,
+    });
+    console.log(`  Found ${logs.length} StakedWithProvider event(s)`);
 
-    while (currentBlock <= toBlock) {
-      const chunkEnd =
-        currentBlock + CHUNK_SIZE > toBlock
-          ? toBlock
-          : currentBlock + CHUNK_SIZE;
+    const mappings: MappedCoinbase[] = [];
+    for (const log of logs) {
+      const attester = log.args.attester!;
+      const coinbase = log.args.coinbaseSplitContractAddress!;
 
-      console.log(`  Fetching logs: ${currentBlock} to ${chunkEnd}...`);
+      // Include attesters we're tracking (or all, in discover-all mode)
+      if (discoverAll || attesterSet.has(attester.toLowerCase())) {
+        const timestamp = await this.options.ethClient.getArchiveBlockTimestamp(
+          log.blockNumber,
+        );
 
-      const logs = await client.getLogs({
-        address: stakingRegistryAddress,
-        event: STAKED_WITH_PROVIDER_EVENT,
-        args: {
-          providerIdentifier: this.options.providerId,
-        },
-        fromBlock: currentBlock,
-        toBlock: chunkEnd,
-      });
+        mappings.push({
+          attesterAddress: attester,
+          coinbaseAddress: coinbase,
+          blockNumber: log.blockNumber,
+          blockHash: log.blockHash,
+          timestamp: Number(timestamp),
+        });
 
-      console.log(`  Found ${logs.length} StakedWithProvider event(s)`);
-
-      for (const log of logs) {
-        const attester = log.args.attester!;
-        const coinbase = log.args.coinbaseSplitContractAddress!;
-
-        // Include attesters we're tracking (or all, in discover-all mode)
-        if (discoverAll || attesterSet.has(attester.toLowerCase())) {
-          // Get block details for timestamp
-          const block = await client.getBlock({ blockNumber: log.blockNumber });
-
-          mappings.push({
-            attesterAddress: attester,
-            coinbaseAddress: coinbase,
-            blockNumber: log.blockNumber,
-            blockHash: log.blockHash,
-            timestamp: Number(block.timestamp),
-          });
-
-          console.log(`    ✅ ${attester} -> ${coinbase}`);
-        }
+        console.log(`    ✅ ${attester} -> ${coinbase}`);
       }
-
-      currentBlock = chunkEnd + 1n;
     }
 
     console.log(`\n✅ Found ${mappings.length} coinbase mapping(s)`);
@@ -348,19 +330,5 @@ export class CoinbaseScraper {
       newCount,
       updatedCount,
     };
-  }
-
-  /**
-   * Get archive client or throw if not available
-   */
-  private getArchiveClient() {
-    const archiveClient = this.options.ethClient.getArchiveClient();
-    if (!archiveClient) {
-      throw new Error(
-        "Archive node is required for coinbase scraping.\n" +
-        "Please configure ETHEREUM_ARCHIVE_NODE_URL in your config file.",
-      );
-    }
-    return archiveClient;
   }
 }

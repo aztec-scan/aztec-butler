@@ -37,6 +37,7 @@ import {
   AttesterOnChainStatus,
 } from "../../types/index.js";
 import { OLLA_STAKING_PROVIDER_REGISTRY_ABI } from "../../types/generated/olla-staking-provider-registry-abi.js";
+import { withRetry } from "./rpc-retry.js";
 
 const SUPPORTED_CHAINS = [sepolia, mainnet];
 
@@ -741,11 +742,13 @@ supply: ${await stakingAssetContract.read.totalSupply()}
   private async getLogsWithArchiveFallback(params: {
     address: Address;
     event: any;
+    args?: Record<string, unknown>;
     fromBlock: bigint;
     toBlock: bigint;
   }): Promise<any[]> {
+    const label = `getLogs ${params.fromBlock}-${params.toBlock}`;
     try {
-      return await this.client.getLogs(params);
+      return await withRetry(() => this.client.getLogs(params), { label });
     } catch (err) {
       if (!this.archiveClient) {
         throw err;
@@ -754,7 +757,10 @@ supply: ${await stakingAssetContract.read.totalSupply()}
         "[EthereumClient] Primary RPC getLogs failed, trying archive client...",
         err,
       );
-      return await this.archiveClient.getLogs(params);
+      const archive = this.archiveClient;
+      return await withRetry(() => archive.getLogs(params), {
+        label: `${label} (archive)`,
+      });
     }
   }
 
@@ -778,6 +784,74 @@ supply: ${await stakingAssetContract.read.totalSupply()}
         toBlock: end,
       });
       logs.push(...chunkLogs);
+      cursor = end + 1n;
+    }
+    return logs;
+  }
+
+  /** Return the archive client, or throw if none is configured. */
+  private requireArchiveClient(): PublicClient {
+    if (!this.archiveClient) {
+      throw new Error(
+        "Archive node is required for historical reads — set ETHEREUM_ARCHIVE_NODE_URL " +
+          "(or SHEETS_EXPORTER_ARCHIVE_RPC_URL) to a real archive node.",
+      );
+    }
+    return this.archiveClient;
+  }
+
+  /** Latest block number from the archive node, retrying rate limits. */
+  async getArchiveBlockNumber(): Promise<bigint> {
+    const archive = this.requireArchiveClient();
+    return withRetry(() => archive.getBlockNumber(), { label: "getBlockNumber" });
+  }
+
+  /** Timestamp (unix seconds) of a block, read from the archive node. */
+  async getArchiveBlockTimestamp(blockNumber: bigint): Promise<bigint> {
+    const archive = this.requireArchiveClient();
+    const block = await withRetry(() => archive.getBlock({ blockNumber }), {
+      label: `getBlock ${blockNumber}`,
+    });
+    return block.timestamp;
+  }
+
+  /**
+   * Fetch event logs from the archive node over a block range, in chunks,
+   * retrying ONLY on rate limiting. Used for historical event scans (e.g.
+   * coinbase discovery). Any non-rate-limit RPC error fails loud — a missing
+   * block, a 5xx, or a malformed request is surfaced, not retried.
+   */
+  async getArchiveEventLogs(params: {
+    address: Address;
+    event: any;
+    args?: Record<string, unknown>;
+    fromBlock: bigint;
+    toBlock: bigint;
+  }): Promise<any[]> {
+    const archive = this.requireArchiveClient();
+    // Conservative chunk — large enough to be fast, small enough to stay under
+    // public-RPC getLogs range/result limits.
+    const CHUNK = 10_000n;
+    const logs: any[] = [];
+    let cursor = params.fromBlock;
+    while (cursor <= params.toBlock) {
+      const end =
+        cursor + CHUNK - 1n > params.toBlock
+          ? params.toBlock
+          : cursor + CHUNK - 1n;
+      console.log(`  Fetching logs: ${cursor} to ${end}...`);
+      const chunk = await withRetry(
+        () =>
+          archive.getLogs({
+            address: params.address,
+            event: params.event,
+            ...(params.args ? { args: params.args } : {}),
+            fromBlock: cursor,
+            toBlock: end,
+          }),
+        { label: `getLogs ${cursor}-${end}` },
+      );
+      logs.push(...chunk);
       cursor = end + 1n;
     }
     return logs;
@@ -894,33 +968,13 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     const latestBlock = toBlock ?? (await this.client.getBlockNumber());
     const lowerBound = fromBlock ?? 0n;
 
-    const fetchLogs = async (
-      rangeFrom: bigint,
-      rangeTo: bigint,
-    ): Promise<any[]> => {
-      try {
-        return await this.client.getLogs({
-          address,
-          event: SPLIT_UPDATED_EVENT,
-          fromBlock: rangeFrom,
-          toBlock: rangeTo,
-        });
-      } catch (err) {
-        if (!this.archiveClient) {
-          throw err;
-        }
-        console.warn(
-          "[EthereumClient] Primary RPC getLogs failed, trying archive client...",
-          err,
-        );
-        return await this.archiveClient.getLogs({
-          address,
-          event: SPLIT_UPDATED_EVENT,
-          fromBlock: rangeFrom,
-          toBlock: rangeTo,
-        });
-      }
-    };
+    const fetchLogs = (rangeFrom: bigint, rangeTo: bigint): Promise<any[]> =>
+      this.getLogsWithArchiveFallback({
+        address,
+        event: SPLIT_UPDATED_EVENT,
+        fromBlock: rangeFrom,
+        toBlock: rangeTo,
+      });
 
     let logs: any[] = [];
     let windowEnd = latestBlock;
@@ -968,33 +1022,13 @@ supply: ${await stakingAssetContract.read.totalSupply()}
     const latestBlock = toBlock ?? (await this.client.getBlockNumber());
     const lowerBound = fromBlock ?? 0n;
 
-    const fetchLogs = async (
-      rangeFrom: bigint,
-      rangeTo: bigint,
-    ): Promise<any[]> => {
-      try {
-        return await this.client.getLogs({
-          address,
-          event: SPLIT_UPDATED_EVENT,
-          fromBlock: rangeFrom,
-          toBlock: rangeTo,
-        });
-      } catch (err) {
-        if (!this.archiveClient) {
-          throw err;
-        }
-        console.warn(
-          "[EthereumClient] Primary RPC getLogs failed, trying archive client...",
-          err,
-        );
-        return await this.archiveClient.getLogs({
-          address,
-          event: SPLIT_UPDATED_EVENT,
-          fromBlock: rangeFrom,
-          toBlock: rangeTo,
-        });
-      }
-    };
+    const fetchLogs = (rangeFrom: bigint, rangeTo: bigint): Promise<any[]> =>
+      this.getLogsWithArchiveFallback({
+        address,
+        event: SPLIT_UPDATED_EVENT,
+        fromBlock: rangeFrom,
+        toBlock: rangeTo,
+      });
 
     const history: Array<{ block: bigint; split: SplitAllocationData }> = [];
     let cursor = lowerBound;
