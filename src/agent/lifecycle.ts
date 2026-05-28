@@ -20,6 +20,21 @@ export const ATTESTER_LIFECYCLE_STATES = [
 
 export type AttesterLifecycleState = (typeof ATTESTER_LIFECYCLE_STATES)[number];
 
+/**
+ * Stable numeric encoding used by the `aztec_butler_attester_lifecycle_state`
+ * gauge. The metric uses value-as-state (one series per attester) rather than
+ * label-as-state to sidestep the OpenTelemetry SDK's cumulative retention of
+ * previously-observed `(attester, state)` attribute sets. Grafana panels map
+ * these integers back to names via value mappings — keep them stable.
+ */
+export const LIFECYCLE_STATE_VALUES: Record<AttesterLifecycleState, number> = {
+  NEW: 0,
+  IN_STAKING_PROVIDER_QUEUE: 1,
+  ROLLUP_ENTRY_QUEUE: 2,
+  ACTIVE: 3,
+  NO_LONGER_ACTIVE: 4,
+};
+
 export interface LifecycleInput {
   /** Result of rollup `getAttesterView`; `null`/`undefined` when not on the rollup. */
   onChainView: AttesterView | null | undefined;

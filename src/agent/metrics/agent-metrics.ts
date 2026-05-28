@@ -22,6 +22,7 @@ import {
   modeHasLocalScrapers,
   type AgentConfig,
 } from "../config.js";
+import { LIFECYCLE_STATE_VALUES } from "../lifecycle.js";
 import { getAgentState, type LocalAttesterRuntimeState } from "../state.js";
 
 /** Build attributes for a LOCAL metric — always carries `network` + `host`. */
@@ -121,19 +122,25 @@ const registerLocalMetrics = (meter: Meter): void => {
   });
 
   // ── local: lifecycle state ──────────────────────────────────────────────
+  // Value-as-state (see LIFECYCLE_STATE_VALUES in lifecycle.ts): emitting the
+  // state as a label would let the OTel SDK's cumulative aggregator retain
+  // every (attester, state) it ever saw, producing ghost series after every
+  // transition.
   const lifecycleState = meter.createObservableGauge(
     metricName("attester_lifecycle_state"),
-    { description: "1 for the attester's current lifecycle state (one series per attester)" },
+    {
+      description:
+        "Numeric lifecycle state of the local attester — 0=NEW, 1=IN_STAKING_PROVIDER_QUEUE, 2=ROLLUP_ENTRY_QUEUE, 3=ACTIVE, 4=NO_LONGER_ACTIVE",
+    },
   );
   lifecycleState.addCallback((result) => {
     const { local } = getAgentState();
     for (const key of local.keys.values()) {
       result.observe(
-        1,
+        LIFECYCLE_STATE_VALUES[key.lifecycleState],
         localAttributes(local.network, local.host, {
           registry: key.registry,
           attester_address: key.attesterAddress,
-          state: key.lifecycleState,
         }),
       );
     }

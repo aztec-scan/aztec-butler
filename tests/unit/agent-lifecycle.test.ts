@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveLifecycleState } from "../../src/agent/lifecycle.js";
+import {
+  ATTESTER_LIFECYCLE_STATES,
+  LIFECYCLE_STATE_VALUES,
+  deriveLifecycleState,
+} from "../../src/agent/lifecycle.js";
 import { AttesterOnChainStatus, type AttesterView } from "../../src/types/index.js";
 
 /** Build a minimal AttesterView for testing. */
@@ -102,4 +106,29 @@ test("ACTIVE takes precedence over provider queue membership", () => {
     }),
     "ACTIVE",
   );
+});
+
+test("LIFECYCLE_STATE_VALUES is exhaustive and the mapping is stable", () => {
+  // Stability matters: Grafana panels reverse this mapping via value mappings.
+  // If a future contributor reorders the integers, dashboards silently mislabel.
+  assert.deepEqual(LIFECYCLE_STATE_VALUES, {
+    NEW: 0,
+    IN_STAKING_PROVIDER_QUEUE: 1,
+    ROLLUP_ENTRY_QUEUE: 2,
+    ACTIVE: 3,
+    NO_LONGER_ACTIVE: 4,
+  });
+
+  // Every declared state must have a value (catches missed updates).
+  for (const state of ATTESTER_LIFECYCLE_STATES) {
+    assert.equal(
+      typeof LIFECYCLE_STATE_VALUES[state],
+      "number",
+      `missing LIFECYCLE_STATE_VALUES entry for ${state}`,
+    );
+  }
+
+  // Values must be unique (otherwise PromQL `== N` collapses distinct states).
+  const values = Object.values(LIFECYCLE_STATE_VALUES);
+  assert.equal(new Set(values).size, values.length, "lifecycle state values must be unique");
 });
