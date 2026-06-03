@@ -6,6 +6,7 @@
 #   ./scripts/scrape-coinbases.sh --from-block 12345678            # Custom start block
 #   ./scripts/scrape-coinbases.sh --config ./my-config.json        # Use specific scraper config file
 #   ./scripts/scrape-coinbases.sh --output ./cache/coinbases.json  # Custom output path
+#   ./scripts/scrape-coinbases.sh --keys-file /path/to/native-registered-keys.json  # Scrape and update file coinbases
 #   ./scripts/scrape-coinbases.sh --full --network testnet         # Combine flags
 #
 # This will:
@@ -13,6 +14,7 @@
 # - Extract attester addresses and provider ID from config
 # - Scrape StakedWithProvider events from chain
 # - Map attesters to their coinbase addresses
+# - With --keys-file, update missing/incorrect coinbases in that file in place
 #
 # Output: ~/.local/share/aztec-butler/{network}-mapped-coinbases.json (or custom path with --output)
 

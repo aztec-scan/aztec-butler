@@ -320,6 +320,10 @@ program
     "Path to scraper config file (defaults to standard path for network)",
   )
   .option("--output <path>", "Output file path for coinbase data")
+  .option(
+    "--keys-file <path>",
+    "Native registered keys file to scrape for and update in place",
+  )
   .option("--full", "Perform full rescrape from deployment block", false)
   .option(
     "--from-block <block>",
@@ -330,6 +334,7 @@ program
     async (options: {
       config?: string;
       output?: string;
+      keysFile?: string;
       full: boolean;
       fromBlock?: bigint;
     }) => {
@@ -342,6 +347,7 @@ program
         fullRescrape: options.full,
         ...(options.config ? { configPath: options.config } : {}),
         ...(options.output ? { outputPath: options.output } : {}),
+        ...(options.keysFile ? { keysFile: options.keysFile } : {}),
         ...(options.fromBlock !== undefined
           ? { fromBlock: options.fromBlock }
           : {}),
