@@ -116,6 +116,7 @@ Supported commands:
 - `add-keys`
 - `get-provider-id`
 - `get-create-staking-provider-calldata`
+- `get-change-provider-commission-calldata` (native only; `--registry olla` errors)
 - `new-publisher-keys`
 - `process-private-keys`
 - `prepare-deployment`
@@ -131,6 +132,22 @@ aztec-butler get-provider-id 0xYourAdminAddress --network mainnet
 # Explicit Olla target
 aztec-butler get-provider-id 0xYourAdminAddress --network mainnet --registry olla
 ```
+
+To generate a native provider commission update and optionally propose it to the
+provider-admin Safe:
+
+```bash
+# Generate calldata only; 1000 bps = 10%
+aztec-butler --network mainnet get-change-provider-commission-calldata --commission-bps 1000
+
+# Propose the same update to the configured provider-admin Safe
+aztec-butler --network mainnet get-change-provider-commission-calldata --commission-bps 1000 --propose-to-safe
+```
+
+Safe proposal mode requires `MULTISIG_PROPOSER_PRIVATE_KEY` and `SAFE_API_KEY`.
+The target Safe defaults to `SAFE_ADDRESS`; in the current config this is seeded
+from `AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS`. You can override it with
+`--safe-address 0x...`.
 
 For Olla target support, configure:
 

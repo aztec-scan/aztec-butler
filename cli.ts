@@ -101,6 +101,17 @@ function parseOptionalBigInt(value: string): bigint {
   return BigInt(value);
 }
 
+function parseCommissionBasisPoints(value: string): number {
+  const commissionBasisPoints = Number(value);
+  if (!Number.isInteger(commissionBasisPoints)) {
+    throw new Error("Commission must be an integer number of basis points.");
+  }
+  if (commissionBasisPoints < 0 || commissionBasisPoints > 10_000) {
+    throw new Error("Commission must be between 0 and 10000 basis points.");
+  }
+  return commissionBasisPoints;
+}
+
 /**
  * Helper to collect multiple values for repeatable options
  */
@@ -258,6 +269,64 @@ program
         ...(options.providerId !== undefined
           ? { providerId: options.providerId }
           : {}),
+      });
+    },
+  );
+
+// Command: get-change-provider-commission-calldata
+program
+  .command("get-change-provider-commission-calldata")
+  .alias("get-change-provider-comission-calldata")
+  .description("Generate calldata to update native staking provider commission")
+  .requiredOption(
+    "--commission-bps <basis-points>",
+    "New provider commission in basis points (100 = 1%)",
+    parseCommissionBasisPoints,
+  )
+  .option(
+    "--provider-id <id>",
+    "Staking provider ID (defaults to AZTEC_STAKING_PROVIDER_ID)",
+    parseBigInt,
+  )
+  .option(
+    "--registry <registry>",
+    "Staking registry target (native only; Olla is not supported)",
+    parseRegistryTarget,
+    "native",
+  )
+  .option(
+    "--propose-to-safe",
+    "Propose the commission update to the provider-admin Safe",
+    false,
+  )
+  .option(
+    "--safe-address <address>",
+    "Safe address to propose to (defaults to SAFE_ADDRESS/AZTEC_STAKING_PROVIDER_ADMIN_ADDRESS)",
+  )
+  .action(
+    async (options: {
+      commissionBps: number;
+      providerId?: bigint;
+      registry: StakingRegistryTarget;
+      proposeToSafe: boolean;
+      safeAddress?: string;
+    }) => {
+      if (options.registry === "olla") {
+        throw new Error(
+          "Changing provider commission is only supported for the native staking registry. The Olla registry does not expose provider take-rate updates.",
+        );
+      }
+
+      const globalOpts = program.opts();
+      const config = await initConfig({ network: globalOpts.network });
+      const ethClient = await initEthClient(config);
+      await command.getChangeProviderCommissionCalldata(ethClient, config, {
+        commissionBasisPoints: options.commissionBps,
+        proposeToSafe: options.proposeToSafe,
+        ...(options.providerId !== undefined
+          ? { providerId: options.providerId }
+          : {}),
+        ...(options.safeAddress ? { safeAddress: options.safeAddress } : {}),
       });
     },
   );
