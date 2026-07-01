@@ -40,6 +40,16 @@ const SPLIT_UPDATED_EVENT = parseAbiItem(
 const PULL_SPLIT_ABI = [
   {
     type: "function",
+    name: "getSplitBalance",
+    inputs: [{ name: "token", type: "address" }],
+    outputs: [
+      { name: "splitBalance", type: "uint256" },
+      { name: "warehouseBalance", type: "uint256" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "distribute",
     inputs: [
       {
@@ -61,6 +71,16 @@ const PULL_SPLIT_ABI = [
 ] as const;
 
 const SPLITS_WAREHOUSE_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "id", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
   {
     type: "function",
     name: "withdraw",
@@ -126,6 +146,9 @@ type AztecSpotPrices = {
 type ClaimRewardsEvaluationRow = {
   coinbase: Address;
   pendingRewards: string;
+  splitBalance: string;
+  splitWarehouseBalance: string;
+  totalDistributableRewards: string;
   recipientAllocation: string;
   totalAllocation: string;
   recipientRewards: string;
@@ -148,11 +171,27 @@ type ClaimRewardsEvaluationRow = {
   errors: string[];
 };
 
+type DirectWarehouseEvaluation = {
+  rewards: string;
+  withdrawGas: string;
+  gasPriceWei: string;
+  gasCostWei: string;
+  gasCostUsdc: string;
+  gasCostPercentBps: string;
+  rewardValueWei: string;
+  rewardValueUsdc: string;
+  netValueWei: string;
+  netValueUsdc: string;
+  acceptedByPercentage: boolean;
+  acceptedByUsd: boolean;
+  worthWithdrawing: boolean;
+  errors: string[];
+};
+
 const formatEth = (value: bigint): string => `${formatEther(value)} ETH`;
 const formatAztec = (value: bigint): string => `${formatEther(value)} AZTEC`;
 const formatUsdc = (value: bigint): string => `$${formatUnits(value, 6)}`;
-const formatPercentBps = (value: bigint): string =>
-  `${formatUnits(value, 2)}%`;
+const formatPercentBps = (value: bigint): string => `${formatUnits(value, 2)}%`;
 const isString = (value: unknown): value is string => typeof value === "string";
 
 const parseDecimalUnits = (
@@ -171,8 +210,10 @@ const parseDecimalUnits = (
     throw new Error(`${label} supports at most ${decimals} decimal places`);
   }
 
-  return BigInt(whole) * 10n ** BigInt(decimals) +
-    BigInt(fraction.padEnd(decimals, "0") || "0");
+  return (
+    BigInt(whole) * 10n ** BigInt(decimals) +
+    BigInt(fraction.padEnd(decimals, "0") || "0")
+  );
 };
 
 const estimateOrZero = async (
@@ -188,7 +229,9 @@ const estimateOrZero = async (
   }
 };
 
-const getUniqueCoinbases = async (network: string): Promise<CoinbaseEntry[]> => {
+const getUniqueCoinbases = async (
+  network: string,
+): Promise<CoinbaseEntry[]> => {
   const cache = await loadCoinbaseCache(network);
   if (!cache) {
     throw new Error(
@@ -225,12 +268,13 @@ const getLatestSplits = async (
   onProgress?.("Fetching latest block for SplitUpdated log scan...");
   const latestBlock = await client.getBlockNumber();
   const minCoinbaseBlock = coinbases.reduce(
-    (min, entry) => entry.firstBlock < min ? entry.firstBlock : min,
+    (min, entry) => (entry.firstBlock < min ? entry.firstBlock : min),
     coinbases[0]!.firstBlock,
   );
-  const fromBlock = configuredFromBlock && configuredFromBlock > minCoinbaseBlock
-    ? minCoinbaseBlock
-    : configuredFromBlock ?? minCoinbaseBlock;
+  const fromBlock =
+    configuredFromBlock && configuredFromBlock > minCoinbaseBlock
+      ? minCoinbaseBlock
+      : (configuredFromBlock ?? minCoinbaseBlock);
   const addresses = coinbases.map((entry) => entry.coinbase);
   const splits = new Map<string, SplitData>();
   const totalRanges = (latestBlock - fromBlock) / LOG_RANGE_LIMIT + 1n;
@@ -269,7 +313,9 @@ const getLatestSplits = async (
     rangeIndex += 1n;
   }
 
-  onProgress?.(`Found latest split data for ${splits.size}/${coinbases.length} coinbases.`);
+  onProgress?.(
+    `Found latest split data for ${splits.size}/${coinbases.length} coinbases.`,
+  );
   return splits;
 };
 
@@ -358,6 +404,7 @@ const buildClaimRewardsSafeTransactions = ({
   stakingAsset,
   warehouse,
   rewardsRecipient,
+  includeWithdraw,
 }: {
   rows: ClaimRewardsEvaluationRow[];
   splits: Map<string, SplitData>;
@@ -365,6 +412,7 @@ const buildClaimRewardsSafeTransactions = ({
   stakingAsset: Address;
   warehouse: Address;
   rewardsRecipient: Address;
+  includeWithdraw: boolean;
 }): MultisigProposal[] => {
   const transactions: MultisigProposal[] = [];
 
@@ -376,15 +424,17 @@ const buildClaimRewardsSafeTransactions = ({
       );
     }
 
-    transactions.push({
-      to: rollup,
-      value: "0",
-      data: encodeFunctionData({
-        abi: RollupAbi,
-        functionName: "claimSequencerRewards",
-        args: [row.coinbase],
-      }),
-    });
+    if (BigInt(row.pendingRewards) > 0n) {
+      transactions.push({
+        to: rollup,
+        value: "0",
+        data: encodeFunctionData({
+          abi: RollupAbi,
+          functionName: "claimSequencerRewards",
+          args: [row.coinbase],
+        }),
+      });
+    }
     transactions.push({
       to: row.coinbase,
       value: "0",
@@ -403,6 +453,9 @@ const buildClaimRewardsSafeTransactions = ({
         ],
       }),
     });
+  }
+
+  if (includeWithdraw) {
     transactions.push({
       to: warehouse,
       value: "0",
@@ -484,7 +537,9 @@ const command = async (
   );
   const safeAddress = options.safeAddress ?? config.SAFE_ADDRESS;
   if (options.proposeToSafe && !safeAddress) {
-    throw new Error("SAFE_ADDRESS or --safe-address must be set to propose to Safe.");
+    throw new Error(
+      "SAFE_ADDRESS or --safe-address must be set to propose to Safe.",
+    );
   }
   logProgress("Fetching gas price from RPC...");
   const gasPrice = await client.getGasPrice();
@@ -501,6 +556,73 @@ const command = async (
   );
   logProgress("Fetching AZTEC spot prices from Uniswap V4...");
   const spotPrices = await getAztecSpotPrices(client);
+  const stakingAssetId = BigInt(stakingAsset);
+  logProgress(
+    "Fetching already-credited recipient rewards from SplitsWarehouse...",
+  );
+  const directWarehouseRewards = await client.readContract({
+    address: warehouse,
+    abi: SPLITS_WAREHOUSE_ABI,
+    functionName: "balanceOf",
+    args: [rewardsRecipient, stakingAssetId],
+  });
+  const directWithdraw = await estimateOrZero(() =>
+    client.estimateContractGas({
+      account: rewardsRecipient,
+      address: warehouse,
+      abi: SPLITS_WAREHOUSE_ABI,
+      functionName: "withdraw",
+      args: [rewardsRecipient, stakingAsset],
+    }),
+  );
+  const directWithdrawGasCostWei = directWithdraw.gas * gasPrice;
+  const directWithdrawRewardValueWei =
+    (directWarehouseRewards * spotPrices.aztecEthWei) / AZTEC_DECIMALS_FACTOR;
+  const directWithdrawRewardValueUsdc =
+    (directWarehouseRewards * spotPrices.aztecUsdcUnits) /
+    AZTEC_DECIMALS_FACTOR;
+  const directWithdrawGasCostUsdc =
+    (directWithdrawGasCostWei * spotPrices.ethUsdcUnits) / 10n ** 18n;
+  const directWithdrawNetValueWei =
+    directWithdrawRewardValueWei - directWithdrawGasCostWei;
+  const directWithdrawNetValueUsdc =
+    directWithdrawRewardValueUsdc - directWithdrawGasCostUsdc;
+  const directWithdrawGasCostPercentBps =
+    directWithdrawRewardValueWei > 0n
+      ? (directWithdrawGasCostWei * BASIS_POINTS_DENOMINATOR) /
+        directWithdrawRewardValueWei
+      : 0n;
+  const directWarehouse: DirectWarehouseEvaluation = {
+    rewards: directWarehouseRewards.toString(),
+    withdrawGas: directWithdraw.gas.toString(),
+    gasPriceWei: gasPrice.toString(),
+    gasCostWei: directWithdrawGasCostWei.toString(),
+    gasCostUsdc: directWithdrawGasCostUsdc.toString(),
+    gasCostPercentBps: directWithdrawGasCostPercentBps.toString(),
+    rewardValueWei: directWithdrawRewardValueWei.toString(),
+    rewardValueUsdc: directWithdrawRewardValueUsdc.toString(),
+    netValueWei: directWithdrawNetValueWei.toString(),
+    netValueUsdc: directWithdrawNetValueUsdc.toString(),
+    acceptedByPercentage:
+      directWithdrawRewardValueWei > 0n &&
+      directWithdrawGasCostPercentBps <= maxAcceptedPercentageBps,
+    acceptedByUsd:
+      directWithdrawRewardValueWei > 0n &&
+      directWithdrawGasCostUsdc <= maxAcceptedUsdUnits,
+    worthWithdrawing:
+      directWithdrawRewardValueWei > 0n &&
+      (directWithdrawGasCostPercentBps <= maxAcceptedPercentageBps ||
+        directWithdrawGasCostUsdc <= maxAcceptedUsdUnits),
+    errors: [directWithdraw.error].filter(isString),
+  };
+  const directWarehouseGasCostWeiForTotals =
+    directWarehouseRewards > 0n ? directWithdrawGasCostWei : 0n;
+  const directWarehouseGasCostUsdcForTotals =
+    directWarehouseRewards > 0n ? directWithdrawGasCostUsdc : 0n;
+  const directWarehouseNetValueWeiForTotals =
+    directWarehouseRewards > 0n ? directWithdrawNetValueWei : 0n;
+  const directWarehouseNetValueUsdcForTotals =
+    directWarehouseRewards > 0n ? directWithdrawNetValueUsdc : 0n;
   logProgress("Loading cached coinbases...");
   const coinbases = await getUniqueCoinbases(options.network);
   logProgress(`Loaded ${coinbases.length} unique cached coinbases.`);
@@ -522,8 +644,18 @@ const command = async (
       functionName: "getSequencerRewards",
       args: [coinbase],
     });
-
     const split = splits.get(coinbase.toLowerCase()) ?? null;
+    const [splitBalance, splitWarehouseBalance] = split
+      ? await client.readContract({
+          address: coinbase,
+          abi: PULL_SPLIT_ABI,
+          functionName: "getSplitBalance",
+          args: [stakingAsset],
+        })
+      : [0n, 0n];
+    const totalDistributableRewards =
+      pendingRewards + splitBalance + splitWarehouseBalance;
+
     const totalAllocation =
       split?.totalAllocation && split.totalAllocation > 0n
         ? split.totalAllocation
@@ -537,18 +669,21 @@ const command = async (
       : 0n;
     const recipientRewards =
       totalAllocation > 0n
-        ? (pendingRewards * recipientAllocation) / totalAllocation
+        ? (totalDistributableRewards * recipientAllocation) / totalAllocation
         : 0n;
 
-    const claim = await estimateOrZero(() =>
-      client.estimateContractGas({
-        account: rewardsRecipient,
-        address: rollup,
-        abi: RollupAbi,
-        functionName: "claimSequencerRewards",
-        args: [coinbase],
-      }),
-    );
+    const claim =
+      pendingRewards > 0n
+        ? await estimateOrZero(() =>
+            client.estimateContractGas({
+              account: rewardsRecipient,
+              address: rollup,
+              abi: RollupAbi,
+              functionName: "claimSequencerRewards",
+              args: [coinbase],
+            }),
+          )
+        : ({ gas: 0n } satisfies EstimateResult);
 
     const distribute = split
       ? await estimateOrZero(() =>
@@ -604,6 +739,9 @@ const command = async (
     rows.push({
       coinbase,
       pendingRewards: pendingRewards.toString(),
+      splitBalance: splitBalance.toString(),
+      splitWarehouseBalance: splitWarehouseBalance.toString(),
+      totalDistributableRewards: totalDistributableRewards.toString(),
       recipientAllocation: recipientAllocation.toString(),
       totalAllocation: totalAllocation.toString(),
       recipientRewards: recipientRewards.toString(),
@@ -628,9 +766,7 @@ const command = async (
   }
 
   logProgress("Sorting evaluation results...");
-  rows.sort((a, b) =>
-    BigInt(b.netValueWei) < BigInt(a.netValueWei) ? -1 : 1,
-  );
+  rows.sort((a, b) => (BigInt(b.netValueWei) < BigInt(a.netValueWei) ? -1 : 1));
 
   const totals = rows.reduce(
     (sum, row) => ({
@@ -672,15 +808,31 @@ const command = async (
             maxAcceptedPercentageBps: maxAcceptedPercentageBps.toString(),
             maxAcceptedUsdUnits: maxAcceptedUsdUnits.toString(),
           },
+          directWarehouse,
           totals: {
-            recipientRewards: totals.recipientRewards.toString(),
-            gasCostWei: totals.gasCostWei.toString(),
-            gasCostUsdc: totals.gasCostUsdc.toString(),
-            rewardValueWei: totals.rewardValueWei.toString(),
-            rewardValueUsdc: totals.rewardValueUsdc.toString(),
-            netValueWei: totals.netValueWei.toString(),
-            netValueUsdc: totals.netValueUsdc.toString(),
-            worthClaiming: totals.worthClaiming,
+            recipientRewards: (
+              totals.recipientRewards + directWarehouseRewards
+            ).toString(),
+            gasCostWei: (
+              totals.gasCostWei + directWarehouseGasCostWeiForTotals
+            ).toString(),
+            gasCostUsdc: (
+              totals.gasCostUsdc + directWarehouseGasCostUsdcForTotals
+            ).toString(),
+            rewardValueWei: (
+              totals.rewardValueWei + directWithdrawRewardValueWei
+            ).toString(),
+            rewardValueUsdc: (
+              totals.rewardValueUsdc + directWithdrawRewardValueUsdc
+            ).toString(),
+            netValueWei: (
+              totals.netValueWei + directWarehouseNetValueWeiForTotals
+            ).toString(),
+            netValueUsdc: (
+              totals.netValueUsdc + directWarehouseNetValueUsdcForTotals
+            ).toString(),
+            worthClaiming:
+              totals.worthClaiming + (directWarehouse.worthWithdrawing ? 1 : 0),
           },
           rows,
         },
@@ -713,8 +865,18 @@ const command = async (
 
   const printRow = (row: ClaimRewardsEvaluationRow) => {
     console.log(`${row.worthClaiming ? "CLAIM" : "SKIP"} ${row.coinbase}`);
-    console.log(`  pending rewards: ${formatAztec(BigInt(row.pendingRewards))}`);
-    console.log(`  recipient share: ${formatAztec(BigInt(row.recipientRewards))}`);
+    console.log(
+      `  rollup pending rewards: ${formatAztec(BigInt(row.pendingRewards))}`,
+    );
+    console.log(
+      `  split held rewards: ${formatAztec(BigInt(row.splitBalance))} contract + ${formatAztec(BigInt(row.splitWarehouseBalance))} warehouse`,
+    );
+    console.log(
+      `  total distributable rewards: ${formatAztec(BigInt(row.totalDistributableRewards))}`,
+    );
+    console.log(
+      `  recipient share: ${formatAztec(BigInt(row.recipientRewards))}`,
+    );
     console.log(
       `  reward value: ${formatEth(BigInt(row.rewardValueWei))} (${formatUsdc(BigInt(row.rewardValueUsdc))})`,
     );
@@ -735,6 +897,31 @@ const command = async (
     }
   };
 
+  const printDirectWarehouse = () => {
+    console.log(
+      `${directWarehouse.worthWithdrawing ? "CLAIM" : "SKIP"} already-credited warehouse rewards`,
+    );
+    console.log(`  rewards: ${formatAztec(BigInt(directWarehouse.rewards))}`);
+    console.log(
+      `  reward value: ${formatEth(BigInt(directWarehouse.rewardValueWei))} (${formatUsdc(BigInt(directWarehouse.rewardValueUsdc))})`,
+    );
+    console.log(
+      `  gas: ${directWarehouse.withdrawGas} (${formatEth(BigInt(directWarehouse.gasCostWei))}, ${formatUsdc(BigInt(directWarehouse.gasCostUsdc))})`,
+    );
+    console.log(
+      `  gas/rewards: ${formatPercentBps(BigInt(directWarehouse.gasCostPercentBps))}`,
+    );
+    console.log(
+      `  accepted by: ${directWarehouse.acceptedByPercentage ? "percentage" : "-"}, ${directWarehouse.acceptedByUsd ? "usd" : "-"}`,
+    );
+    console.log(
+      `  net value: ${formatEth(BigInt(directWarehouse.netValueWei))} (${formatUsdc(BigInt(directWarehouse.netValueUsdc))})`,
+    );
+    if (directWarehouse.errors.length > 0) {
+      console.log(`  estimate warnings: ${directWarehouse.errors.length}`);
+    }
+  };
+
   console.log("=== Skipped Coinbases ===\n");
   for (const row of rows.filter((row) => !row.worthClaiming)) {
     printRow(row);
@@ -745,18 +932,25 @@ const command = async (
     printRow(row);
   }
 
+  console.log("\n=== Already-Credited Warehouse Rewards ===\n");
+  printDirectWarehouse();
+
   console.log("\n=== Summary ===\n");
-  console.log(`Total AZTEC received: ${formatAztec(totals.recipientRewards)}`);
   console.log(
-    `Total gas cost: ${formatEth(totals.gasCostWei)} (${formatUsdc(totals.gasCostUsdc)})`,
+    `Total AZTEC received: ${formatAztec(totals.recipientRewards + directWarehouseRewards)}`,
   );
   console.log(
-    `Total reward value: ${formatEth(totals.rewardValueWei)} (${formatUsdc(totals.rewardValueUsdc)})`,
+    `Total gas cost: ${formatEth(totals.gasCostWei + directWarehouseGasCostWeiForTotals)} (${formatUsdc(totals.gasCostUsdc + directWarehouseGasCostUsdcForTotals)})`,
   );
   console.log(
-    `Total net value: ${formatEth(totals.netValueWei)} (${formatUsdc(totals.netValueUsdc)})`,
+    `Total reward value: ${formatEth(totals.rewardValueWei + directWithdrawRewardValueWei)} (${formatUsdc(totals.rewardValueUsdc + directWithdrawRewardValueUsdc)})`,
   );
-  console.log(`Worth claiming: ${totals.worthClaiming}/${rows.length}`);
+  console.log(
+    `Total net value: ${formatEth(totals.netValueWei + directWarehouseNetValueWeiForTotals)} (${formatUsdc(totals.netValueUsdc + directWarehouseNetValueUsdcForTotals)})`,
+  );
+  console.log(
+    `Worth claiming: ${totals.worthClaiming + (directWarehouse.worthWithdrawing ? 1 : 0)}/${rows.length + 1}`,
+  );
 
   if (options.proposeToSafe) {
     const transactions = buildClaimRewardsSafeTransactions({
@@ -766,6 +960,9 @@ const command = async (
       stakingAsset,
       warehouse,
       rewardsRecipient,
+      includeWithdraw:
+        directWarehouse.worthWithdrawing ||
+        rows.some((row) => row.worthClaiming),
     });
 
     if (transactions.length === 0) {
